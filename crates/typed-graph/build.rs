@@ -18,7 +18,7 @@ use std::path::Path;
 
 fn main() {
     println!("cargo::rerun-if-changed=build.rs");
-    println!("cargo::rerun-if-changed=../../schema.json");
+    println!("cargo::rerun-if-changed=../../schemas/schema.json");
 
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set by Cargo");
     let crate_dir = Path::new(&manifest_dir);
@@ -26,7 +26,7 @@ fn main() {
         .parent()
         .and_then(|p| p.parent())
         .expect("crate is two levels deep in workspace");
-    let schema_path = workspace_root.join("schema.json");
+    let schema_path = workspace_root.join("schemas/schema.json");
 
     let schema_json = match fs::read_to_string(&schema_path) {
         Ok(s) => s,
@@ -36,7 +36,7 @@ fn main() {
                 schema_path.display(),
                 e
             );
-            eprintln!("  hint: ensure schema.json exists at the workspace root");
+            eprintln!("  hint: ensure schema.json exists at schemas/schema.json");
             std::process::exit(1);
         }
     };
