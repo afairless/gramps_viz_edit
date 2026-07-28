@@ -15,8 +15,8 @@ pub use schema::*;
 /// Re-export graph module key types at the crate root.
 pub use graph::{Graph, GraphError, NodeKind, ValidationError, ValidationState};
 
-/// Re-export date module key types at the crate root for convenience.
-pub use date::{DateQuality, DateValue};
+// The date module adds convenience methods (new, new_ymd, display_text, is_valid)
+// to the generated DateValue type from the schema.
 
 #[cfg(test)]
 mod tests {
