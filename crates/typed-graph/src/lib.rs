@@ -5,6 +5,7 @@
 
 pub mod graph;
 pub mod schema;
+pub mod validate;
 
 /// Re-export the schema module.
 /// The schema module is populated by build.rs codegen at compile time.

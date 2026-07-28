@@ -271,7 +271,7 @@ pub fn node_kind(node: &Node) -> NodeKind {
 }
 
 /// Extract the source and target handles from any [`Edge`] variant.
-fn edge_source_target(edge: &Edge) -> (Handle, Handle) {
+pub(crate) fn edge_source_target(edge: &Edge) -> (Handle, Handle) {
     match edge {
         Edge::CitationMediaRef { source, target }
         | Edge::CitationNote { source, target }
@@ -356,15 +356,15 @@ pub enum ValidationError {
     /// An edge references a handle that doesn't exist in the graph.
     DanglingReference {
         source: Handle,
-        link: &'static str,
+        link: String,
         target: Handle,
     },
     /// A required field is missing (e.g., Person with no primary_name).
-    MissingRequired { node: Handle, field: &'static str },
+    MissingRequired { node: Handle, field: String },
     /// A cardinality constraint is violated.
     CardinalityViolation {
         node: Handle,
-        field: &'static str,
+        field: String,
         expected: String,
         actual: usize,
     },
@@ -563,7 +563,7 @@ mod tests {
 
         let errors = vec![ValidationError::MissingRequired {
             node: "p1".to_string(),
-            field: "primary_name",
+            field: "primary_name".to_string(),
         }];
         graph.set_validation_state(ValidationState::Invalid(errors));
         assert!(matches!(
@@ -634,7 +634,7 @@ mod tests {
     fn validation_error_display() {
         let err = ValidationError::MissingRequired {
             node: "p1".to_string(),
-            field: "primary_name",
+            field: "primary_name".to_string(),
         };
         let msg = format!("{}", err);
         assert!(msg.contains("p1"));
