@@ -11,7 +11,7 @@ pub mod schema;
 pub use schema::*;
 
 /// Re-export graph module key types at the crate root.
-pub use graph::{Graph, GraphError, ValidationError, ValidationState};
+pub use graph::{Graph, GraphError, NodeKind, ValidationError, ValidationState};
 
 #[cfg(test)]
 mod tests {

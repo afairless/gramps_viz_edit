@@ -53,6 +53,31 @@ impl std::fmt::Display for GraphError {
 
 impl std::error::Error for GraphError {}
 
+/// A kind identifier for node variants, used for filtering in queries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NodeKind {
+    /// [`Node::Citation`]
+    Citation,
+    /// [`Node::Event`]
+    Event,
+    /// [`Node::Family`]
+    Family,
+    /// [`Node::Media`]
+    Media,
+    /// [`Node::Note`]
+    Note,
+    /// [`Node::Person`]
+    Person,
+    /// [`Node::Place`]
+    Place,
+    /// [`Node::Repository`]
+    Repository,
+    /// [`Node::Source`]
+    Source,
+    /// [`Node::Tag`]
+    Tag,
+}
+
 /// The typed directed multigraph.
 ///
 /// Concrete (not generic) — all nodes are [`Node`] enum variants,
@@ -67,12 +92,14 @@ impl std::error::Error for GraphError {}
 pub struct Graph {
     /// All primary nodes, keyed by handle.
     nodes: HashMap<Handle, Node>,
-    /// Edge index: source → (link_type, target).
-    edges: Vec<Edge>,
+    /// Forward edge index: source → [edge_index].
+    forward_edges: HashMap<Handle, Vec<usize>>,
     /// Reverse edge index: target → [edge_index].
     reverse_edges: HashMap<Handle, Vec<usize>>,
     /// Validation state set by the last validation pass.
     validation_state: ValidationState,
+    /// All edges in insertion order.
+    edges: Vec<Edge>,
 }
 
 impl Default for Graph {
@@ -90,6 +117,7 @@ impl Graph {
         Graph {
             nodes: HashMap::new(),
             edges: Vec::new(),
+            forward_edges: HashMap::new(),
             reverse_edges: HashMap::new(),
             validation_state: ValidationState::Unvalidated,
         }
@@ -125,6 +153,7 @@ impl Graph {
         }
         let index = self.edges.len();
         self.edges.push(edge);
+        self.forward_edges.entry(source).or_default().push(index);
         self.reverse_edges.entry(target).or_default().push(index);
         Ok(())
     }
@@ -168,6 +197,49 @@ impl Graph {
     }
 
     // -----------------------------------------------------------------------
+    // Iteration
+    // -----------------------------------------------------------------------
+
+    /// Iterate over all nodes in the graph as `(&Handle, &Node)` pairs.
+    pub fn iter_nodes(&self) -> impl Iterator<Item = (&Handle, &Node)> {
+        self.nodes.iter()
+    }
+
+    /// Return the handles of all nodes matching the given [`NodeKind`].
+    pub fn nodes_by_kind(&self, kind: NodeKind) -> Vec<&Handle> {
+        self.nodes
+            .iter()
+            .filter(|(_, node)| node_kind(node) == kind)
+            .map(|(handle, _)| handle)
+            .collect()
+    }
+
+    /// Iterate over all edges in insertion order.
+    pub fn iter_edges(&self) -> impl Iterator<Item = &Edge> {
+        self.edges.iter()
+    }
+
+    /// Return all edges whose source is the given [`Handle`].
+    ///
+    /// Uses the forward edge index for O(1) lookup.
+    pub fn edges_from(&self, handle: &Handle) -> Vec<&Edge> {
+        self.forward_edges
+            .get(handle)
+            .map(|indices| indices.iter().filter_map(|&i| self.edges.get(i)).collect())
+            .unwrap_or_default()
+    }
+
+    /// Return all edges whose target is the given [`Handle`].
+    ///
+    /// Uses the reverse edge index for O(1) lookup.
+    pub fn edges_to(&self, handle: &Handle) -> Vec<&Edge> {
+        self.reverse_edges
+            .get(handle)
+            .map(|indices| indices.iter().filter_map(|&i| self.edges.get(i)).collect())
+            .unwrap_or_default()
+    }
+
+    // -----------------------------------------------------------------------
     // Validation state
     // -----------------------------------------------------------------------
 
@@ -179,6 +251,22 @@ impl Graph {
     /// Set the current [`ValidationState`].
     pub fn set_validation_state(&mut self, state: ValidationState) {
         self.validation_state = state;
+    }
+}
+
+/// Return the [`NodeKind`] for a given [`Node`].
+pub fn node_kind(node: &Node) -> NodeKind {
+    match node {
+        Node::Citation(_) => NodeKind::Citation,
+        Node::Event(_) => NodeKind::Event,
+        Node::Family(_) => NodeKind::Family,
+        Node::Media(_) => NodeKind::Media,
+        Node::Note(_) => NodeKind::Note,
+        Node::Person(_) => NodeKind::Person,
+        Node::Place(_) => NodeKind::Place,
+        Node::Repository(_) => NodeKind::Repository,
+        Node::Source(_) => NodeKind::Source,
+        Node::Tag(_) => NodeKind::Tag,
     }
 }
 
@@ -551,5 +639,219 @@ mod tests {
         let msg = format!("{}", err);
         assert!(msg.contains("p1"));
         assert!(msg.contains("primary_name"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Query method tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn iter_nodes_empty() {
+        let graph = Graph::new();
+        assert_eq!(graph.iter_nodes().count(), 0);
+    }
+
+    #[test]
+    fn iter_nodes_with_nodes() {
+        let mut graph = Graph::new();
+        graph
+            .add_node("p1".into(), Node::Person(PersonData::default()))
+            .unwrap();
+        graph
+            .add_node("p2".into(), Node::Person(PersonData::default()))
+            .unwrap();
+        graph
+            .add_node("f1".into(), Node::Family(FamilyData::default()))
+            .unwrap();
+        assert_eq!(graph.iter_nodes().count(), 3);
+    }
+
+    #[test]
+    fn nodes_by_kind() {
+        let mut graph = Graph::new();
+        graph
+            .add_node("p1".into(), Node::Person(PersonData::default()))
+            .unwrap();
+        graph
+            .add_node("p2".into(), Node::Person(PersonData::default()))
+            .unwrap();
+        graph
+            .add_node("f1".into(), Node::Family(FamilyData::default()))
+            .unwrap();
+
+        let persons = graph.nodes_by_kind(NodeKind::Person);
+        assert_eq!(persons.len(), 2);
+        assert!(persons.contains(&&"p1".to_string()));
+        assert!(persons.contains(&&"p2".to_string()));
+
+        let families = graph.nodes_by_kind(NodeKind::Family);
+        assert_eq!(families.len(), 1);
+        assert!(families.contains(&&"f1".to_string()));
+
+        let events = graph.nodes_by_kind(NodeKind::Event);
+        assert_eq!(events.len(), 0);
+    }
+
+    #[test]
+    fn iter_edges_empty() {
+        let graph = Graph::new();
+        assert_eq!(graph.iter_edges().count(), 0);
+    }
+
+    #[test]
+    fn iter_edges_with_edges() {
+        let mut graph = Graph::new();
+        graph
+            .add_node("p1".into(), Node::Person(PersonData::default()))
+            .unwrap();
+        graph
+            .add_node("p2".into(), Node::Person(PersonData::default()))
+            .unwrap();
+        graph
+            .add_node("f1".into(), Node::Family(FamilyData::default()))
+            .unwrap();
+
+        graph
+            .add_edge(Edge::PersonFamily {
+                source: "p1".into(),
+                target: "f1".into(),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonFamily {
+                source: "p2".into(),
+                target: "f1".into(),
+            })
+            .unwrap();
+
+        assert_eq!(graph.iter_edges().count(), 2);
+    }
+
+    #[test]
+    fn edges_from_returns_correct_edges() {
+        let mut graph = Graph::new();
+        graph
+            .add_node("p1".into(), Node::Person(PersonData::default()))
+            .unwrap();
+        graph
+            .add_node("p2".into(), Node::Person(PersonData::default()))
+            .unwrap();
+        graph
+            .add_node("f1".into(), Node::Family(FamilyData::default()))
+            .unwrap();
+
+        graph
+            .add_edge(Edge::PersonFamily {
+                source: "p1".into(),
+                target: "f1".into(),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonFamily {
+                source: "p2".into(),
+                target: "f1".into(),
+            })
+            .unwrap();
+
+        let from_p1 = graph.edges_from(&"p1".to_string());
+        assert_eq!(from_p1.len(), 1);
+
+        let from_p2 = graph.edges_from(&"p2".to_string());
+        assert_eq!(from_p2.len(), 1);
+
+        let from_f1 = graph.edges_from(&"f1".to_string());
+        assert_eq!(from_f1.len(), 0);
+    }
+
+    #[test]
+    fn edges_to_returns_correct_edges() {
+        let mut graph = Graph::new();
+        graph
+            .add_node("p1".into(), Node::Person(PersonData::default()))
+            .unwrap();
+        graph
+            .add_node("p2".into(), Node::Person(PersonData::default()))
+            .unwrap();
+        graph
+            .add_node("f1".into(), Node::Family(FamilyData::default()))
+            .unwrap();
+
+        graph
+            .add_edge(Edge::PersonFamily {
+                source: "p1".into(),
+                target: "f1".into(),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonFamily {
+                source: "p2".into(),
+                target: "f1".into(),
+            })
+            .unwrap();
+
+        let to_f1 = graph.edges_to(&"f1".to_string());
+        assert_eq!(to_f1.len(), 2);
+
+        let to_p1 = graph.edges_to(&"p1".to_string());
+        assert_eq!(to_p1.len(), 0);
+    }
+
+    #[test]
+    fn edges_from_missing_handle() {
+        let graph = Graph::new();
+        let edges = graph.edges_from(&"nonexistent".to_string());
+        assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn edges_to_missing_handle() {
+        let graph = Graph::new();
+        let edges = graph.edges_to(&"nonexistent".to_string());
+        assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn reverse_edge_index_maintained() {
+        let mut graph = Graph::new();
+        graph
+            .add_node("p1".into(), Node::Person(PersonData::default()))
+            .unwrap();
+        graph
+            .add_node("p2".into(), Node::Person(PersonData::default()))
+            .unwrap();
+        graph
+            .add_node("f1".into(), Node::Family(FamilyData::default()))
+            .unwrap();
+        graph
+            .add_node("f2".into(), Node::Family(FamilyData::default()))
+            .unwrap();
+
+        graph
+            .add_edge(Edge::PersonFamily {
+                source: "p1".into(),
+                target: "f1".into(),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonFamily {
+                source: "p1".into(),
+                target: "f2".into(),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonFamily {
+                source: "p2".into(),
+                target: "f1".into(),
+            })
+            .unwrap();
+
+        // p1 -> 2 edges (f1, f2)
+        assert_eq!(graph.edges_from(&"p1".to_string()).len(), 2);
+        // p2 -> 1 edge (f1)
+        assert_eq!(graph.edges_from(&"p2".to_string()).len(), 1);
+        // f1 <- 2 edges (p1, p2)
+        assert_eq!(graph.edges_to(&"f1".to_string()).len(), 2);
+        // f2 <- 1 edge (p1)
+        assert_eq!(graph.edges_to(&"f2".to_string()).len(), 1);
     }
 }
