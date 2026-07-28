@@ -3,11 +3,15 @@
 //! This crate provides the core graph model, schema-driven codegen types,
 //! validation, and generation capabilities for Gramps family tree datasets.
 
+pub mod graph;
 pub mod schema;
 
 /// Re-export the schema module.
 /// The schema module is populated by build.rs codegen at compile time.
 pub use schema::*;
+
+/// Re-export graph module key types at the crate root.
+pub use graph::{Graph, GraphError, ValidationError, ValidationState};
 
 #[cfg(test)]
 mod tests {
