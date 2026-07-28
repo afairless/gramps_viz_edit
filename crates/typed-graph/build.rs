@@ -130,16 +130,23 @@ fn generate_enum_types(code: &mut String, schema: &serde_json::Value) {
             })
             .unwrap_or_default();
 
-        code.push_str("#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]\n");
+        code.push_str("#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]\n");
         code.push_str(&format!("pub enum {} {{\n", enum_name));
 
         let mut unique: Vec<String> = values.clone();
         unique.sort();
         unique.dedup();
 
-        for value in &unique {
+        for (i, value) in unique.iter().enumerate() {
             let variant = to_enum_variant_name(value);
-            code.push_str(&format!("    /// {} value.\n    {},\n", value, variant));
+            if i == 0 {
+                code.push_str(&format!(
+                    "    /// {} value.\n    #[default]\n    {},\n",
+                    value, variant
+                ));
+            } else {
+                code.push_str(&format!("    /// {} value.\n    {},\n", value, variant));
+            }
         }
         code.push_str("}\n\n");
     }
@@ -477,7 +484,7 @@ fn gen_struct_from_fields(
     struct_name: &str,
     fields: Option<&serde_json::Map<String, serde_json::Value>>,
 ) {
-    code.push_str("#[derive(Clone, Debug, PartialEq)]\n");
+    code.push_str("#[derive(Clone, Debug, PartialEq, Default)]\n");
     code.push_str(&format!("pub struct {} {{\n", struct_name));
 
     if let Some(fields) = fields {
@@ -508,10 +515,14 @@ fn field_to_rust_type(field_info: &serde_json::Value) -> String {
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    // Handle handle or handle_ref -> Handle
+    // Handle handle or handle_ref -> Handle or Option<Handle>
     if let Some(k) = kind {
         if k == "handle" || k == "handle_ref" {
-            return "Handle".to_string();
+            if required {
+                return "Handle".to_string();
+            } else {
+                return "Option<Handle>".to_string();
+            }
         }
     }
 
