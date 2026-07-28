@@ -23,6 +23,7 @@ import json
 import os
 import sys
 import types
+from pathlib import Path
 from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -420,6 +421,12 @@ def extract_schema(gramps_lib: Any) -> Dict[str, Any]:
 
 
 def main():
+
+    output_path = Path.cwd() / "schemas"
+    output_path.mkdir(exist_ok=True, parents=True)
+    output_filename = "schema.json"
+    output_filepath = output_path / output_filename
+
     parser = argparse.ArgumentParser(
         description="Extract Gramps schema and emit schema.json"
     )
@@ -431,7 +438,7 @@ def main():
     parser.add_argument(
         "--output",
         "-o",
-        default="schema.json",
+        default=output_filepath,
         help="Output path for schema.json (default: schema.json)",
     )
     args = parser.parse_args()
