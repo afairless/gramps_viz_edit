@@ -1,0 +1,653 @@
+{
+  "version": "5.2",
+  "primary_types": {
+    "Person": {
+      "fields": {
+        "handle": { "type": "string", "kind": "handle", "required": true },
+        "gramps_id": { "type": "string", "required": false },
+        "gender": { "type": "enum", "values": [0, 1, 2, 3], "required": true },
+        "primary_name": { "type": "embedded", "schema": "Name", "required": true },
+        "alternate_names": { "type": "array", "items": "Name", "required": false, "cardinality": { "min": 0, "max": null } },
+        "event_ref_list": {
+          "type": "array",
+          "items": {
+            "embedded": "EventRef",
+            "edges": [{ "link": "EventRef.ref", "target": "Event" }]
+          },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "family_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Family" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "parent_family_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Family" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "person_ref_list": {
+          "type": "array",
+          "items": {
+            "embedded": "PersonRef",
+            "edges": [{ "link": "PersonRef.ref", "target": "Person" }]
+          },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "citation_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Citation" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "note_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Note" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "media_list": {
+          "type": "array",
+          "items": {
+            "embedded": "MediaRef",
+            "edges": [{ "link": "MediaRef.ref", "target": "Media" }]
+          },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "tag_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Tag" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "attribute_list": {
+          "type": "array",
+          "items": "Attribute",
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "address_list": {
+          "type": "array",
+          "items": "Address",
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "url_list": {
+          "type": "array",
+          "items": "Url",
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "lds_ord_list": {
+          "type": "array",
+          "items": "LdsOrd",
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        }
+      },
+      "inherit_mixins": [
+        "CitationBase", "NoteBase", "MediaBase", "AttributeBase",
+        "AddressBase", "UrlBase", "LdsOrdBase", "TagBase"
+      ]
+    },
+    "Family": {
+      "fields": {
+        "handle": { "type": "string", "kind": "handle", "required": true },
+        "gramps_id": { "type": "string", "required": false },
+        "father_handle": { "type": "string", "kind": "handle_ref", "target": "Person", "required": false },
+        "mother_handle": { "type": "string", "kind": "handle_ref", "target": "Person", "required": false },
+        "child_ref_list": {
+          "type": "array",
+          "items": {
+            "embedded": "ChildRef",
+            "edges": [{ "link": "ChildRef.ref", "target": "Person" }]
+          },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "event_ref_list": {
+          "type": "array",
+          "items": {
+            "embedded": "EventRef",
+            "edges": [{ "link": "EventRef.ref", "target": "Event" }]
+          },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "citation_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Citation" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "note_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Note" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "media_list": {
+          "type": "array",
+          "items": {
+            "embedded": "MediaRef",
+            "edges": [{ "link": "MediaRef.ref", "target": "Media" }]
+          },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "tag_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Tag" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "attribute_list": {
+          "type": "array",
+          "items": "Attribute",
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        }
+      },
+      "inherit_mixins": [
+        "CitationBase", "NoteBase", "MediaBase", "AttributeBase", "TagBase"
+      ]
+    },
+    "Event": {
+      "fields": {
+        "handle": { "type": "string", "kind": "handle", "required": true },
+        "gramps_id": { "type": "string", "required": false },
+        "event_type": { "type": "enum_ref", "target": "EventType", "required": true },
+        "date": { "type": "embedded", "schema": "DateValue", "required": false },
+        "place_handle": { "type": "string", "kind": "handle_ref", "target": "Place", "required": false },
+        "description": { "type": "string", "required": false },
+        "citation_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Citation" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "note_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Note" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "media_list": {
+          "type": "array",
+          "items": {
+            "embedded": "MediaRef",
+            "edges": [{ "link": "MediaRef.ref", "target": "Media" }]
+          },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "tag_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Tag" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "attribute_list": {
+          "type": "array",
+          "items": "Attribute",
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        }
+      },
+      "inherit_mixins": [
+        "CitationBase", "NoteBase", "MediaBase", "AttributeBase", "TagBase"
+      ]
+    },
+    "Place": {
+      "fields": {
+        "handle": { "type": "string", "kind": "handle", "required": true },
+        "gramps_id": { "type": "string", "required": false },
+        "name": { "type": "embedded", "schema": "Location", "required": true },
+        "place_ref_list": {
+          "type": "array",
+          "items": {
+            "embedded": "PlaceRef",
+            "edges": [{ "link": "PlaceRef.ref", "target": "Place" }]
+          },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "citation_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Citation" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "note_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Note" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "media_list": {
+          "type": "array",
+          "items": {
+            "embedded": "MediaRef",
+            "edges": [{ "link": "MediaRef.ref", "target": "Media" }]
+          },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "tag_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Tag" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "attribute_list": {
+          "type": "array",
+          "items": "Attribute",
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        }
+      },
+      "inherit_mixins": [
+        "CitationBase", "NoteBase", "MediaBase", "AttributeBase", "TagBase"
+      ]
+    },
+    "Source": {
+      "fields": {
+        "handle": { "type": "string", "kind": "handle", "required": true },
+        "gramps_id": { "type": "string", "required": false },
+        "title": { "type": "string", "required": true },
+        "author": { "type": "string", "required": false },
+        "pubinfo": { "type": "string", "required": false },
+        "reporef_list": {
+          "type": "array",
+          "items": {
+            "embedded": "RepoRef",
+            "edges": [{ "link": "RepoRef.ref", "target": "Repository" }]
+          },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "note_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Note" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "media_list": {
+          "type": "array",
+          "items": {
+            "embedded": "MediaRef",
+            "edges": [{ "link": "MediaRef.ref", "target": "Media" }]
+          },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "tag_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Tag" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "attribute_list": {
+          "type": "array",
+          "items": "Attribute",
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        }
+      },
+      "inherit_mixins": [
+        "CitationBase", "NoteBase", "MediaBase", "AttributeBase", "TagBase"
+      ]
+    },
+    "Citation": {
+      "fields": {
+        "handle": { "type": "string", "kind": "handle", "required": true },
+        "gramps_id": { "type": "string", "required": false },
+        "source_handle": { "type": "string", "kind": "handle_ref", "target": "Source", "required": true },
+        "page": { "type": "string", "required": false },
+        "confidence": { "type": "integer", "required": false },
+        "note_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Note" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "media_list": {
+          "type": "array",
+          "items": {
+            "embedded": "MediaRef",
+            "edges": [{ "link": "MediaRef.ref", "target": "Media" }]
+          },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "tag_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Tag" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        }
+      },
+      "inherit_mixins": [
+        "CitationBase", "NoteBase", "MediaBase", "AttributeBase", "TagBase"
+      ]
+    },
+    "Repository": {
+      "fields": {
+        "handle": { "type": "string", "kind": "handle", "required": true },
+        "gramps_id": { "type": "string", "required": false },
+        "type": { "type": "enum_ref", "target": "RepositoryType", "required": false },
+        "name": { "type": "string", "required": false },
+        "note_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Note" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "address_list": {
+          "type": "array",
+          "items": "Address",
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "url_list": {
+          "type": "array",
+          "items": "Url",
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "media_list": {
+          "type": "array",
+          "items": {
+            "embedded": "MediaRef",
+            "edges": [{ "link": "MediaRef.ref", "target": "Media" }]
+          },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "tag_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Tag" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        }
+      },
+      "inherit_mixins": [
+        "CitationBase", "NoteBase", "MediaBase", "AddressBase", "UrlBase", "TagBase"
+      ]
+    },
+    "Media": {
+      "fields": {
+        "handle": { "type": "string", "kind": "handle", "required": true },
+        "gramps_id": { "type": "string", "required": false },
+        "path": { "type": "string", "required": false },
+        "mime_type": { "type": "string", "required": false },
+        "desc": { "type": "string", "required": false },
+        "checksum": { "type": "string", "required": false },
+        "citation_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Citation" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "note_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Note" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "attribute_list": {
+          "type": "array",
+          "items": "Attribute",
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "tag_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Tag" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        }
+      },
+      "inherit_mixins": [
+        "CitationBase", "NoteBase", "AttributeBase", "TagBase"
+      ]
+    },
+    "Note": {
+      "fields": {
+        "handle": { "type": "string", "kind": "handle", "required": true },
+        "gramps_id": { "type": "string", "required": false },
+        "text": { "type": "string", "required": true },
+        "format": { "type": "integer", "required": false },
+        "type": { "type": "enum_ref", "target": "NoteType", "required": false },
+        "citation_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Citation" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "tag_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Tag" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        }
+      },
+      "inherit_mixins": [
+        "CitationBase", "TagBase"
+      ]
+    },
+    "Tag": {
+      "fields": {
+        "handle": { "type": "string", "kind": "handle", "required": true },
+        "gramps_id": { "type": "string", "required": false },
+        "name": { "type": "string", "required": true },
+        "color": { "type": "string", "required": false },
+        "priority": { "type": "integer", "required": false },
+        "tag_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Tag" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        }
+      },
+      "inherit_mixins": []
+    }
+  },
+  "secondary_types": {
+    "EventRef": {
+      "fields": {
+        "ref": { "type": "handle_ref", "target": "Event", "required": true },
+        "role": { "type": "enum_ref", "target": "EventRoleType", "required": false }
+      }
+    },
+    "ChildRef": {
+      "fields": {
+        "ref": { "type": "handle_ref", "target": "Person", "required": true },
+        "relation": { "type": "enum_ref", "target": "ChildRefType", "required": false }
+      }
+    },
+    "PersonRef": {
+      "fields": {
+        "ref": { "type": "handle_ref", "target": "Person", "required": true },
+        "relation": { "type": "enum_ref", "target": "FamilyRelType", "required": false }
+      }
+    },
+    "PlaceRef": {
+      "fields": {
+        "ref": { "type": "handle_ref", "target": "Place", "required": true }
+      }
+    },
+    "MediaRef": {
+      "fields": {
+        "ref": { "type": "handle_ref", "target": "Media", "required": true }
+      }
+    },
+    "RepoRef": {
+      "fields": {
+        "ref": { "type": "handle_ref", "target": "Repository", "required": true },
+        "call_number": { "type": "string", "required": false },
+        "media_type": { "type": "enum_ref", "target": "SourceMediaType", "required": false }
+      }
+    },
+    "Name": {
+      "fields": {
+        "type": { "type": "enum_ref", "target": "NameType", "required": false },
+        "display": { "type": "string", "required": false },
+        "first_name": { "type": "string", "required": false },
+        "surname_list": { "type": "array", "items": "Surname", "required": false, "cardinality": { "min": 0, "max": null } },
+        "suffix": { "type": "string", "required": false },
+        "title": { "type": "string", "required": false },
+        "date": { "type": "embedded", "schema": "DateValue", "required": false }
+      }
+    },
+    "Surname": {
+      "fields": {
+        "surname": { "type": "string", "required": false },
+        "prefix": { "type": "string", "required": false },
+        "primary": { "type": "boolean", "required": false },
+        "origintype": { "type": "enum_ref", "target": "NameOriginType", "required": false }
+      }
+    },
+    "Location": {
+      "fields": {
+        "street": { "type": "string", "required": false },
+        "locality": { "type": "string", "required": false },
+        "city": { "type": "string", "required": false },
+        "county": { "type": "string", "required": false },
+        "state": { "type": "string", "required": false },
+        "country": { "type": "string", "required": false },
+        "postal": { "type": "string", "required": false },
+        "phone": { "type": "string", "required": false }
+      }
+    },
+    "Address": {
+      "fields": {
+        "date": { "type": "embedded", "schema": "DateValue", "required": false },
+        "location": { "type": "embedded", "schema": "Location", "required": false },
+        "citation_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Citation" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "note_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Note" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        }
+      }
+    },
+    "Attribute": {
+      "fields": {
+        "type": { "type": "enum_ref", "target": "AttributeType", "required": true },
+        "value": { "type": "string", "required": true },
+        "citation_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Citation" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "note_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Note" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        }
+      }
+    },
+    "Url": {
+      "fields": {
+        "href": { "type": "string", "required": true },
+        "type": { "type": "enum_ref", "target": "UrlType", "required": false },
+        "desc": { "type": "string", "required": false }
+      }
+    },
+    "LdsOrd": {
+      "fields": {
+        "type": { "type": "enum_ref", "target": "LdsOrdType", "required": true },
+        "date": { "type": "embedded", "schema": "DateValue", "required": false },
+        "place_handle": { "type": "string", "kind": "handle_ref", "target": "Place", "required": false },
+        "temple": { "type": "string", "required": false },
+        "status": { "type": "string", "required": false },
+        "citation_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Citation" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        },
+        "note_list": {
+          "type": "array",
+          "items": { "kind": "handle_ref", "target": "Note" },
+          "required": false,
+          "cardinality": { "min": 0, "max": null }
+        }
+      }
+    },
+    "DateValue": {
+      "fields": {
+        "year": { "type": "integer", "required": true },
+        "month": { "type": "integer", "required": false },
+        "day": { "type": "integer", "required": false },
+        "quality": { "type": "enum_ref", "target": "DateQuality", "required": false },
+        "modifier": { "type": "enum_ref", "target": "DateModifier", "required": false },
+        "text": { "type": "string", "required": false }
+      }
+    }
+  },
+  "enum_types": {
+    "EventType": {
+      "values": ["Birth", "Death", "Marriage", "Divorce", "Census", "Burial", "Adoption", "Emigration", "Immigration", "Naturalization", "Residence", "Occupation", "Title", "Education", "Military Service", "Retirement", "Religion", "Graduation", "Probate", "Will", "Correspondence", "Confirmation", "Baptism", "Bar Mitzvah", "Bat Mitzvah", "Funeral", "Creates", "Other"]
+    },
+    "EventRoleType": {
+      "values": ["Primary", "Family", "Witness", "Clergy", "Bride", "Groom", "Parent", "Child", "Officiator", "Other"]
+    },
+    "ChildRefType": {
+      "values": ["Birth", "Adopted", "Stepchild", "Foster", "Sponsor", "Godchild", "Created", "Other"]
+    },
+    "Gender": {
+      "values": [0, 1, 2, 3]
+    },
+    "NameType": {
+      "values": ["Birth", "Married", "Also Known As", "Akn", "Called", "Formal", "Patronymic", "Religious", "Unknown"]
+    },
+    "NameOriginType": {
+      "values": ["Patrilineal", "Matrilineal", "Given", "Taken", "Other"]
+    },
+    "AttributeType": {
+      "values": ["Custom", "Caste", "Description", "Ethnicity", "Nationality", "Nobility", "Title", "Profession", "Property", "Religion", "Social Security Number", "DNA", "Cause"]
+    },
+    "UrlType": {
+      "values": ["Email", "Web Home", "Web Search", "FTP", "Other"]
+    },
+    "NoteType": {
+      "values": ["General", "Research", "Transcript", "Citation", "Report", "HTML", "Other"]
+    },
+    "SourceMediaType": {
+      "values": ["Audio", "Book", "Card", "CD", "Electronic", "Fiche", "Film", "Magazine", "Manuscript", "Map", "Newspaper", "Photo", "Tombstone", "Video", "Other"]
+    },
+    "RepositoryType": {
+      "values": ["Library", "Archive", "Museum", "Church", "Cemetery", "Court House", "Historical Society", "Other"]
+    },
+    "PlaceType": {
+      "values": ["Unknown", "Country", "State", "County", "City", "Parish", "Town", "Village", "Hamlet", "Neighborhood", "Street", "Farm", "Building", "Other"]
+    },
+    "LdsOrdType": {
+      "values": ["Baptism", "Endowment", "Sealing to Parents", "Sealing to Spouse", "Confirm", "Other"]
+    },
+    "FamilyRelType": {
+      "values": ["Birth", "Married", "Census", "Unknown"]
+    },
+    "DateQuality": {
+      "values": ["Exact", "Estimated", "Calculated"]
+    },
+    "DateModifier": {
+      "values": ["None", "Before", "After", "About", "Range", "Span"]
+    }
+  }
+}
