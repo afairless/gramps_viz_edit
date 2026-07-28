@@ -1839,4 +1839,405 @@ mod tests {
 
         assert_eq!(graph.node_count(), 10);
     }
+
+    // -----------------------------------------------------------------------
+    // Integration tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn builder_complex_tree() {
+        // Build a 3-generation family tree:
+        // Grandfather + Grandmother -> Family1
+        // Family1 -> Child1 (Father), Child2 (Aunt)
+        // Father + Mother -> Family2
+        // Family2 -> Grandchild1, Grandchild2
+        let mut graph = Graph::new();
+        let mut builder = GraphBuilder::new(&mut graph);
+
+        // Generation 1: Grandparents
+        let gf = builder
+            .add_person("gf")
+            .with_name("John", "Smith")
+            .with_gender(1)
+            .build()
+            .unwrap();
+        let gm = builder
+            .add_person("gm")
+            .with_name("Jane", "Smith")
+            .with_gender(2)
+            .build()
+            .unwrap();
+
+        // Family 1: Grandparents
+        let f1 = builder
+            .add_family("f1")
+            .with_father(&gf)
+            .with_mother(&gm)
+            .with_marriage_date(DateValue::new(1920))
+            .build()
+            .unwrap();
+
+        // Generation 2: Children of Grandparents
+        let father = builder
+            .add_person("father")
+            .with_name("Robert", "Smith")
+            .with_gender(1)
+            .with_parent_family(&f1)
+            .with_birth_date(DateValue::new(1925))
+            .build()
+            .unwrap();
+        let aunt = builder
+            .add_person("aunt")
+            .with_name("Alice", "Smith")
+            .with_gender(2)
+            .with_parent_family(&f1)
+            .with_birth_date(DateValue::new(1928))
+            .build()
+            .unwrap();
+
+        // Generation 2: Mother (from a different family)
+        let mother = builder
+            .add_person("mother")
+            .with_name("Mary", "Johnson")
+            .with_gender(2)
+            .with_birth_date(DateValue::new(1930))
+            .build()
+            .unwrap();
+
+        // Family 2: Father + Mother
+        let f2 = builder
+            .add_family("f2")
+            .with_father(&father)
+            .with_mother(&mother)
+            .with_marriage_date(DateValue::new(1950))
+            .build()
+            .unwrap();
+
+        // Generation 3: Grandchildren
+        let gc1 = builder
+            .add_person("gc1")
+            .with_name("James", "Smith")
+            .with_gender(1)
+            .with_parent_family(&f2)
+            .with_birth_date(DateValue::new(1955))
+            .build()
+            .unwrap();
+        let gc2 = builder
+            .add_person("gc2")
+            .with_name("Emily", "Smith")
+            .with_gender(2)
+            .with_parent_family(&f2)
+            .with_birth_date(DateValue::new(1958))
+            .build()
+            .unwrap();
+
+        // Verify node counts
+        // 6 persons + 2 families + 5 events (gf/gm marriage, father/mother marriage,
+        // father birth, aunt birth, mother birth, gc1 birth, gc2 birth)
+        // But wait: gf and gm don't have birth/death dates, so no events for them.
+        // father has birth, aunt has birth, mother has birth, gc1 birth, gc2 birth = 5 events
+        // f1 marriage, f2 marriage = 2 events
+        // 7 persons + 2 families + 7 events = 16
+        assert_eq!(graph.node_count(), 16);
+
+        // Verify all nodes exist
+        assert!(graph.contains_node(&gf));
+        assert!(graph.contains_node(&gm));
+        assert!(graph.contains_node(&father));
+        assert!(graph.contains_node(&aunt));
+        assert!(graph.contains_node(&mother));
+        assert!(graph.contains_node(&gc1));
+        assert!(graph.contains_node(&gc2));
+
+        // Verify family relationships
+        let node = graph.get_node(&father).unwrap();
+        if let Node::Person(person) = node {
+            assert_eq!(person.parent_family_list, vec!["f1".to_string()]);
+        } else {
+            panic!("Expected Person");
+        }
+
+        // Verify edges exist
+        assert!(graph
+            .edges_from(&f1)
+            .iter()
+            .any(|e| matches!(e, Edge::FamilyFather { .. })));
+        assert!(graph
+            .edges_from(&f1)
+            .iter()
+            .any(|e| matches!(e, Edge::FamilyMother { .. })));
+        assert!(graph
+            .edges_from(&f2)
+            .iter()
+            .any(|e| matches!(e, Edge::FamilyFather { .. })));
+        assert!(graph
+            .edges_from(&f2)
+            .iter()
+            .any(|e| matches!(e, Edge::FamilyMother { .. })));
+    }
+
+    #[test]
+    fn builder_person_with_all_fields() {
+        let mut graph = Graph::new();
+
+        // Create a family first for reference
+        graph
+            .add_node("f1".into(), Node::Family(crate::FamilyData::default()))
+            .unwrap();
+
+        let mut builder = GraphBuilder::new(&mut graph);
+        let alt_name = Name {
+            first_name: Some("Johnny".to_string()),
+            surname_list: vec![Surname {
+                surname: Some("Smithy".to_string()),
+                ..Surname::default()
+            }],
+            ..Name::default()
+        };
+
+        let handle = builder
+            .add_person("p1")
+            .with_gramps_id("I0001")
+            .with_gender(1)
+            .with_name("John", "Smith")
+            .with_birth_date(DateValue::new(1870))
+            .with_death_date(DateValue::new(1945))
+            .with_parent_family(&"f1".to_string())
+            .add_alternate_name(alt_name)
+            .build()
+            .unwrap();
+
+        assert_eq!(handle, "p1");
+
+        let node = graph.get_node(&handle).unwrap();
+        if let Node::Person(person) = node {
+            assert_eq!(person.gramps_id, Some("I0001".to_string()));
+            assert_eq!(person.gender, 1);
+            assert_eq!(person.primary_name.first_name, Some("John".to_string()));
+            assert_eq!(person.parent_family_list, vec!["f1".to_string()]);
+            assert_eq!(person.alternate_names.len(), 1);
+        } else {
+            panic!("Expected Person");
+        }
+
+        // Verify events and edges
+        assert!(graph.node_count() >= 3); // person + birth event + death event
+        assert!(graph.edge_count() >= 2); // PersonEventRef x2 + PersonParentFamily
+    }
+
+    #[test]
+    fn builder_graph_validates_after_build() {
+        let mut graph = Graph::new();
+        let mut builder = GraphBuilder::new(&mut graph);
+
+        builder
+            .add_person("p1")
+            .with_name("John", "Smith")
+            .with_gender(1)
+            .build()
+            .unwrap();
+
+        // Run validation
+        let schema = crate::Schema::new();
+        let errors = graph.validate(&schema);
+        assert!(
+            errors.is_empty(),
+            "Builder-produced graph should pass validation: {:?}",
+            errors
+        );
+        assert_eq!(graph.validation_state(), &crate::ValidationState::Valid);
+    }
+
+    #[test]
+    fn builder_empty_graph_after_new() {
+        let mut graph = Graph::new();
+        let _builder = GraphBuilder::new(&mut graph);
+        // Graph should not be modified until build() is called
+        assert_eq!(graph.node_count(), 0);
+        assert_eq!(graph.edge_count(), 0);
+    }
+
+    #[test]
+    fn builder_mixed_auto_and_explicit_handles() {
+        let mut graph = Graph::new();
+        let mut builder = GraphBuilder::new(&mut graph);
+
+        let explicit = builder
+            .add_person("p1")
+            .with_name("Explicit", "Handle")
+            .build()
+            .unwrap();
+        assert_eq!(explicit, "p1");
+
+        let auto = builder
+            .add_person_auto()
+            .with_name("Auto", "Handle")
+            .build()
+            .unwrap();
+        assert_eq!(auto.len(), 36);
+        assert_ne!(explicit, auto);
+
+        assert_eq!(graph.node_count(), 2);
+    }
+
+    #[test]
+    fn builder_error_cases_comprehensive() {
+        let mut graph = Graph::new();
+        let mut builder = GraphBuilder::new(&mut graph);
+
+        // Person missing name
+        let result = builder.add_person("p1").with_gender(1).build();
+        assert!(matches!(
+            result,
+            Err(BuilderError::MissingRequiredField {
+                builder_type: "Person",
+                field: _,
+            })
+        ));
+
+        // Person with invalid gender
+        let result = builder
+            .add_person("p2")
+            .with_name("X", "Y")
+            .with_gender(99)
+            .build();
+        assert!(matches!(
+            result,
+            Err(BuilderError::MissingRequiredField {
+                builder_type: "Person",
+                field: _, // gender (must be 0-3)
+            })
+        ));
+
+        // Person with non-existent parent family
+        let result = builder
+            .add_person("p3")
+            .with_name("Child", "Smith")
+            .with_parent_family(&"nonexistent".to_string())
+            .build();
+        assert!(matches!(
+            result,
+            Err(BuilderError::InvalidHandle {
+                builder_type: "Person",
+                handle: _,
+                target_type: "Family",
+            })
+        ));
+
+        // Family with non-existent father
+        let result = builder
+            .add_family("f1")
+            .with_father(&"nonexistent".to_string())
+            .build();
+        assert!(matches!(
+            result,
+            Err(BuilderError::InvalidHandle {
+                builder_type: "Family",
+                handle: _,
+                target_type: _, // Person (father)
+            })
+        ));
+
+        // Family with non-existent child
+        let result = builder
+            .add_family("f2")
+            .add_child(&"nonexistent".to_string(), ChildRefType::Birth)
+            .build();
+        assert!(matches!(
+            result,
+            Err(BuilderError::InvalidHandle {
+                builder_type: "Family",
+                handle: _,
+                target_type: _, // Person (child)
+            })
+        ));
+
+        // Event with non-existent place
+        let result = builder
+            .add_event("e1")
+            .with_event_type(EventType::Birth)
+            .with_place(&"nonexistent".to_string())
+            .build();
+        assert!(matches!(
+            result,
+            Err(BuilderError::InvalidHandle {
+                builder_type: "Event",
+                handle: _,
+                target_type: "Place",
+            })
+        ));
+
+        // Citation without source
+        let result = builder.add_citation("c1").build();
+        assert!(matches!(
+            result,
+            Err(BuilderError::MissingRequiredField {
+                builder_type: "Citation",
+                field: "source_handle",
+            })
+        ));
+
+        // Note without text
+        let result = builder.add_note("n1").build();
+        assert!(matches!(
+            result,
+            Err(BuilderError::MissingRequiredField {
+                builder_type: "Note",
+                field: "text",
+            })
+        ));
+
+        // Source without title
+        let result = builder.add_source("s1").build();
+        assert!(matches!(
+            result,
+            Err(BuilderError::MissingRequiredField {
+                builder_type: "Source",
+                field: "title",
+            })
+        ));
+
+        // Tag without name
+        let result = builder.add_tag("t1").build();
+        assert!(matches!(
+            result,
+            Err(BuilderError::MissingRequiredField {
+                builder_type: "Tag",
+                field: "name",
+            })
+        ));
+
+        // Duplicate handle
+        builder
+            .add_person("existing")
+            .with_name("Existing", "Person")
+            .build()
+            .unwrap();
+        let result = builder
+            .add_person("existing")
+            .with_name("Duplicate", "Person")
+            .build();
+        assert!(matches!(
+            result,
+            Err(BuilderError::DuplicateHandle(h)) if h == "existing"
+        ));
+
+        // BuilderError Display
+        let err = BuilderError::MissingRequiredField {
+            builder_type: "Person",
+            field: "handle",
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("Person"));
+        assert!(msg.contains("handle"));
+
+        let err = BuilderError::InvalidHandle {
+            builder_type: "Person",
+            handle: "bad".to_string(),
+            target_type: "Family",
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("bad"));
+        assert!(msg.contains("Family"));
+    }
 }
