@@ -3,6 +3,7 @@
 //! This crate provides the core graph model, schema-driven codegen types,
 //! validation, and generation capabilities for Gramps family tree datasets.
 
+pub mod date;
 pub mod graph;
 pub mod schema;
 pub mod validate;
@@ -13,6 +14,9 @@ pub use schema::*;
 
 /// Re-export graph module key types at the crate root.
 pub use graph::{Graph, GraphError, NodeKind, ValidationError, ValidationState};
+
+/// Re-export date module key types at the crate root for convenience.
+pub use date::{DateQuality, DateValue};
 
 #[cfg(test)]
 mod tests {
