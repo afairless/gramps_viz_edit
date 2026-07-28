@@ -750,4 +750,193 @@ mod tests {
             errors.len()
         );
     }
+
+    #[test]
+    fn validation_state_transitions() {
+        let mut graph = Graph::new();
+        let schema = Schema::new();
+
+        // Initial: Unvalidated
+        assert_eq!(
+            graph.validation_state(),
+            &crate::ValidationState::Unvalidated
+        );
+
+        // Add a valid node and validate -> Valid
+        graph
+            .add_node(
+                "p1".into(),
+                Node::Person(PersonData {
+                    handle: "p1".to_string(),
+                    gender: 1,
+                    primary_name: Name {
+                        first_name: Some("John".to_string()),
+                        ..Name::default()
+                    },
+                    ..PersonData::default()
+                }),
+            )
+            .unwrap();
+        let errors = graph.validate(&schema);
+        assert!(errors.is_empty());
+        assert_eq!(graph.validation_state(), &crate::ValidationState::Valid);
+
+        // Add an invalid node and validate -> Invalid
+        graph
+            .add_node(
+                "p2".into(),
+                Node::Person(PersonData {
+                    handle: "".to_string(),
+                    ..PersonData::default()
+                }),
+            )
+            .unwrap();
+        let errors = graph.validate(&schema);
+        assert!(!errors.is_empty());
+        assert!(matches!(
+            graph.validation_state(),
+            crate::ValidationState::Invalid(_)
+        ));
+
+        // Fix the invalid node by mutating it and validate -> Valid
+        if let Some(Node::Person(ref mut person)) = graph.get_node_mut(&"p2".to_string()) {
+            person.handle = "p2".to_string();
+            person.gender = 1;
+            person.primary_name = Name {
+                first_name: Some("Jane".to_string()),
+                ..Name::default()
+            };
+        }
+        let errors = graph.validate(&schema);
+        assert!(errors.is_empty());
+        assert_eq!(graph.validation_state(), &crate::ValidationState::Valid);
+    }
+
+    #[test]
+    fn validate_graph_with_all_required_fields() {
+        let mut graph = Graph::new();
+        let schema = Schema::new();
+
+        // Add a fully specified Person node
+        graph
+            .add_node(
+                "p1".into(),
+                Node::Person(PersonData {
+                    handle: "p1".to_string(),
+                    gramps_id: Some("I0001".to_string()),
+                    gender: 1,
+                    primary_name: Name {
+                        first_name: Some("John".to_string()),
+                        surname_list: vec![Surname {
+                            surname: Some("Smith".to_string()),
+                            ..Surname::default()
+                        }],
+                        ..Name::default()
+                    },
+                    ..PersonData::default()
+                }),
+            )
+            .unwrap();
+
+        let errors = validate(&graph, &schema);
+        assert!(
+            errors.is_empty(),
+            "Full-featured Person should pass validation: {:?}",
+            errors
+        );
+
+        // Add a fully specified Family node
+        graph
+            .add_node(
+                "f1".into(),
+                Node::Family(FamilyData {
+                    handle: "f1".to_string(),
+                    ..FamilyData::default()
+                }),
+            )
+            .unwrap();
+        let errors = validate(&graph, &schema);
+        assert!(
+            errors.is_empty(),
+            "Full-featured Family should pass validation: {:?}",
+            errors
+        );
+
+        // Add a fully specified Event node
+        graph
+            .add_node(
+                "e1".into(),
+                Node::Event(EventData {
+                    handle: "e1".to_string(),
+                    event_type: EventType::Birth,
+                    ..EventData::default()
+                }),
+            )
+            .unwrap();
+        let errors = validate(&graph, &schema);
+        assert!(
+            errors.is_empty(),
+            "Full-featured Event should pass validation: {:?}",
+            errors
+        );
+
+        // Add a Source with required title
+        graph
+            .add_node(
+                "s1".into(),
+                Node::Source(SourceData {
+                    handle: "s1".to_string(),
+                    title: "Census Records".to_string(),
+                    ..SourceData::default()
+                }),
+            )
+            .unwrap();
+        let errors = validate(&graph, &schema);
+        assert!(
+            errors.is_empty(),
+            "Full-featured Source should pass validation: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn dangling_reference_in_citation_edge() {
+        let mut graph = Graph::new();
+        let schema = Schema::new();
+
+        // Add a Citation node with a source_handle pointing to a non-existent Source
+        graph
+            .add_node(
+                "c1".into(),
+                Node::Citation(CitationData {
+                    handle: "c1".to_string(),
+                    source_handle: "s_missing".to_string(), // points to non-existent node
+                    ..CitationData::default()
+                }),
+            )
+            .unwrap();
+
+        // The Citation has a valid handle and source_handle is non-empty string,
+        // so it should pass structural validation for required fields
+        let errors = structural_validation(&graph, &schema);
+        let missing: Vec<_> = errors
+            .iter()
+            .filter(|e| matches!(e, ValidationError::MissingRequired { .. }))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "Citation should have no missing required fields: {:?}",
+            missing
+        );
+
+        // But the citation source edge should still be rejected by add_edge
+        let result = graph.add_edge(Edge::CitationSource {
+            source: "c1".into(),
+            target: "s_missing".into(),
+        });
+        assert!(
+            result.is_err(),
+            "add_edge should reject edge to non-existent target"
+        );
+    }
 }

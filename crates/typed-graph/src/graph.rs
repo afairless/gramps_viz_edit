@@ -136,6 +136,7 @@ impl Graph {
             return Err(GraphError::DuplicateHandle(handle));
         }
         self.nodes.insert(handle, node);
+        self.validation_state = ValidationState::Unvalidated;
         Ok(())
     }
 
@@ -155,6 +156,7 @@ impl Graph {
         self.edges.push(edge);
         self.forward_edges.entry(source).or_default().push(index);
         self.reverse_edges.entry(target).or_default().push(index);
+        self.validation_state = ValidationState::Unvalidated;
         Ok(())
     }
 
@@ -853,5 +855,94 @@ mod tests {
         assert_eq!(graph.edges_to(&"f1".to_string()).len(), 2);
         // f2 <- 1 edge (p1)
         assert_eq!(graph.edges_to(&"f2".to_string()).len(), 1);
+    }
+
+    #[test]
+    fn add_node_empty_handle() {
+        let mut graph = Graph::new();
+        // Empty string handles are allowed syntactically (they're just strings)
+        let result = graph.add_node("".into(), Node::Person(PersonData::default()));
+        assert!(result.is_ok(), "Empty handle should be accepted");
+        assert_eq!(graph.node_count(), 1);
+    }
+
+    #[test]
+    fn add_node_after_validation_resets_state() {
+        let mut graph = Graph::new();
+        graph
+            .add_node(
+                "p1".into(),
+                Node::Person(PersonData {
+                    handle: "p1".to_string(),
+                    gender: 1,
+                    primary_name: Name {
+                        first_name: Some("John".to_string()),
+                        ..Name::default()
+                    },
+                    ..PersonData::default()
+                }),
+            )
+            .unwrap();
+
+        // Validate -> Valid
+        let schema = Schema::new();
+        graph.validate(&schema);
+        assert_eq!(graph.validation_state(), &ValidationState::Valid);
+
+        // Add a new node -> should reset to Unvalidated
+        graph
+            .add_node("p2".into(), Node::Person(PersonData::default()))
+            .unwrap();
+        assert_eq!(
+            graph.validation_state(),
+            &ValidationState::Unvalidated,
+            "Adding a node should reset validation state to Unvalidated"
+        );
+    }
+
+    #[test]
+    fn add_edge_after_validation_resets_state() {
+        let mut graph = Graph::new();
+        graph
+            .add_node(
+                "p1".into(),
+                Node::Person(PersonData {
+                    handle: "p1".to_string(),
+                    gender: 1,
+                    primary_name: Name {
+                        first_name: Some("John".to_string()),
+                        ..Name::default()
+                    },
+                    ..PersonData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                "f1".into(),
+                Node::Family(FamilyData {
+                    handle: "f1".to_string(),
+                    ..FamilyData::default()
+                }),
+            )
+            .unwrap();
+
+        // Validate -> Valid
+        let schema = Schema::new();
+        graph.validate(&schema);
+        assert_eq!(graph.validation_state(), &ValidationState::Valid);
+
+        // Add an edge -> should reset to Unvalidated
+        graph
+            .add_edge(Edge::PersonFamily {
+                source: "p1".into(),
+                target: "f1".into(),
+            })
+            .unwrap();
+        assert_eq!(
+            graph.validation_state(),
+            &ValidationState::Unvalidated,
+            "Adding an edge should reset validation state to Unvalidated"
+        );
     }
 }
