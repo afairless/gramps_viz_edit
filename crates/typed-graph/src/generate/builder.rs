@@ -20,11 +20,14 @@
 //!     .build();
 //! ```
 
+use crate::ChildRef;
+use crate::ChildRefType;
 use crate::DateValue;
 use crate::Edge;
 use crate::EventData;
 use crate::EventRoleType;
 use crate::EventType;
+use crate::FamilyData;
 use crate::Graph;
 use crate::Handle;
 use crate::Name;
@@ -117,6 +120,53 @@ impl<'a> GraphBuilder<'a> {
             },
             birth_date: None,
             death_date: None,
+        }
+    }
+
+    /// Start building a [`Family`](Node::Family) node with the given handle.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use typed_graph::generate::GraphBuilder;
+    /// use typed_graph::Graph;
+    ///
+    /// let mut graph = Graph::new();
+    /// let mut builder = GraphBuilder::new(&mut graph);
+    /// let f1 = builder.add_family("f1").build();
+    /// ```
+    pub fn add_family(&mut self, handle: impl Into<Handle>) -> FamilyBuilder<'a, '_> {
+        FamilyBuilder {
+            builder: self,
+            data: FamilyData {
+                handle: handle.into(),
+                ..FamilyData::default()
+            },
+            marriage_date: None,
+        }
+    }
+
+    /// Start building a [`Family`](Node::Family) node with an auto-generated UUID v4 handle.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use typed_graph::generate::GraphBuilder;
+    /// use typed_graph::Graph;
+    ///
+    /// let mut graph = Graph::new();
+    /// let mut builder = GraphBuilder::new(&mut graph);
+    /// let f = builder.add_family_auto().build();
+    /// ```
+    pub fn add_family_auto(&mut self) -> FamilyBuilder<'a, '_> {
+        let handle = uuid::Uuid::new_v4().to_string();
+        FamilyBuilder {
+            builder: self,
+            data: FamilyData {
+                handle,
+                ..FamilyData::default()
+            },
+            marriage_date: None,
         }
     }
 }
@@ -347,6 +397,176 @@ impl<'a, 'b> PersonBuilder<'a, 'b> {
         }
 
         person_handle
+    }
+}
+
+/// Builder for constructing a single [`Family`](Node::Family) node.
+///
+/// Created via [`GraphBuilder::add_family`] or [`GraphBuilder::add_family_auto`].
+pub struct FamilyBuilder<'a, 'b> {
+    builder: &'b mut GraphBuilder<'a>,
+    data: FamilyData,
+    /// Optional marriage date — creates a Marriage event during `build()`.
+    marriage_date: Option<DateValue>,
+}
+
+impl<'a, 'b> FamilyBuilder<'a, 'b> {
+    /// Override the handle for this family.
+    pub fn with_handle(mut self, handle: impl Into<Handle>) -> Self {
+        self.data.handle = handle.into();
+        self
+    }
+
+    /// Set the Gramps ID (e.g., "F0001").
+    pub fn with_gramps_id(mut self, id: impl Into<String>) -> Self {
+        self.data.gramps_id = Some(id.into());
+        self
+    }
+
+    /// Set the father of this family.
+    ///
+    /// Sets `father_handle` and records a `FamilyFather` edge.
+    /// Does NOT validate that the handle exists (that comes in Step 6).
+    pub fn with_father(mut self, father_handle: &Handle) -> Self {
+        self.data.father_handle = Some(father_handle.clone());
+        self
+    }
+
+    /// Set the mother of this family.
+    ///
+    /// Sets `mother_handle` and records a `FamilyMother` edge.
+    /// Does NOT validate that the handle exists (that comes in Step 6).
+    pub fn with_mother(mut self, mother_handle: &Handle) -> Self {
+        self.data.mother_handle = Some(mother_handle.clone());
+        self
+    }
+
+    /// Add a child to this family with the given relation type.
+    ///
+    /// Adds to `child_ref_list` and records a `FamilyChildRef` edge.
+    pub fn add_child(mut self, child_handle: &Handle, relation: ChildRefType) -> Self {
+        self.data.child_ref_list.push(ChildRef {
+            ref_field: child_handle.clone(),
+            relation: Some(relation),
+        });
+        self
+    }
+
+    /// Add a child with [`ChildRefType::Birth`] relation.
+    pub fn add_child_birth(mut self, child_handle: &Handle) -> Self {
+        self.data.child_ref_list.push(ChildRef {
+            ref_field: child_handle.clone(),
+            relation: Some(ChildRefType::Birth),
+        });
+        self
+    }
+
+    /// Set the marriage date for this family.
+    ///
+    /// During [`build`](Self::build), a Marriage event node is created and
+    /// linked to this family via a `FamilyEventRef` edge.
+    pub fn with_marriage_date(mut self, date: DateValue) -> Self {
+        self.marriage_date = Some(date);
+        self
+    }
+
+    /// Build the family node and insert it into the graph.
+    ///
+    /// If a marriage date was set, a Marriage event node is created and
+    /// linked via a `FamilyEventRef` edge.
+    ///
+    /// Returns the handle of the inserted family node.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the node already exists or if creating an event/edge fails.
+    /// This is a temporary limitation — Step 6 adds proper error handling.
+    pub fn build(mut self) -> Handle {
+        let family_handle = self.data.handle.clone();
+
+        // Extract data before consuming self.data
+        let father_handle = self.data.father_handle.clone();
+        let mother_handle = self.data.mother_handle.clone();
+        let child_handles: Vec<(Handle, ChildRefType)> = self
+            .data
+            .child_ref_list
+            .iter()
+            .map(|cr| {
+                (
+                    cr.ref_field.clone(),
+                    cr.relation.unwrap_or(ChildRefType::Birth),
+                )
+            })
+            .collect();
+
+        // 1. Insert the family node
+        let node = Node::Family(self.data);
+        self.builder
+            .graph
+            .add_node(family_handle.clone(), node)
+            .expect("duplicate handle in builder — use unique handles");
+
+        // 2. Add FamilyFather edge if father was set
+        if let Some(ref fh) = father_handle {
+            let edge = Edge::FamilyFather {
+                source: family_handle.clone(),
+                target: fh.clone(),
+            };
+            // Ignore errors — the person node may not exist yet
+            let _ = self.builder.graph.add_edge(edge);
+        }
+
+        // 3. Add FamilyMother edge if mother was set
+        if let Some(ref mh) = mother_handle {
+            let edge = Edge::FamilyMother {
+                source: family_handle.clone(),
+                target: mh.clone(),
+            };
+            let _ = self.builder.graph.add_edge(edge);
+        }
+
+        // 4. Add FamilyChildRef edges for each child
+        for (child_handle, _) in &child_handles {
+            let edge = Edge::FamilyChildRef {
+                source: family_handle.clone(),
+                target: child_handle.clone(),
+                metadata: Box::new(ChildRef {
+                    ref_field: child_handle.clone(),
+                    relation: None,
+                }),
+            };
+            let _ = self.builder.graph.add_edge(edge);
+        }
+
+        // 5. Create marriage event if date was set
+        if let Some(date) = self.marriage_date.take() {
+            let event_handle = uuid::Uuid::new_v4().to_string();
+            let event = EventData {
+                handle: event_handle.clone(),
+                event_type: EventType::Marriage,
+                date: Some(date),
+                ..EventData::default()
+            };
+            self.builder
+                .graph
+                .add_node(event_handle.clone(), Node::Event(event))
+                .expect("duplicate handle for marriage event");
+
+            let edge = Edge::FamilyEventRef {
+                source: family_handle.clone(),
+                target: event_handle,
+                metadata: Box::new(crate::EventRef {
+                    ref_field: family_handle.clone(),
+                    role: Some(EventRoleType::Family),
+                }),
+            };
+            self.builder
+                .graph
+                .add_edge(edge)
+                .expect("failed to add marriage event edge");
+        }
+
+        family_handle
     }
 }
 
@@ -680,5 +900,157 @@ mod tests {
             }
         }
         panic!("No event node found");
+    }
+
+    // -----------------------------------------------------------------------
+    // FamilyBuilder tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn builder_family_basic() {
+        let mut graph = Graph::new();
+        let mut builder = GraphBuilder::new(&mut graph);
+        builder.add_family("f1").build();
+        assert_eq!(graph.node_count(), 1);
+        assert!(graph.contains_node(&"f1".to_string()));
+    }
+
+    #[test]
+    fn builder_family_auto_handle() {
+        let mut graph = Graph::new();
+        let mut builder = GraphBuilder::new(&mut graph);
+        let handle = builder.add_family_auto().build();
+        assert_eq!(handle.len(), 36);
+        assert!(graph.contains_node(&handle));
+    }
+
+    #[test]
+    fn builder_family_with_father_mother() {
+        let mut graph = Graph::new();
+        // Create parents first
+        graph
+            .add_node("p1".into(), Node::Person(PersonData::default()))
+            .unwrap();
+        graph
+            .add_node("p2".into(), Node::Person(PersonData::default()))
+            .unwrap();
+
+        let mut builder = GraphBuilder::new(&mut graph);
+        builder
+            .add_family("f1")
+            .with_father(&"p1".to_string())
+            .with_mother(&"p2".to_string())
+            .build();
+
+        let node = graph.get_node(&"f1".to_string()).unwrap();
+        if let Node::Family(family) = node {
+            assert_eq!(family.father_handle, Some("p1".to_string()));
+            assert_eq!(family.mother_handle, Some("p2".to_string()));
+        } else {
+            panic!("Expected Family node");
+        }
+
+        // Edges should exist
+        let edges = graph.edges_from(&"f1".to_string());
+        assert!(edges.iter().any(|e| matches!(e, Edge::FamilyFather { .. })));
+        assert!(edges.iter().any(|e| matches!(e, Edge::FamilyMother { .. })));
+    }
+
+    #[test]
+    fn builder_family_with_child() {
+        let mut graph = Graph::new();
+        graph
+            .add_node("c1".into(), Node::Person(PersonData::default()))
+            .unwrap();
+
+        let mut builder = GraphBuilder::new(&mut graph);
+        builder
+            .add_family("f1")
+            .add_child(&"c1".to_string(), ChildRefType::Birth)
+            .build();
+
+        let node = graph.get_node(&"f1".to_string()).unwrap();
+        if let Node::Family(family) = node {
+            assert_eq!(family.child_ref_list.len(), 1);
+            assert_eq!(family.child_ref_list[0].ref_field, "c1");
+        } else {
+            panic!("Expected Family node");
+        }
+
+        let edges = graph.edges_from(&"f1".to_string());
+        assert!(edges
+            .iter()
+            .any(|e| matches!(e, Edge::FamilyChildRef { .. })));
+    }
+
+    #[test]
+    fn builder_family_with_multiple_children() {
+        let mut graph = Graph::new();
+        graph
+            .add_node("c1".into(), Node::Person(PersonData::default()))
+            .unwrap();
+        graph
+            .add_node("c2".into(), Node::Person(PersonData::default()))
+            .unwrap();
+        graph
+            .add_node("c3".into(), Node::Person(PersonData::default()))
+            .unwrap();
+
+        let mut builder = GraphBuilder::new(&mut graph);
+        builder
+            .add_family("f1")
+            .add_child(&"c1".to_string(), ChildRefType::Birth)
+            .add_child_birth(&"c2".to_string())
+            .add_child(&"c3".to_string(), ChildRefType::Adopted)
+            .build();
+
+        let node = graph.get_node(&"f1".to_string()).unwrap();
+        if let Node::Family(family) = node {
+            assert_eq!(family.child_ref_list.len(), 3);
+        } else {
+            panic!("Expected Family node");
+        }
+    }
+
+    #[test]
+    fn builder_family_with_marriage_date() {
+        let mut graph = Graph::new();
+        let mut builder = GraphBuilder::new(&mut graph);
+        builder
+            .add_family("f1")
+            .with_marriage_date(DateValue::new(1895))
+            .build();
+
+        // 2 nodes: family + marriage event
+        assert_eq!(graph.node_count(), 2);
+        // 1 edge: FamilyEventRef
+        assert_eq!(graph.edge_count(), 1);
+
+        let edges = graph.edges_from(&"f1".to_string());
+        assert!(edges
+            .iter()
+            .any(|e| matches!(e, Edge::FamilyEventRef { .. })));
+    }
+
+    #[test]
+    fn builder_person_belongs_to_family() {
+        let mut graph = Graph::new();
+        graph
+            .add_node("f1".into(), Node::Family(crate::FamilyData::default()))
+            .unwrap();
+
+        let mut builder = GraphBuilder::new(&mut graph);
+        builder
+            .add_person("p1")
+            .with_name("John", "Smith")
+            .with_family(&"f1".to_string())
+            .build();
+
+        let node = graph.get_node(&"p1".to_string()).unwrap();
+        if let Node::Person(person) = node {
+            assert_eq!(person.family_list, vec!["f1".to_string()]);
+        } else {
+            panic!("Expected Person node");
+        }
     }
 }
