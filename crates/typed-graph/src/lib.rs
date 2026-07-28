@@ -4,6 +4,7 @@
 //! validation, and generation capabilities for Gramps family tree datasets.
 
 pub mod date;
+pub mod generate;
 pub mod graph;
 pub mod schema;
 pub mod validate;
