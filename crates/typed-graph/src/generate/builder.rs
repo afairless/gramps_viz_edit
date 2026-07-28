@@ -17,7 +17,8 @@
 //! let p1 = builder.add_person("p1")
 //!     .with_name("John", "Smith")
 //!     .with_gender(1)
-//!     .build();
+//!     .build()
+//!     .unwrap();
 //! ```
 
 use crate::ChildRef;
@@ -42,6 +43,66 @@ use crate::RepositoryData;
 use crate::SourceData;
 use crate::Surname;
 use crate::TagData;
+
+// ---------------------------------------------------------------------------
+// BuilderError
+// ---------------------------------------------------------------------------
+
+/// Errors that can occur during graph construction via the builder API.
+#[derive(Clone, Debug, PartialEq)]
+pub enum BuilderError {
+    /// A required field was not set before calling `build()`.
+    MissingRequiredField {
+        /// The builder type (e.g., "Person", "Family").
+        builder_type: &'static str,
+        /// The missing field name.
+        field: &'static str,
+    },
+    /// A handle reference does not point to an existing node in the graph.
+    InvalidHandle {
+        /// The builder type.
+        builder_type: &'static str,
+        /// The handle that was not found.
+        handle: Handle,
+        /// The target type description.
+        target_type: &'static str,
+    },
+    /// A node with this handle already exists in the graph.
+    DuplicateHandle(Handle),
+}
+
+impl std::fmt::Display for BuilderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BuilderError::MissingRequiredField {
+                builder_type,
+                field,
+            } => {
+                write!(
+                    f,
+                    "{} builder: missing required field '{}' — set it before calling build()",
+                    builder_type, field
+                )
+            }
+            BuilderError::InvalidHandle {
+                builder_type,
+                handle,
+                target_type,
+            } => {
+                write!(
+                    f,
+                    "{} builder: handle '{}' does not exist in the graph (expected {})",
+                    builder_type, handle, target_type
+                )
+            }
+            BuilderError::DuplicateHandle(h) => {
+                write!(f, "duplicate handle: '{}' already exists in the graph", h)
+            }
+        }
+    }
+}
+
+impl std::error::Error for BuilderError {}
 
 /// Fluent builder for constructing a [`Graph`] programmatically.
 ///
@@ -90,7 +151,8 @@ impl<'a> GraphBuilder<'a> {
     /// let p1 = builder.add_person("p1")
     ///     .with_name("John", "Smith")
     ///     .with_gender(1)
-    ///     .build();
+    ///     .build()
+    ///     .unwrap();
     /// ```
     pub fn add_person(&mut self, handle: impl Into<Handle>) -> PersonBuilder<'a, '_> {
         PersonBuilder {
@@ -116,7 +178,8 @@ impl<'a> GraphBuilder<'a> {
     /// let mut builder = GraphBuilder::new(&mut graph);
     /// let p = builder.add_person_auto()
     ///     .with_name("Jane", "Doe")
-    ///     .build();
+    ///     .build()
+    ///     .unwrap();
     /// ```
     pub fn add_person_auto(&mut self) -> PersonBuilder<'a, '_> {
         let handle = uuid::Uuid::new_v4().to_string();
@@ -141,7 +204,7 @@ impl<'a> GraphBuilder<'a> {
     ///
     /// let mut graph = Graph::new();
     /// let mut builder = GraphBuilder::new(&mut graph);
-    /// let f1 = builder.add_family("f1").build();
+    /// let f1 = builder.add_family("f1").build().unwrap();
     /// ```
     pub fn add_family(&mut self, handle: impl Into<Handle>) -> FamilyBuilder<'a, '_> {
         FamilyBuilder {
@@ -164,7 +227,7 @@ impl<'a> GraphBuilder<'a> {
     ///
     /// let mut graph = Graph::new();
     /// let mut builder = GraphBuilder::new(&mut graph);
-    /// let f = builder.add_family_auto().build();
+    /// let f = builder.add_family_auto().build().unwrap();
     /// ```
     pub fn add_family_auto(&mut self) -> FamilyBuilder<'a, '_> {
         let handle = uuid::Uuid::new_v4().to_string();
@@ -376,13 +439,12 @@ impl<'a, 'b> PersonBuilder<'a, 'b> {
     /// If a birth or death date was set, corresponding Event nodes are created
     /// and linked via `PersonEventRef` edges.
     ///
-    /// Returns the handle of the inserted person node.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the node already exists (duplicate handle) or if creating
-    /// an event/edge for the birth/death date fails. This is a temporary
-    /// limitation — Step 6 adds proper error handling.
+    /// Returns `Ok(handle)` on success, or `Err(BuilderError)` if:
+    /// - The handle is empty (use [`with_handle`](Self::with_handle) or a non-empty handle)
+    /// - The gender is out of range (must be 0-3)
+    /// - No name was set (use [`with_name`](Self::with_name) or [`with_primary_name`](Self::with_primary_name))
+    /// - A referenced family handle does not exist in the graph
+    /// - The handle already exists (duplicate)
     ///
     /// # Example
     ///
@@ -397,11 +459,54 @@ impl<'a, 'b> PersonBuilder<'a, 'b> {
     ///     .with_gender(1)
     ///     .with_birth_date(DateValue::new(1870))
     ///     .with_death_date(DateValue::new(1945))
-    ///     .build();
+    ///     .build()
+    ///     .unwrap();
     /// assert_eq!(handle, "p1");
     /// ```
-    pub fn build(mut self) -> Handle {
+    pub fn build(self) -> Result<Handle, BuilderError> {
         let person_handle = self.data.handle.clone();
+
+        // Validate required fields
+        if person_handle.is_empty() {
+            return Err(BuilderError::MissingRequiredField {
+                builder_type: "Person",
+                field: "handle",
+            });
+        }
+        if !(0..=3).contains(&self.data.gender) {
+            return Err(BuilderError::MissingRequiredField {
+                builder_type: "Person",
+                field: "gender (must be 0-3)",
+            });
+        }
+        let has_name = self.data.primary_name.first_name.is_some()
+            || !self.data.primary_name.surname_list.is_empty();
+        if !has_name {
+            return Err(BuilderError::MissingRequiredField {
+                builder_type: "Person",
+                field: "primary_name (must have at least a first name or surname)",
+            });
+        }
+
+        // Validate handle references resolve
+        for fh in &self.data.parent_family_list {
+            if !self.builder.graph.contains_node(fh) {
+                return Err(BuilderError::InvalidHandle {
+                    builder_type: "Person",
+                    handle: fh.clone(),
+                    target_type: "Family",
+                });
+            }
+        }
+        for fh in &self.data.family_list {
+            if !self.builder.graph.contains_node(fh) {
+                return Err(BuilderError::InvalidHandle {
+                    builder_type: "Person",
+                    handle: fh.clone(),
+                    target_type: "Family",
+                });
+            }
+        }
 
         // Extract lists before consuming self.data
         let parent_family_list = self.data.parent_family_list.clone();
@@ -412,10 +517,13 @@ impl<'a, 'b> PersonBuilder<'a, 'b> {
         self.builder
             .graph
             .add_node(person_handle.clone(), node)
-            .expect("duplicate handle in builder — use unique handles");
+            .map_err(|e| match e {
+                crate::GraphError::DuplicateHandle(h) => BuilderError::DuplicateHandle(h),
+                _ => BuilderError::DuplicateHandle(person_handle.clone()),
+            })?;
 
         // 2. Create birth event if date was set
-        if let Some(date) = self.birth_date.take() {
+        if let Some(date) = self.birth_date {
             let event_handle = uuid::Uuid::new_v4().to_string();
             let event = EventData {
                 handle: event_handle.clone(),
@@ -426,9 +534,8 @@ impl<'a, 'b> PersonBuilder<'a, 'b> {
             self.builder
                 .graph
                 .add_node(event_handle.clone(), Node::Event(event))
-                .expect("duplicate handle for birth event");
+                .map_err(|_| BuilderError::DuplicateHandle(event_handle.clone()))?;
 
-            // Add PersonEventRef edge
             let edge = Edge::PersonEventRef {
                 source: person_handle.clone(),
                 target: event_handle,
@@ -440,11 +547,11 @@ impl<'a, 'b> PersonBuilder<'a, 'b> {
             self.builder
                 .graph
                 .add_edge(edge)
-                .expect("failed to add birth event edge");
+                .expect("birth event target exists (just added)");
         }
 
         // 3. Create death event if date was set
-        if let Some(date) = self.death_date.take() {
+        if let Some(date) = self.death_date {
             let event_handle = uuid::Uuid::new_v4().to_string();
             let event = EventData {
                 handle: event_handle.clone(),
@@ -455,9 +562,8 @@ impl<'a, 'b> PersonBuilder<'a, 'b> {
             self.builder
                 .graph
                 .add_node(event_handle.clone(), Node::Event(event))
-                .expect("duplicate handle for death event");
+                .map_err(|_| BuilderError::DuplicateHandle(event_handle.clone()))?;
 
-            // Add PersonEventRef edge
             let edge = Edge::PersonEventRef {
                 source: person_handle.clone(),
                 target: event_handle,
@@ -469,30 +575,28 @@ impl<'a, 'b> PersonBuilder<'a, 'b> {
             self.builder
                 .graph
                 .add_edge(edge)
-                .expect("failed to add death event edge");
+                .expect("death event target exists (just added)");
         }
 
-        // 4. Add PersonParentFamily edges
+        // 4. Add PersonParentFamily edges (already validated above)
         for family_handle in &parent_family_list {
             let edge = Edge::PersonParentFamily {
                 source: person_handle.clone(),
                 target: family_handle.clone(),
             };
-            // Ignore errors — the family node may not exist yet (validated in Step 6)
             let _ = self.builder.graph.add_edge(edge);
         }
 
-        // 5. Add PersonFamily edges
+        // 5. Add PersonFamily edges (already validated above)
         for family_handle in &family_list {
             let edge = Edge::PersonFamily {
                 source: person_handle.clone(),
                 target: family_handle.clone(),
             };
-            // Ignore errors — the family node may not exist yet (validated in Step 6)
             let _ = self.builder.graph.add_edge(edge);
         }
 
-        person_handle
+        Ok(person_handle)
     }
 }
 
@@ -571,14 +675,49 @@ impl<'a, 'b> FamilyBuilder<'a, 'b> {
     /// If a marriage date was set, a Marriage event node is created and
     /// linked via a `FamilyEventRef` edge.
     ///
-    /// Returns the handle of the inserted family node.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the node already exists or if creating an event/edge fails.
-    /// This is a temporary limitation — Step 6 adds proper error handling.
-    pub fn build(mut self) -> Handle {
+    /// Returns `Ok(handle)` on success, or `Err(BuilderError)` if:
+    /// - The handle is empty
+    /// - A referenced father, mother, or child handle does not exist in the graph
+    /// - The handle already exists
+    pub fn build(self) -> Result<Handle, BuilderError> {
         let family_handle = self.data.handle.clone();
+
+        // Validate required fields
+        if family_handle.is_empty() {
+            return Err(BuilderError::MissingRequiredField {
+                builder_type: "Family",
+                field: "handle",
+            });
+        }
+
+        // Validate that referenced person nodes exist
+        if let Some(ref fh) = self.data.father_handle {
+            if !self.builder.graph.contains_node(fh) {
+                return Err(BuilderError::InvalidHandle {
+                    builder_type: "Family",
+                    handle: fh.clone(),
+                    target_type: "Person (father)",
+                });
+            }
+        }
+        if let Some(ref mh) = self.data.mother_handle {
+            if !self.builder.graph.contains_node(mh) {
+                return Err(BuilderError::InvalidHandle {
+                    builder_type: "Family",
+                    handle: mh.clone(),
+                    target_type: "Person (mother)",
+                });
+            }
+        }
+        for cr in &self.data.child_ref_list {
+            if !self.builder.graph.contains_node(&cr.ref_field) {
+                return Err(BuilderError::InvalidHandle {
+                    builder_type: "Family",
+                    handle: cr.ref_field.clone(),
+                    target_type: "Person (child)",
+                });
+            }
+        }
 
         // Extract data before consuming self.data
         let father_handle = self.data.father_handle.clone();
@@ -600,7 +739,10 @@ impl<'a, 'b> FamilyBuilder<'a, 'b> {
         self.builder
             .graph
             .add_node(family_handle.clone(), node)
-            .expect("duplicate handle in builder — use unique handles");
+            .map_err(|e| match e {
+                crate::GraphError::DuplicateHandle(h) => BuilderError::DuplicateHandle(h),
+                _ => BuilderError::DuplicateHandle(family_handle.clone()),
+            })?;
 
         // 2. Add FamilyFather edge if father was set
         if let Some(ref fh) = father_handle {
@@ -608,7 +750,6 @@ impl<'a, 'b> FamilyBuilder<'a, 'b> {
                 source: family_handle.clone(),
                 target: fh.clone(),
             };
-            // Ignore errors — the person node may not exist yet
             let _ = self.builder.graph.add_edge(edge);
         }
 
@@ -635,7 +776,7 @@ impl<'a, 'b> FamilyBuilder<'a, 'b> {
         }
 
         // 5. Create marriage event if date was set
-        if let Some(date) = self.marriage_date.take() {
+        if let Some(date) = self.marriage_date {
             let event_handle = uuid::Uuid::new_v4().to_string();
             let event = EventData {
                 handle: event_handle.clone(),
@@ -646,7 +787,7 @@ impl<'a, 'b> FamilyBuilder<'a, 'b> {
             self.builder
                 .graph
                 .add_node(event_handle.clone(), Node::Event(event))
-                .expect("duplicate handle for marriage event");
+                .map_err(|_| BuilderError::DuplicateHandle(event_handle.clone()))?;
 
             let edge = Edge::FamilyEventRef {
                 source: family_handle.clone(),
@@ -659,10 +800,10 @@ impl<'a, 'b> FamilyBuilder<'a, 'b> {
             self.builder
                 .graph
                 .add_edge(edge)
-                .expect("failed to add marriage event edge");
+                .expect("marriage event target exists (just added)");
         }
 
-        family_handle
+        Ok(family_handle)
     }
 }
 
@@ -701,17 +842,40 @@ impl<'a, 'b> EventBuilder<'a, 'b> {
         self.data.description = Some(description.into());
         self
     }
-    pub fn build(self) -> Handle {
+    pub fn build(self) -> Result<Handle, BuilderError> {
         let handle = self.data.handle.clone();
+
+        // Validate required fields
+        if handle.is_empty() {
+            return Err(BuilderError::MissingRequiredField {
+                builder_type: "Event",
+                field: "handle",
+            });
+        }
+
+        // Validate place_handle resolves if set
+        if let Some(ref ph) = self.data.place_handle {
+            if !self.builder.graph.contains_node(ph) {
+                return Err(BuilderError::InvalidHandle {
+                    builder_type: "Event",
+                    handle: ph.clone(),
+                    target_type: "Place",
+                });
+            }
+        }
+
         // Extract place_handle before consuming self.data
         let place_handle = self.data.place_handle.clone();
         let node = Node::Event(self.data);
         self.builder
             .graph
             .add_node(handle.clone(), node)
-            .expect("duplicate handle in builder — use unique handles");
+            .map_err(|e| match e {
+                crate::GraphError::DuplicateHandle(h) => BuilderError::DuplicateHandle(h),
+                _ => BuilderError::DuplicateHandle(handle.clone()),
+            })?;
 
-        // Add EventPlace edge if place was set (best-effort, validated in Step 6)
+        // Add EventPlace edge if place was set
         if let Some(ph) = place_handle {
             let edge = Edge::EventPlace {
                 source: handle.clone(),
@@ -720,7 +884,7 @@ impl<'a, 'b> EventBuilder<'a, 'b> {
             let _ = self.builder.graph.add_edge(edge);
         }
 
-        handle
+        Ok(handle)
     }
 }
 
@@ -739,14 +903,23 @@ impl<'a, 'b> PlaceBuilder<'a, 'b> {
         self.data.name = name;
         self
     }
-    pub fn build(self) -> Handle {
+    pub fn build(self) -> Result<Handle, BuilderError> {
         let handle = self.data.handle.clone();
+        if handle.is_empty() {
+            return Err(BuilderError::MissingRequiredField {
+                builder_type: "Place",
+                field: "handle",
+            });
+        }
         let node = Node::Place(self.data);
         self.builder
             .graph
             .add_node(handle.clone(), node)
-            .expect("duplicate handle in builder — use unique handles");
-        handle
+            .map_err(|e| match e {
+                crate::GraphError::DuplicateHandle(h) => BuilderError::DuplicateHandle(h),
+                _ => BuilderError::DuplicateHandle(handle.clone()),
+            })?;
+        Ok(handle)
     }
 }
 
@@ -765,14 +938,29 @@ impl<'a, 'b> SourceBuilder<'a, 'b> {
         self.data.title = title.into();
         self
     }
-    pub fn build(self) -> Handle {
+    pub fn build(self) -> Result<Handle, BuilderError> {
         let handle = self.data.handle.clone();
+        if handle.is_empty() {
+            return Err(BuilderError::MissingRequiredField {
+                builder_type: "Source",
+                field: "handle",
+            });
+        }
+        if self.data.title.is_empty() {
+            return Err(BuilderError::MissingRequiredField {
+                builder_type: "Source",
+                field: "title",
+            });
+        }
         let node = Node::Source(self.data);
         self.builder
             .graph
             .add_node(handle.clone(), node)
-            .expect("duplicate handle in builder — use unique handles");
-        handle
+            .map_err(|e| match e {
+                crate::GraphError::DuplicateHandle(h) => BuilderError::DuplicateHandle(h),
+                _ => BuilderError::DuplicateHandle(handle.clone()),
+            })?;
+        Ok(handle)
     }
 }
 
@@ -791,25 +979,46 @@ impl<'a, 'b> CitationBuilder<'a, 'b> {
         self.data.source_handle = source_handle.clone();
         self
     }
-    pub fn build(self) -> Handle {
+    pub fn build(self) -> Result<Handle, BuilderError> {
         let handle = self.data.handle.clone();
+        if handle.is_empty() {
+            return Err(BuilderError::MissingRequiredField {
+                builder_type: "Citation",
+                field: "handle",
+            });
+        }
+        if self.data.source_handle.is_empty() {
+            return Err(BuilderError::MissingRequiredField {
+                builder_type: "Citation",
+                field: "source_handle",
+            });
+        }
+        if !self.builder.graph.contains_node(&self.data.source_handle) {
+            return Err(BuilderError::InvalidHandle {
+                builder_type: "Citation",
+                handle: self.data.source_handle.clone(),
+                target_type: "Source",
+            });
+        }
+
         let source_handle = self.data.source_handle.clone();
         let node = Node::Citation(self.data);
         self.builder
             .graph
             .add_node(handle.clone(), node)
-            .expect("duplicate handle in builder — use unique handles");
+            .map_err(|e| match e {
+                crate::GraphError::DuplicateHandle(h) => BuilderError::DuplicateHandle(h),
+                _ => BuilderError::DuplicateHandle(handle.clone()),
+            })?;
 
-        // Add CitationSource edge (best-effort, validated in Step 6)
-        if !source_handle.is_empty() {
-            let edge = Edge::CitationSource {
-                source: handle.clone(),
-                target: source_handle,
-            };
-            let _ = self.builder.graph.add_edge(edge);
-        }
+        // Add CitationSource edge
+        let edge = Edge::CitationSource {
+            source: handle.clone(),
+            target: source_handle,
+        };
+        let _ = self.builder.graph.add_edge(edge);
 
-        handle
+        Ok(handle)
     }
 }
 
@@ -828,14 +1037,29 @@ impl<'a, 'b> NoteBuilder<'a, 'b> {
         self.data.text = text.into();
         self
     }
-    pub fn build(self) -> Handle {
+    pub fn build(self) -> Result<Handle, BuilderError> {
         let handle = self.data.handle.clone();
+        if handle.is_empty() {
+            return Err(BuilderError::MissingRequiredField {
+                builder_type: "Note",
+                field: "handle",
+            });
+        }
+        if self.data.text.is_empty() {
+            return Err(BuilderError::MissingRequiredField {
+                builder_type: "Note",
+                field: "text",
+            });
+        }
         let node = Node::Note(self.data);
         self.builder
             .graph
             .add_node(handle.clone(), node)
-            .expect("duplicate handle in builder — use unique handles");
-        handle
+            .map_err(|e| match e {
+                crate::GraphError::DuplicateHandle(h) => BuilderError::DuplicateHandle(h),
+                _ => BuilderError::DuplicateHandle(handle.clone()),
+            })?;
+        Ok(handle)
     }
 }
 
@@ -850,14 +1074,23 @@ impl<'a, 'b> MediaBuilder<'a, 'b> {
         self.data.handle = handle.into();
         self
     }
-    pub fn build(self) -> Handle {
+    pub fn build(self) -> Result<Handle, BuilderError> {
         let handle = self.data.handle.clone();
+        if handle.is_empty() {
+            return Err(BuilderError::MissingRequiredField {
+                builder_type: "Media",
+                field: "handle",
+            });
+        }
         let node = Node::Media(self.data);
         self.builder
             .graph
             .add_node(handle.clone(), node)
-            .expect("duplicate handle in builder — use unique handles");
-        handle
+            .map_err(|e| match e {
+                crate::GraphError::DuplicateHandle(h) => BuilderError::DuplicateHandle(h),
+                _ => BuilderError::DuplicateHandle(handle.clone()),
+            })?;
+        Ok(handle)
     }
 }
 
@@ -872,14 +1105,23 @@ impl<'a, 'b> RepositoryBuilder<'a, 'b> {
         self.data.handle = handle.into();
         self
     }
-    pub fn build(self) -> Handle {
+    pub fn build(self) -> Result<Handle, BuilderError> {
         let handle = self.data.handle.clone();
+        if handle.is_empty() {
+            return Err(BuilderError::MissingRequiredField {
+                builder_type: "Repository",
+                field: "handle",
+            });
+        }
         let node = Node::Repository(self.data);
         self.builder
             .graph
             .add_node(handle.clone(), node)
-            .expect("duplicate handle in builder — use unique handles");
-        handle
+            .map_err(|e| match e {
+                crate::GraphError::DuplicateHandle(h) => BuilderError::DuplicateHandle(h),
+                _ => BuilderError::DuplicateHandle(handle.clone()),
+            })?;
+        Ok(handle)
     }
 }
 
@@ -898,14 +1140,29 @@ impl<'a, 'b> TagBuilder<'a, 'b> {
         self.data.name = name.into();
         self
     }
-    pub fn build(self) -> Handle {
+    pub fn build(self) -> Result<Handle, BuilderError> {
         let handle = self.data.handle.clone();
+        if handle.is_empty() {
+            return Err(BuilderError::MissingRequiredField {
+                builder_type: "Tag",
+                field: "handle",
+            });
+        }
+        if self.data.name.is_empty() {
+            return Err(BuilderError::MissingRequiredField {
+                builder_type: "Tag",
+                field: "name",
+            });
+        }
         let node = Node::Tag(self.data);
         self.builder
             .graph
             .add_node(handle.clone(), node)
-            .expect("duplicate handle in builder — use unique handles");
-        handle
+            .map_err(|e| match e {
+                crate::GraphError::DuplicateHandle(h) => BuilderError::DuplicateHandle(h),
+                _ => BuilderError::DuplicateHandle(handle.clone()),
+            })?;
+        Ok(handle)
     }
 }
 
@@ -934,7 +1191,8 @@ mod tests {
             .add_person("p1")
             .with_name("John", "Smith")
             .with_gender(1)
-            .build();
+            .build()
+            .unwrap();
         assert_eq!(graph.node_count(), 1);
         let node = graph.get_node(&"p1".to_string());
         assert!(node.is_some());
@@ -955,7 +1213,11 @@ mod tests {
     fn builder_add_person_auto_handle() {
         let mut graph = Graph::new();
         let mut builder = GraphBuilder::new(&mut graph);
-        let handle = builder.add_person_auto().with_name("Auto", "Gen").build();
+        let handle = builder
+            .add_person_auto()
+            .with_name("Auto", "Gen")
+            .build()
+            .unwrap();
         // UUID v4 is 36 characters
         assert_eq!(handle.len(), 36);
         assert!(graph.contains_node(&handle));
@@ -965,7 +1227,11 @@ mod tests {
     fn builder_build_returns_handle() {
         let mut graph = Graph::new();
         let mut builder = GraphBuilder::new(&mut graph);
-        let handle = builder.add_person("p1").with_name("John", "Smith").build();
+        let handle = builder
+            .add_person("p1")
+            .with_name("John", "Smith")
+            .build()
+            .unwrap();
         assert_eq!(handle, "p1");
     }
 
@@ -977,7 +1243,8 @@ mod tests {
             .add_person("p1")
             .with_name("John", "Smith")
             .with_gramps_id("I0001")
-            .build();
+            .build()
+            .unwrap();
         let node = graph.get_node(&"p1".to_string()).unwrap();
         if let Node::Person(person) = node {
             assert_eq!(person.gramps_id, Some("I0001".to_string()));
@@ -990,7 +1257,11 @@ mod tests {
     fn builder_into_graph_returns_graph() {
         let mut graph = Graph::new();
         let mut builder = GraphBuilder::new(&mut graph);
-        builder.add_person("p1").with_name("John", "Smith").build();
+        builder
+            .add_person("p1")
+            .with_name("John", "Smith")
+            .build()
+            .unwrap();
         let graph_ref = builder.into_graph();
         assert_eq!(graph_ref.node_count(), 1);
     }
@@ -999,8 +1270,16 @@ mod tests {
     fn builder_add_multiple_persons() {
         let mut graph = Graph::new();
         let mut builder = GraphBuilder::new(&mut graph);
-        builder.add_person("p1").with_name("John", "Smith").build();
-        builder.add_person("p2").with_name("Jane", "Doe").build();
+        builder
+            .add_person("p1")
+            .with_name("John", "Smith")
+            .build()
+            .unwrap();
+        builder
+            .add_person("p2")
+            .with_name("Jane", "Doe")
+            .build()
+            .unwrap();
         assert_eq!(graph.node_count(), 2);
         assert!(graph.contains_node(&"p1".to_string()));
         assert!(graph.contains_node(&"p2".to_string()));
@@ -1023,7 +1302,8 @@ mod tests {
             .add_person("p1")
             .with_primary_name(name)
             .with_gender(1)
-            .build();
+            .build()
+            .unwrap();
         let node = graph.get_node(&"p1".to_string()).unwrap();
         if let Node::Person(person) = node {
             assert_eq!(person.primary_name.first_name, Some("Robert".to_string()));
@@ -1041,19 +1321,27 @@ mod tests {
             .add_person("temp")
             .with_handle("custom")
             .with_name("Custom", "Handle")
-            .build();
+            .build()
+            .unwrap();
         assert_eq!(handle, "custom");
         assert!(graph.contains_node(&"custom".to_string()));
         assert!(!graph.contains_node(&"temp".to_string()));
     }
 
     #[test]
-    #[should_panic(expected = "duplicate handle")]
-    fn builder_duplicate_handle_panics() {
+    fn builder_duplicate_handle_returns_error() {
         let mut graph = Graph::new();
         let mut builder = GraphBuilder::new(&mut graph);
-        builder.add_person("p1").with_name("John", "Smith").build();
-        builder.add_person("p1").with_name("Jane", "Doe").build();
+        builder
+            .add_person("p1")
+            .with_name("John", "Smith")
+            .build()
+            .unwrap();
+        let result = builder.add_person("p1").with_name("Jane", "Doe").build();
+        assert!(matches!(
+            result,
+            Err(BuilderError::DuplicateHandle(h)) if h == "p1"
+        ));
     }
 
     // -----------------------------------------------------------------------
@@ -1068,7 +1356,8 @@ mod tests {
             .add_person("p1")
             .with_name("John", "Smith")
             .with_birth_date(DateValue::new(1870))
-            .build();
+            .build()
+            .unwrap();
         // Person exists
         assert!(graph.contains_node(&"p1".to_string()));
         // Birth event should exist (auto-generated UUID handle)
@@ -1089,7 +1378,8 @@ mod tests {
             .add_person("p1")
             .with_name("John", "Smith")
             .with_death_date(DateValue::new(1945))
-            .build();
+            .build()
+            .unwrap();
         assert_eq!(graph.node_count(), 2);
         assert_eq!(graph.edge_count(), 1);
         let edges = graph.edges_from(&"p1".to_string());
@@ -1110,7 +1400,8 @@ mod tests {
             .add_person("p1")
             .with_name("Child", "Smith")
             .with_parent_family(&"f1".to_string())
-            .build();
+            .build()
+            .unwrap();
 
         // Person should have parent_family_list populated
         let node = graph.get_node(&"p1".to_string()).unwrap();
@@ -1136,7 +1427,8 @@ mod tests {
             .add_person("p1")
             .with_name("Parent", "Smith")
             .with_family(&"f1".to_string())
-            .build();
+            .build()
+            .unwrap();
 
         let node = graph.get_node(&"p1".to_string()).unwrap();
         if let Node::Person(person) = node {
@@ -1160,7 +1452,8 @@ mod tests {
             .add_person("p1")
             .with_name("John", "Smith")
             .add_alternate_name(alt_name)
-            .build();
+            .build()
+            .unwrap();
 
         let node = graph.get_node(&"p1".to_string()).unwrap();
         if let Node::Person(person) = node {
@@ -1190,7 +1483,8 @@ mod tests {
             .with_name("Parent", "Smith")
             .with_family(&"f1".to_string())
             .with_family(&"f2".to_string())
-            .build();
+            .build()
+            .unwrap();
 
         let node = graph.get_node(&"p1".to_string()).unwrap();
         if let Node::Person(person) = node {
@@ -1211,7 +1505,8 @@ mod tests {
             .with_name("John", "Smith")
             .with_birth_date(DateValue::new(1870))
             .with_death_date(DateValue::new(1945))
-            .build();
+            .build()
+            .unwrap();
 
         // 3 nodes: person + birth event + death event
         assert_eq!(graph.node_count(), 3);
@@ -1227,7 +1522,8 @@ mod tests {
             .add_person("p1")
             .with_name("John", "Smith")
             .with_birth_date(DateValue::new(1870))
-            .build();
+            .build()
+            .unwrap();
 
         // Find the event node (the one that's not the person)
         for (handle, node) in graph.iter_nodes() {
@@ -1249,7 +1545,7 @@ mod tests {
     fn builder_family_basic() {
         let mut graph = Graph::new();
         let mut builder = GraphBuilder::new(&mut graph);
-        builder.add_family("f1").build();
+        builder.add_family("f1").build().unwrap();
         assert_eq!(graph.node_count(), 1);
         assert!(graph.contains_node(&"f1".to_string()));
     }
@@ -1258,7 +1554,7 @@ mod tests {
     fn builder_family_auto_handle() {
         let mut graph = Graph::new();
         let mut builder = GraphBuilder::new(&mut graph);
-        let handle = builder.add_family_auto().build();
+        let handle = builder.add_family_auto().build().unwrap();
         assert_eq!(handle.len(), 36);
         assert!(graph.contains_node(&handle));
     }
@@ -1279,7 +1575,8 @@ mod tests {
             .add_family("f1")
             .with_father(&"p1".to_string())
             .with_mother(&"p2".to_string())
-            .build();
+            .build()
+            .unwrap();
 
         let node = graph.get_node(&"f1".to_string()).unwrap();
         if let Node::Family(family) = node {
@@ -1306,7 +1603,8 @@ mod tests {
         builder
             .add_family("f1")
             .add_child(&"c1".to_string(), ChildRefType::Birth)
-            .build();
+            .build()
+            .unwrap();
 
         let node = graph.get_node(&"f1".to_string()).unwrap();
         if let Node::Family(family) = node {
@@ -1341,7 +1639,8 @@ mod tests {
             .add_child(&"c1".to_string(), ChildRefType::Birth)
             .add_child_birth(&"c2".to_string())
             .add_child(&"c3".to_string(), ChildRefType::Adopted)
-            .build();
+            .build()
+            .unwrap();
 
         let node = graph.get_node(&"f1".to_string()).unwrap();
         if let Node::Family(family) = node {
@@ -1358,7 +1657,8 @@ mod tests {
         builder
             .add_family("f1")
             .with_marriage_date(DateValue::new(1895))
-            .build();
+            .build()
+            .unwrap();
 
         // 2 nodes: family + marriage event
         assert_eq!(graph.node_count(), 2);
@@ -1383,7 +1683,8 @@ mod tests {
             .add_person("p1")
             .with_name("John", "Smith")
             .with_family(&"f1".to_string())
-            .build();
+            .build()
+            .unwrap();
 
         let node = graph.get_node(&"p1".to_string()).unwrap();
         if let Node::Person(person) = node {
@@ -1404,7 +1705,8 @@ mod tests {
         builder
             .add_event("e1")
             .with_event_type(EventType::Birth)
-            .build();
+            .build()
+            .unwrap();
         assert_eq!(graph.node_count(), 1);
         assert!(graph.contains_node(&"e1".to_string()));
     }
@@ -1423,7 +1725,8 @@ mod tests {
             .with_date(DateValue::new(1895))
             .with_place(&"pl1".to_string())
             .with_description("Church wedding")
-            .build();
+            .build()
+            .unwrap();
 
         let node = graph.get_node(&"e1".to_string()).unwrap();
         if let Node::Event(event) = node {
@@ -1445,7 +1748,7 @@ mod tests {
             state: Some("IL".to_string()),
             ..Location::default()
         };
-        builder.add_place("pl1").with_name(name).build();
+        builder.add_place("pl1").with_name(name).build().unwrap();
         assert!(graph.contains_node(&"pl1".to_string()));
     }
 
@@ -1456,7 +1759,8 @@ mod tests {
         builder
             .add_source("s1")
             .with_title("Census Records")
-            .build();
+            .build()
+            .unwrap();
         assert!(graph.contains_node(&"s1".to_string()));
         let node = graph.get_node(&"s1".to_string()).unwrap();
         if let Node::Source(source) = node {
@@ -1477,7 +1781,8 @@ mod tests {
         builder
             .add_citation("c1")
             .with_source(&"s1".to_string())
-            .build();
+            .build()
+            .unwrap();
         assert!(graph.contains_node(&"c1".to_string()));
         let node = graph.get_node(&"c1".to_string()).unwrap();
         if let Node::Citation(citation) = node {
@@ -1491,7 +1796,11 @@ mod tests {
     fn builder_note_with_text() {
         let mut graph = Graph::new();
         let mut builder = GraphBuilder::new(&mut graph);
-        builder.add_note("n1").with_text("Some notes here").build();
+        builder
+            .add_note("n1")
+            .with_text("Some notes here")
+            .build()
+            .unwrap();
         assert!(graph.contains_node(&"n1".to_string()));
         let node = graph.get_node(&"n1".to_string()).unwrap();
         if let Node::Note(note) = node {
@@ -1505,19 +1814,28 @@ mod tests {
     fn builder_all_types() {
         let mut graph = Graph::new();
         let mut builder = GraphBuilder::new(&mut graph);
-        builder.add_person("p1").with_name("John", "Smith").build();
-        builder.add_family("f1").build();
+        builder
+            .add_person("p1")
+            .with_name("John", "Smith")
+            .build()
+            .unwrap();
+        builder.add_family("f1").build().unwrap();
         builder
             .add_event("e1")
             .with_event_type(EventType::Birth)
-            .build();
-        builder.add_place("pl1").build();
-        builder.add_source("s1").with_title("T").build();
-        builder.add_citation("c1").build();
-        builder.add_note("n1").with_text("N").build();
-        builder.add_media("m1").build();
-        builder.add_repository("r1").build();
-        builder.add_tag("t1").with_name("Tag").build();
+            .build()
+            .unwrap();
+        builder.add_place("pl1").build().unwrap();
+        builder.add_source("s1").with_title("T").build().unwrap();
+        builder
+            .add_citation("c1")
+            .with_source(&"s1".to_string())
+            .build()
+            .unwrap();
+        builder.add_note("n1").with_text("N").build().unwrap();
+        builder.add_media("m1").build().unwrap();
+        builder.add_repository("r1").build().unwrap();
+        builder.add_tag("t1").with_name("Tag").build().unwrap();
 
         assert_eq!(graph.node_count(), 10);
     }
