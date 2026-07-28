@@ -20,6 +20,11 @@
 //!     .build();
 //! ```
 
+use crate::DateValue;
+use crate::Edge;
+use crate::EventData;
+use crate::EventRoleType;
+use crate::EventType;
 use crate::Graph;
 use crate::Handle;
 use crate::Name;
@@ -83,6 +88,8 @@ impl<'a> GraphBuilder<'a> {
                 handle: handle.into(),
                 ..PersonData::default()
             },
+            birth_date: None,
+            death_date: None,
         }
     }
 
@@ -108,6 +115,8 @@ impl<'a> GraphBuilder<'a> {
                 handle,
                 ..PersonData::default()
             },
+            birth_date: None,
+            death_date: None,
         }
     }
 }
@@ -118,6 +127,10 @@ impl<'a> GraphBuilder<'a> {
 pub struct PersonBuilder<'a, 'b> {
     builder: &'b mut GraphBuilder<'a>,
     data: PersonData,
+    /// Optional birth date — creates a Birth event during `build()`.
+    birth_date: Option<DateValue>,
+    /// Optional death date — creates a Death event during `build()`.
+    death_date: Option<DateValue>,
 }
 
 impl<'a, 'b> PersonBuilder<'a, 'b> {
@@ -168,37 +181,172 @@ impl<'a, 'b> PersonBuilder<'a, 'b> {
         self
     }
 
+    /// Set the birth date for this person.
+    ///
+    /// During [`build`](Self::build), a Birth event node is created and linked
+    /// to this person via a `PersonEventRef` edge.
+    pub fn with_birth_date(mut self, date: DateValue) -> Self {
+        self.birth_date = Some(date);
+        self
+    }
+
+    /// Set the death date for this person.
+    ///
+    /// During [`build`](Self::build), a Death event node is created and linked
+    /// to this person via a `PersonEventRef` edge.
+    pub fn with_death_date(mut self, date: DateValue) -> Self {
+        self.death_date = Some(date);
+        self
+    }
+
+    /// Add a parent family reference.
+    ///
+    /// Adds the family handle to `parent_family_list` and records a
+    /// `PersonParentFamily` edge. Does NOT validate that the family handle
+    /// exists in the graph (that comes in Step 6).
+    pub fn with_parent_family(mut self, family_handle: &Handle) -> Self {
+        self.data.parent_family_list.push(family_handle.clone());
+        self
+    }
+
+    /// Add a family reference (own family).
+    ///
+    /// Adds the family handle to `family_list` and records a
+    /// `PersonFamily` edge. Does NOT validate that the family handle
+    /// exists in the graph (that comes in Step 6).
+    pub fn with_family(mut self, family_handle: &Handle) -> Self {
+        self.data.family_list.push(family_handle.clone());
+        self
+    }
+
+    /// Add an alternate name to this person.
+    pub fn add_alternate_name(mut self, name: Name) -> Self {
+        self.data.alternate_names.push(name);
+        self
+    }
+
     /// Build the person node and insert it into the graph.
     ///
-    /// Returns the handle of the inserted node.
+    /// If a birth or death date was set, corresponding Event nodes are created
+    /// and linked via `PersonEventRef` edges.
+    ///
+    /// Returns the handle of the inserted person node.
     ///
     /// # Panics
     ///
-    /// Panics if the node already exists (duplicate handle). This is a
-    /// temporary limitation — Step 6 adds proper error handling.
+    /// Panics if the node already exists (duplicate handle) or if creating
+    /// an event/edge for the birth/death date fails. This is a temporary
+    /// limitation — Step 6 adds proper error handling.
     ///
     /// # Example
     ///
     /// ```
     /// use typed_graph::generate::GraphBuilder;
-    /// use typed_graph::Graph;
+    /// use typed_graph::{DateValue, Graph};
     ///
     /// let mut graph = Graph::new();
     /// let mut builder = GraphBuilder::new(&mut graph);
     /// let handle = builder.add_person("p1")
     ///     .with_name("John", "Smith")
     ///     .with_gender(1)
+    ///     .with_birth_date(DateValue::new(1870))
+    ///     .with_death_date(DateValue::new(1945))
     ///     .build();
     /// assert_eq!(handle, "p1");
     /// ```
-    pub fn build(self) -> Handle {
-        let handle = self.data.handle.clone();
+    pub fn build(mut self) -> Handle {
+        let person_handle = self.data.handle.clone();
+
+        // Extract lists before consuming self.data
+        let parent_family_list = self.data.parent_family_list.clone();
+        let family_list = self.data.family_list.clone();
+
+        // 1. Insert the person node first so edges can reference it
         let node = Node::Person(self.data);
         self.builder
             .graph
-            .add_node(handle.clone(), node)
+            .add_node(person_handle.clone(), node)
             .expect("duplicate handle in builder — use unique handles");
-        handle
+
+        // 2. Create birth event if date was set
+        if let Some(date) = self.birth_date.take() {
+            let event_handle = uuid::Uuid::new_v4().to_string();
+            let event = EventData {
+                handle: event_handle.clone(),
+                event_type: EventType::Birth,
+                date: Some(date),
+                ..EventData::default()
+            };
+            self.builder
+                .graph
+                .add_node(event_handle.clone(), Node::Event(event))
+                .expect("duplicate handle for birth event");
+
+            // Add PersonEventRef edge
+            let edge = Edge::PersonEventRef {
+                source: person_handle.clone(),
+                target: event_handle,
+                metadata: Box::new(crate::EventRef {
+                    ref_field: person_handle.clone(),
+                    role: Some(EventRoleType::Primary),
+                }),
+            };
+            self.builder
+                .graph
+                .add_edge(edge)
+                .expect("failed to add birth event edge");
+        }
+
+        // 3. Create death event if date was set
+        if let Some(date) = self.death_date.take() {
+            let event_handle = uuid::Uuid::new_v4().to_string();
+            let event = EventData {
+                handle: event_handle.clone(),
+                event_type: EventType::Death,
+                date: Some(date),
+                ..EventData::default()
+            };
+            self.builder
+                .graph
+                .add_node(event_handle.clone(), Node::Event(event))
+                .expect("duplicate handle for death event");
+
+            // Add PersonEventRef edge
+            let edge = Edge::PersonEventRef {
+                source: person_handle.clone(),
+                target: event_handle,
+                metadata: Box::new(crate::EventRef {
+                    ref_field: person_handle.clone(),
+                    role: Some(EventRoleType::Primary),
+                }),
+            };
+            self.builder
+                .graph
+                .add_edge(edge)
+                .expect("failed to add death event edge");
+        }
+
+        // 4. Add PersonParentFamily edges
+        for family_handle in &parent_family_list {
+            let edge = Edge::PersonParentFamily {
+                source: person_handle.clone(),
+                target: family_handle.clone(),
+            };
+            // Ignore errors — the family node may not exist yet (validated in Step 6)
+            let _ = self.builder.graph.add_edge(edge);
+        }
+
+        // 5. Add PersonFamily edges
+        for family_handle in &family_list {
+            let edge = Edge::PersonFamily {
+                source: person_handle.clone(),
+                target: family_handle.clone(),
+            };
+            // Ignore errors — the family node may not exist yet (validated in Step 6)
+            let _ = self.builder.graph.add_edge(edge);
+        }
+
+        person_handle
     }
 }
 
@@ -347,5 +495,190 @@ mod tests {
         let mut builder = GraphBuilder::new(&mut graph);
         builder.add_person("p1").with_name("John", "Smith").build();
         builder.add_person("p1").with_name("Jane", "Doe").build();
+    }
+
+    // -----------------------------------------------------------------------
+    // Date and family reference tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn builder_person_with_birth_date() {
+        let mut graph = Graph::new();
+        let mut builder = GraphBuilder::new(&mut graph);
+        builder
+            .add_person("p1")
+            .with_name("John", "Smith")
+            .with_birth_date(DateValue::new(1870))
+            .build();
+        // Person exists
+        assert!(graph.contains_node(&"p1".to_string()));
+        // Birth event should exist (auto-generated UUID handle)
+        // We should have at least 2 nodes: person + birth event
+        assert_eq!(graph.node_count(), 2);
+        // There should be a PersonEventRef edge
+        assert_eq!(graph.edge_count(), 1);
+        let edges = graph.edges_from(&"p1".to_string());
+        assert_eq!(edges.len(), 1);
+        assert!(matches!(edges[0], Edge::PersonEventRef { .. }));
+    }
+
+    #[test]
+    fn builder_person_with_death_date() {
+        let mut graph = Graph::new();
+        let mut builder = GraphBuilder::new(&mut graph);
+        builder
+            .add_person("p1")
+            .with_name("John", "Smith")
+            .with_death_date(DateValue::new(1945))
+            .build();
+        assert_eq!(graph.node_count(), 2);
+        assert_eq!(graph.edge_count(), 1);
+        let edges = graph.edges_from(&"p1".to_string());
+        assert_eq!(edges.len(), 1);
+        assert!(matches!(edges[0], Edge::PersonEventRef { .. }));
+    }
+
+    #[test]
+    fn builder_person_with_parent_family() {
+        let mut graph = Graph::new();
+        // First create the family
+        graph
+            .add_node("f1".into(), Node::Family(crate::FamilyData::default()))
+            .unwrap();
+
+        let mut builder = GraphBuilder::new(&mut graph);
+        builder
+            .add_person("p1")
+            .with_name("Child", "Smith")
+            .with_parent_family(&"f1".to_string())
+            .build();
+
+        // Person should have parent_family_list populated
+        let node = graph.get_node(&"p1".to_string()).unwrap();
+        if let Node::Person(person) = node {
+            assert_eq!(person.parent_family_list, vec!["f1".to_string()]);
+        } else {
+            panic!("Expected Person node");
+        }
+        // PersonParentFamily edge should exist
+        let edges = graph.edges_from(&"p1".to_string());
+        assert!(edges.iter().any(|e| matches!(e, Edge::PersonParentFamily { source, target } if source == "p1" && target == "f1")));
+    }
+
+    #[test]
+    fn builder_person_with_family() {
+        let mut graph = Graph::new();
+        graph
+            .add_node("f1".into(), Node::Family(crate::FamilyData::default()))
+            .unwrap();
+
+        let mut builder = GraphBuilder::new(&mut graph);
+        builder
+            .add_person("p1")
+            .with_name("Parent", "Smith")
+            .with_family(&"f1".to_string())
+            .build();
+
+        let node = graph.get_node(&"p1".to_string()).unwrap();
+        if let Node::Person(person) = node {
+            assert_eq!(person.family_list, vec!["f1".to_string()]);
+        } else {
+            panic!("Expected Person node");
+        }
+        let edges = graph.edges_from(&"p1".to_string());
+        assert!(edges.iter().any(|e| matches!(e, Edge::PersonFamily { source, target } if source == "p1" && target == "f1")));
+    }
+
+    #[test]
+    fn builder_person_with_alternate_name() {
+        let mut graph = Graph::new();
+        let mut builder = GraphBuilder::new(&mut graph);
+        let alt_name = Name {
+            first_name: Some("Johnny".to_string()),
+            ..Name::default()
+        };
+        builder
+            .add_person("p1")
+            .with_name("John", "Smith")
+            .add_alternate_name(alt_name)
+            .build();
+
+        let node = graph.get_node(&"p1".to_string()).unwrap();
+        if let Node::Person(person) = node {
+            assert_eq!(person.alternate_names.len(), 1);
+            assert_eq!(
+                person.alternate_names[0].first_name,
+                Some("Johnny".to_string())
+            );
+        } else {
+            panic!("Expected Person node");
+        }
+    }
+
+    #[test]
+    fn builder_person_with_multiple_families() {
+        let mut graph = Graph::new();
+        graph
+            .add_node("f1".into(), Node::Family(crate::FamilyData::default()))
+            .unwrap();
+        graph
+            .add_node("f2".into(), Node::Family(crate::FamilyData::default()))
+            .unwrap();
+
+        let mut builder = GraphBuilder::new(&mut graph);
+        builder
+            .add_person("p1")
+            .with_name("Parent", "Smith")
+            .with_family(&"f1".to_string())
+            .with_family(&"f2".to_string())
+            .build();
+
+        let node = graph.get_node(&"p1".to_string()).unwrap();
+        if let Node::Person(person) = node {
+            assert_eq!(person.family_list.len(), 2);
+        } else {
+            panic!("Expected Person node");
+        }
+        let edges = graph.edges_from(&"p1".to_string());
+        assert_eq!(edges.len(), 2);
+    }
+
+    #[test]
+    fn builder_person_with_birth_and_death_dates() {
+        let mut graph = Graph::new();
+        let mut builder = GraphBuilder::new(&mut graph);
+        builder
+            .add_person("p1")
+            .with_name("John", "Smith")
+            .with_birth_date(DateValue::new(1870))
+            .with_death_date(DateValue::new(1945))
+            .build();
+
+        // 3 nodes: person + birth event + death event
+        assert_eq!(graph.node_count(), 3);
+        // 2 edges: PersonEventRef for birth + PersonEventRef for death
+        assert_eq!(graph.edge_count(), 2);
+    }
+
+    #[test]
+    fn builder_person_with_birth_date_has_event_type() {
+        let mut graph = Graph::new();
+        let mut builder = GraphBuilder::new(&mut graph);
+        builder
+            .add_person("p1")
+            .with_name("John", "Smith")
+            .with_birth_date(DateValue::new(1870))
+            .build();
+
+        // Find the event node (the one that's not the person)
+        for (handle, node) in graph.iter_nodes() {
+            if let Node::Event(event) = node {
+                assert_eq!(event.event_type, EventType::Birth);
+                assert_eq!(event.date, Some(DateValue::new(1870)));
+                assert_ne!(*handle, "p1");
+                return;
+            }
+        }
+        panic!("No event node found");
     }
 }
