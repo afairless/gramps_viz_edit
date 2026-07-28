@@ -22,6 +22,7 @@
 
 use crate::ChildRef;
 use crate::ChildRefType;
+use crate::CitationData;
 use crate::DateValue;
 use crate::Edge;
 use crate::EventData;
@@ -30,10 +31,17 @@ use crate::EventType;
 use crate::FamilyData;
 use crate::Graph;
 use crate::Handle;
+use crate::Location;
+use crate::MediaData;
 use crate::Name;
 use crate::Node;
+use crate::NoteData;
 use crate::PersonData;
+use crate::PlaceData;
+use crate::RepositoryData;
+use crate::SourceData;
 use crate::Surname;
+use crate::TagData;
 
 /// Fluent builder for constructing a [`Graph`] programmatically.
 ///
@@ -167,6 +175,94 @@ impl<'a> GraphBuilder<'a> {
                 ..FamilyData::default()
             },
             marriage_date: None,
+        }
+    }
+
+    /// Start building an [`Event`](Node::Event) node with the given handle.
+    pub fn add_event(&mut self, handle: impl Into<Handle>) -> EventBuilder<'a, '_> {
+        EventBuilder {
+            builder: self,
+            data: EventData {
+                handle: handle.into(),
+                ..EventData::default()
+            },
+        }
+    }
+
+    /// Start building a [`Place`](Node::Place) node with the given handle.
+    pub fn add_place(&mut self, handle: impl Into<Handle>) -> PlaceBuilder<'a, '_> {
+        PlaceBuilder {
+            builder: self,
+            data: PlaceData {
+                handle: handle.into(),
+                ..PlaceData::default()
+            },
+        }
+    }
+
+    /// Start building a [`Source`](Node::Source) node with the given handle.
+    pub fn add_source(&mut self, handle: impl Into<Handle>) -> SourceBuilder<'a, '_> {
+        SourceBuilder {
+            builder: self,
+            data: SourceData {
+                handle: handle.into(),
+                ..SourceData::default()
+            },
+        }
+    }
+
+    /// Start building a [`Citation`](Node::Citation) node with the given handle.
+    pub fn add_citation(&mut self, handle: impl Into<Handle>) -> CitationBuilder<'a, '_> {
+        CitationBuilder {
+            builder: self,
+            data: CitationData {
+                handle: handle.into(),
+                ..CitationData::default()
+            },
+        }
+    }
+
+    /// Start building a [`Note`](Node::Note) node with the given handle.
+    pub fn add_note(&mut self, handle: impl Into<Handle>) -> NoteBuilder<'a, '_> {
+        NoteBuilder {
+            builder: self,
+            data: NoteData {
+                handle: handle.into(),
+                ..NoteData::default()
+            },
+        }
+    }
+
+    /// Start building a [`Media`](Node::Media) node with the given handle.
+    pub fn add_media(&mut self, handle: impl Into<Handle>) -> MediaBuilder<'a, '_> {
+        MediaBuilder {
+            builder: self,
+            data: MediaData {
+                handle: handle.into(),
+                ..MediaData::default()
+            },
+        }
+    }
+
+    /// Start building a [`Repository`](Node::Repository) node with the given handle.
+    pub fn add_repository(&mut self, handle: impl Into<Handle>) -> RepositoryBuilder<'a, '_> {
+        RepositoryBuilder {
+            builder: self,
+            data: RepositoryData {
+                handle: handle.into(),
+                ..RepositoryData::default()
+            },
+        }
+    }
+
+    /// Start building a [`Tag`](Node::Tag) node with the given handle.
+    pub fn add_tag(&mut self, handle: impl Into<Handle>) -> TagBuilder<'a, '_> {
+        TagBuilder {
+            builder: self,
+            data: TagData {
+                handle: handle.into(),
+                ..TagData::default()
+            },
         }
     }
 }
@@ -567,6 +663,249 @@ impl<'a, 'b> FamilyBuilder<'a, 'b> {
         }
 
         family_handle
+    }
+}
+
+// =======================================================================
+// Remaining primary type builders
+// =======================================================================
+
+/// Builder for constructing a single [`Event`](Node::Event) node.
+pub struct EventBuilder<'a, 'b> {
+    builder: &'b mut GraphBuilder<'a>,
+    data: EventData,
+}
+
+impl<'a, 'b> EventBuilder<'a, 'b> {
+    pub fn with_handle(mut self, handle: impl Into<Handle>) -> Self {
+        self.data.handle = handle.into();
+        self
+    }
+    pub fn with_gramps_id(mut self, id: impl Into<String>) -> Self {
+        self.data.gramps_id = Some(id.into());
+        self
+    }
+    pub fn with_event_type(mut self, event_type: EventType) -> Self {
+        self.data.event_type = event_type;
+        self
+    }
+    pub fn with_date(mut self, date: DateValue) -> Self {
+        self.data.date = Some(date);
+        self
+    }
+    pub fn with_place(mut self, place_handle: &Handle) -> Self {
+        self.data.place_handle = Some(place_handle.clone());
+        self
+    }
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.data.description = Some(description.into());
+        self
+    }
+    pub fn build(self) -> Handle {
+        let handle = self.data.handle.clone();
+        // Extract place_handle before consuming self.data
+        let place_handle = self.data.place_handle.clone();
+        let node = Node::Event(self.data);
+        self.builder
+            .graph
+            .add_node(handle.clone(), node)
+            .expect("duplicate handle in builder — use unique handles");
+
+        // Add EventPlace edge if place was set (best-effort, validated in Step 6)
+        if let Some(ph) = place_handle {
+            let edge = Edge::EventPlace {
+                source: handle.clone(),
+                target: ph,
+            };
+            let _ = self.builder.graph.add_edge(edge);
+        }
+
+        handle
+    }
+}
+
+/// Builder for constructing a single [`Place`](Node::Place) node.
+pub struct PlaceBuilder<'a, 'b> {
+    builder: &'b mut GraphBuilder<'a>,
+    data: PlaceData,
+}
+
+impl<'a, 'b> PlaceBuilder<'a, 'b> {
+    pub fn with_handle(mut self, handle: impl Into<Handle>) -> Self {
+        self.data.handle = handle.into();
+        self
+    }
+    pub fn with_name(mut self, name: Location) -> Self {
+        self.data.name = name;
+        self
+    }
+    pub fn build(self) -> Handle {
+        let handle = self.data.handle.clone();
+        let node = Node::Place(self.data);
+        self.builder
+            .graph
+            .add_node(handle.clone(), node)
+            .expect("duplicate handle in builder — use unique handles");
+        handle
+    }
+}
+
+/// Builder for constructing a single [`Source`](Node::Source) node.
+pub struct SourceBuilder<'a, 'b> {
+    builder: &'b mut GraphBuilder<'a>,
+    data: SourceData,
+}
+
+impl<'a, 'b> SourceBuilder<'a, 'b> {
+    pub fn with_handle(mut self, handle: impl Into<Handle>) -> Self {
+        self.data.handle = handle.into();
+        self
+    }
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.data.title = title.into();
+        self
+    }
+    pub fn build(self) -> Handle {
+        let handle = self.data.handle.clone();
+        let node = Node::Source(self.data);
+        self.builder
+            .graph
+            .add_node(handle.clone(), node)
+            .expect("duplicate handle in builder — use unique handles");
+        handle
+    }
+}
+
+/// Builder for constructing a single [`Citation`](Node::Citation) node.
+pub struct CitationBuilder<'a, 'b> {
+    builder: &'b mut GraphBuilder<'a>,
+    data: CitationData,
+}
+
+impl<'a, 'b> CitationBuilder<'a, 'b> {
+    pub fn with_handle(mut self, handle: impl Into<Handle>) -> Self {
+        self.data.handle = handle.into();
+        self
+    }
+    pub fn with_source(mut self, source_handle: &Handle) -> Self {
+        self.data.source_handle = source_handle.clone();
+        self
+    }
+    pub fn build(self) -> Handle {
+        let handle = self.data.handle.clone();
+        let source_handle = self.data.source_handle.clone();
+        let node = Node::Citation(self.data);
+        self.builder
+            .graph
+            .add_node(handle.clone(), node)
+            .expect("duplicate handle in builder — use unique handles");
+
+        // Add CitationSource edge (best-effort, validated in Step 6)
+        if !source_handle.is_empty() {
+            let edge = Edge::CitationSource {
+                source: handle.clone(),
+                target: source_handle,
+            };
+            let _ = self.builder.graph.add_edge(edge);
+        }
+
+        handle
+    }
+}
+
+/// Builder for constructing a single [`Note`](Node::Note) node.
+pub struct NoteBuilder<'a, 'b> {
+    builder: &'b mut GraphBuilder<'a>,
+    data: NoteData,
+}
+
+impl<'a, 'b> NoteBuilder<'a, 'b> {
+    pub fn with_handle(mut self, handle: impl Into<Handle>) -> Self {
+        self.data.handle = handle.into();
+        self
+    }
+    pub fn with_text(mut self, text: impl Into<String>) -> Self {
+        self.data.text = text.into();
+        self
+    }
+    pub fn build(self) -> Handle {
+        let handle = self.data.handle.clone();
+        let node = Node::Note(self.data);
+        self.builder
+            .graph
+            .add_node(handle.clone(), node)
+            .expect("duplicate handle in builder — use unique handles");
+        handle
+    }
+}
+
+/// Builder for constructing a single [`Media`](Node::Media) node.
+pub struct MediaBuilder<'a, 'b> {
+    builder: &'b mut GraphBuilder<'a>,
+    data: MediaData,
+}
+
+impl<'a, 'b> MediaBuilder<'a, 'b> {
+    pub fn with_handle(mut self, handle: impl Into<Handle>) -> Self {
+        self.data.handle = handle.into();
+        self
+    }
+    pub fn build(self) -> Handle {
+        let handle = self.data.handle.clone();
+        let node = Node::Media(self.data);
+        self.builder
+            .graph
+            .add_node(handle.clone(), node)
+            .expect("duplicate handle in builder — use unique handles");
+        handle
+    }
+}
+
+/// Builder for constructing a single [`Repository`](Node::Repository) node.
+pub struct RepositoryBuilder<'a, 'b> {
+    builder: &'b mut GraphBuilder<'a>,
+    data: RepositoryData,
+}
+
+impl<'a, 'b> RepositoryBuilder<'a, 'b> {
+    pub fn with_handle(mut self, handle: impl Into<Handle>) -> Self {
+        self.data.handle = handle.into();
+        self
+    }
+    pub fn build(self) -> Handle {
+        let handle = self.data.handle.clone();
+        let node = Node::Repository(self.data);
+        self.builder
+            .graph
+            .add_node(handle.clone(), node)
+            .expect("duplicate handle in builder — use unique handles");
+        handle
+    }
+}
+
+/// Builder for constructing a single [`Tag`](Node::Tag) node.
+pub struct TagBuilder<'a, 'b> {
+    builder: &'b mut GraphBuilder<'a>,
+    data: TagData,
+}
+
+impl<'a, 'b> TagBuilder<'a, 'b> {
+    pub fn with_handle(mut self, handle: impl Into<Handle>) -> Self {
+        self.data.handle = handle.into();
+        self
+    }
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.data.name = name.into();
+        self
+    }
+    pub fn build(self) -> Handle {
+        let handle = self.data.handle.clone();
+        let node = Node::Tag(self.data);
+        self.builder
+            .graph
+            .add_node(handle.clone(), node)
+            .expect("duplicate handle in builder — use unique handles");
+        handle
     }
 }
 
@@ -1052,5 +1391,134 @@ mod tests {
         } else {
             panic!("Expected Person node");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Remaining type builder tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn builder_event_basic() {
+        let mut graph = Graph::new();
+        let mut builder = GraphBuilder::new(&mut graph);
+        builder
+            .add_event("e1")
+            .with_event_type(EventType::Birth)
+            .build();
+        assert_eq!(graph.node_count(), 1);
+        assert!(graph.contains_node(&"e1".to_string()));
+    }
+
+    #[test]
+    fn builder_event_with_type_date_place() {
+        let mut graph = Graph::new();
+        graph
+            .add_node("pl1".into(), Node::Place(PlaceData::default()))
+            .unwrap();
+
+        let mut builder = GraphBuilder::new(&mut graph);
+        builder
+            .add_event("e1")
+            .with_event_type(EventType::Marriage)
+            .with_date(DateValue::new(1895))
+            .with_place(&"pl1".to_string())
+            .with_description("Church wedding")
+            .build();
+
+        let node = graph.get_node(&"e1".to_string()).unwrap();
+        if let Node::Event(event) = node {
+            assert_eq!(event.event_type, EventType::Marriage);
+            assert_eq!(event.date, Some(DateValue::new(1895)));
+            assert_eq!(event.place_handle, Some("pl1".to_string()));
+            assert_eq!(event.description, Some("Church wedding".to_string()));
+        } else {
+            panic!("Expected Event node");
+        }
+    }
+
+    #[test]
+    fn builder_place_basic() {
+        let mut graph = Graph::new();
+        let mut builder = GraphBuilder::new(&mut graph);
+        let name = Location {
+            city: Some("Springfield".to_string()),
+            state: Some("IL".to_string()),
+            ..Location::default()
+        };
+        builder.add_place("pl1").with_name(name).build();
+        assert!(graph.contains_node(&"pl1".to_string()));
+    }
+
+    #[test]
+    fn builder_source_basic() {
+        let mut graph = Graph::new();
+        let mut builder = GraphBuilder::new(&mut graph);
+        builder
+            .add_source("s1")
+            .with_title("Census Records")
+            .build();
+        assert!(graph.contains_node(&"s1".to_string()));
+        let node = graph.get_node(&"s1".to_string()).unwrap();
+        if let Node::Source(source) = node {
+            assert_eq!(source.title, "Census Records");
+        } else {
+            panic!("Expected Source node");
+        }
+    }
+
+    #[test]
+    fn builder_citation_with_source() {
+        let mut graph = Graph::new();
+        graph
+            .add_node("s1".into(), Node::Source(SourceData::default()))
+            .unwrap();
+
+        let mut builder = GraphBuilder::new(&mut graph);
+        builder
+            .add_citation("c1")
+            .with_source(&"s1".to_string())
+            .build();
+        assert!(graph.contains_node(&"c1".to_string()));
+        let node = graph.get_node(&"c1".to_string()).unwrap();
+        if let Node::Citation(citation) = node {
+            assert_eq!(citation.source_handle, "s1");
+        } else {
+            panic!("Expected Citation node");
+        }
+    }
+
+    #[test]
+    fn builder_note_with_text() {
+        let mut graph = Graph::new();
+        let mut builder = GraphBuilder::new(&mut graph);
+        builder.add_note("n1").with_text("Some notes here").build();
+        assert!(graph.contains_node(&"n1".to_string()));
+        let node = graph.get_node(&"n1".to_string()).unwrap();
+        if let Node::Note(note) = node {
+            assert_eq!(note.text, "Some notes here");
+        } else {
+            panic!("Expected Note node");
+        }
+    }
+
+    #[test]
+    fn builder_all_types() {
+        let mut graph = Graph::new();
+        let mut builder = GraphBuilder::new(&mut graph);
+        builder.add_person("p1").with_name("John", "Smith").build();
+        builder.add_family("f1").build();
+        builder
+            .add_event("e1")
+            .with_event_type(EventType::Birth)
+            .build();
+        builder.add_place("pl1").build();
+        builder.add_source("s1").with_title("T").build();
+        builder.add_citation("c1").build();
+        builder.add_note("n1").with_text("N").build();
+        builder.add_media("m1").build();
+        builder.add_repository("r1").build();
+        builder.add_tag("t1").with_name("Tag").build();
+
+        assert_eq!(graph.node_count(), 10);
     }
 }
