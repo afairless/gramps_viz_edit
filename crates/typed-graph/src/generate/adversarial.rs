@@ -385,6 +385,180 @@ pub fn deep_nesting(depth: usize) -> GraphTransform {
 }
 
 // ---------------------------------------------------------------------------
+// Max ref chains transform
+// ---------------------------------------------------------------------------
+
+/// Create legal maximum-length reference chains.
+///
+/// Builds chains of the form:
+///   Event → Citation → Source → Repository → Note → ...
+///
+/// Each chain is structurally valid (all handle refs resolve) and tests
+/// downstream tools for stack overflow or O(n²) traversal when following
+/// long reference chains.
+///
+/// The transform is validity-preserving: all references remain valid.
+pub fn max_ref_chains(chain_length: usize) -> GraphTransform {
+    Box::new(move |mut graph: Graph| -> Result<Graph, AdversarialError> {
+        let event_handles: Vec<crate::Handle> = graph
+            .nodes_by_kind(crate::NodeKind::Event)
+            .into_iter()
+            .cloned()
+            .collect();
+
+        if event_handles.is_empty() {
+            return Err(AdversarialError::TransformNotApplicable(
+                "no event nodes in graph".to_string(),
+            ));
+        }
+
+        let effective_length = chain_length.clamp(1, 10);
+
+        for event_handle in &event_handles {
+            // Pre-create all nodes for the chain so forward references work
+            let mut chain_handles: Vec<crate::Handle> = Vec::with_capacity(effective_length);
+            chain_handles.push(event_handle.clone());
+
+            for step in 0..effective_length {
+                let new_handle = match step {
+                    0 => {
+                        // Citation (will reference Source created in step 1)
+                        let h = uuid::Uuid::new_v4().to_string();
+                        // We'll update source_handle after creating the Source
+                        let citation = crate::CitationData {
+                            handle: h.clone(),
+                            source_handle: String::new(), // placeholder, updated below
+                            ..crate::CitationData::default()
+                        };
+                        graph
+                            .add_node(h.clone(), crate::Node::Citation(citation))
+                            .map_err(|_| {
+                                AdversarialError::TransformNotApplicable(
+                                    "duplicate citation handle".to_string(),
+                                )
+                            })?;
+                        h
+                    }
+                    1 => {
+                        // Source
+                        let h = uuid::Uuid::new_v4().to_string();
+                        let source = crate::SourceData {
+                            handle: h.clone(),
+                            title: "Generated source".to_string(),
+                            ..crate::SourceData::default()
+                        };
+                        graph
+                            .add_node(h.clone(), crate::Node::Source(source))
+                            .map_err(|_| {
+                                AdversarialError::TransformNotApplicable(
+                                    "duplicate source handle".to_string(),
+                                )
+                            })?;
+
+                        // Update the Citation's source_handle to point to this Source
+                        let citation_handle = &chain_handles[1]; // index 1 = citation
+                        if let Some(crate::Node::Citation(ref mut citation)) =
+                            graph.get_node_mut(citation_handle)
+                        {
+                            citation.source_handle = h.clone();
+                        }
+
+                        h
+                    }
+                    2 => {
+                        // Repository
+                        let h = uuid::Uuid::new_v4().to_string();
+                        let repo = crate::RepositoryData {
+                            handle: h.clone(),
+                            ..crate::RepositoryData::default()
+                        };
+                        graph
+                            .add_node(h.clone(), crate::Node::Repository(repo))
+                            .map_err(|_| {
+                                AdversarialError::TransformNotApplicable(
+                                    "duplicate repository handle".to_string(),
+                                )
+                            })?;
+                        h
+                    }
+                    3 => {
+                        // Note
+                        let h = uuid::Uuid::new_v4().to_string();
+                        let note = crate::NoteData {
+                            handle: h.clone(),
+                            text: "Generated note for reference chain".to_string(),
+                            ..crate::NoteData::default()
+                        };
+                        graph
+                            .add_node(h.clone(), crate::Node::Note(note))
+                            .map_err(|_| {
+                                AdversarialError::TransformNotApplicable(
+                                    "duplicate note handle".to_string(),
+                                )
+                            })?;
+                        h
+                    }
+                    _ => {
+                        // Tag (for step 4+)
+                        let h = uuid::Uuid::new_v4().to_string();
+                        let tag = crate::TagData {
+                            handle: h.clone(),
+                            name: format!("chain-tag-{}", step),
+                            ..crate::TagData::default()
+                        };
+                        graph
+                            .add_node(h.clone(), crate::Node::Tag(tag))
+                            .map_err(|_| {
+                                AdversarialError::TransformNotApplicable(
+                                    "duplicate tag handle".to_string(),
+                                )
+                            })?;
+                        h
+                    }
+                };
+                chain_handles.push(new_handle);
+            }
+
+            // Now add edges between consecutive nodes in the chain
+            for i in 0..effective_length {
+                let source = &chain_handles[i];
+                let target = &chain_handles[i + 1];
+
+                let edge: crate::Edge = match i {
+                    0 => crate::Edge::EventCitation {
+                        source: source.clone(),
+                        target: target.clone(),
+                    },
+                    1 => crate::Edge::CitationSource {
+                        source: source.clone(),
+                        target: target.clone(),
+                    },
+                    2 => crate::Edge::SourceRepoRef {
+                        source: source.clone(),
+                        target: target.clone(),
+                        metadata: Box::new(crate::RepoRef::default()),
+                    },
+                    3 => crate::Edge::RepositoryNote {
+                        source: source.clone(),
+                        target: target.clone(),
+                    },
+                    _ => crate::Edge::NoteTag {
+                        source: source.clone(),
+                        target: target.clone(),
+                    },
+                };
+
+                graph.add_edge(edge).map_err(|_| {
+                    AdversarialError::TransformNotApplicable("failed to add chain edge".to_string())
+                })?;
+            }
+        }
+
+        Ok(graph)
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1095,6 +1269,154 @@ mod tests {
             errors.is_empty(),
             "Deep nesting should be validity-preserving: {:?}",
             errors
+        );
+    }
+
+    // =======================================================================
+    // Max ref chains transform tests
+    // =======================================================================
+
+    /// Build a graph with a single Event node.
+    fn build_graph_with_event() -> Graph {
+        let mut graph = Graph::new();
+        graph
+            .add_node(
+                "evt1".to_string(),
+                crate::Node::Event(crate::EventData {
+                    handle: "evt1".to_string(),
+                    event_type: crate::EventType::Birth,
+                    ..crate::EventData::default()
+                }),
+            )
+            .unwrap();
+        graph
+    }
+
+    #[test]
+    fn max_ref_chains_length_3() {
+        let graph = build_graph_with_event();
+        let transform = max_ref_chains(3);
+        let result = transform(graph).unwrap();
+
+        // 1 original event + 3 new nodes = 4 nodes
+        assert_eq!(
+            result.node_count(),
+            4,
+            "Should have 4 nodes with chain length 3"
+        );
+        // 3 edges (Event→Citation, Citation→Source, Source→Repository)
+        assert_eq!(
+            result.edge_count(),
+            3,
+            "Should have 3 edges with chain length 3"
+        );
+    }
+
+    #[test]
+    fn max_ref_chains_length_5() {
+        let graph = build_graph_with_event();
+        let transform = max_ref_chains(5);
+        let result = transform(graph).unwrap();
+
+        // 1 original event + 5 new nodes = 6 nodes
+        assert_eq!(
+            result.node_count(),
+            6,
+            "Should have 6 nodes with chain length 5"
+        );
+        // 5 edges
+        assert_eq!(
+            result.edge_count(),
+            5,
+            "Should have 5 edges with chain length 5"
+        );
+    }
+
+    #[test]
+    fn max_ref_chains_all_refs_resolve() {
+        let graph = build_graph_with_event();
+        let transform = max_ref_chains(5);
+        let result = transform(graph).unwrap();
+
+        // Every edge's source and target handles must exist in the graph
+        for edge in result.iter_edges() {
+            let (source, target) = crate::graph::edge_source_target(edge);
+            assert!(
+                result.contains_node(&source),
+                "Source handle {} should exist",
+                source
+            );
+            assert!(
+                result.contains_node(&target),
+                "Target handle {} should exist",
+                target
+            );
+        }
+    }
+
+    #[test]
+    fn max_ref_chains_no_circular_refs() {
+        let graph = build_graph_with_event();
+        let transform = max_ref_chains(5);
+        let result = transform(graph).unwrap();
+
+        // Each edge should form a forward chain; no edge should have its target
+        // also be the source of an edge pointing back to the original source.
+        // Collect all sources and targets
+        let mut edge_pairs: Vec<(crate::Handle, crate::Handle)> = Vec::new();
+        for edge in result.iter_edges() {
+            let (source, target) = crate::graph::edge_source_target(edge);
+            edge_pairs.push((source, target));
+        }
+
+        // Check no direct 2-edge cycles: A->B and B->A should not coexist
+        for (s1, t1) in &edge_pairs {
+            for (s2, t2) in &edge_pairs {
+                if s1 == t2 && t1 == s2 {
+                    panic!("Circular reference detected: {} <-> {}", s1, t1);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn max_ref_chains_validates_ok() {
+        let schema = crate::Schema::new();
+        let graph = build_graph_with_event();
+        let transform = max_ref_chains(5);
+        let mut graph = transform(graph).unwrap();
+
+        let errors = graph.validate(&schema);
+        assert!(
+            errors.is_empty(),
+            "Max ref chains should be validity-preserving: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn max_ref_chains_node_count_increases() {
+        let graph = build_graph_with_event();
+        let node_count_before = graph.node_count();
+
+        let transform = max_ref_chains(5);
+        let result = transform(graph).unwrap();
+
+        assert_eq!(
+            result.node_count(),
+            node_count_before + 5,
+            "Node count should increase by 5"
+        );
+    }
+
+    #[test]
+    fn max_ref_chains_empty_graph() {
+        let graph = Graph::new();
+        let transform = max_ref_chains(5);
+        let result = transform(graph);
+        assert!(
+            matches!(result, Err(AdversarialError::TransformNotApplicable(_))),
+            "Empty graph should return TransformNotApplicable"
         );
     }
 }
