@@ -2201,4 +2201,142 @@ mod tests {
         // The important thing is the function doesn't panic.
         let _ = result;
     }
+
+    // =======================================================================
+    // Property-based tests
+    // =======================================================================
+
+    use crate::generate::random::{generate_random, RandomConfig};
+
+    #[test]
+    fn property_validity_preserving_strategies_produce_valid_graphs() {
+        let schema = crate::Schema::new();
+        let validity_preserving = vec![
+            AdversarialStrategy::DisconnectedSubgraphs,
+            AdversarialStrategy::DeepNesting,
+            AdversarialStrategy::MaxRefChains,
+            AdversarialStrategy::OrphanedReferences,
+            AdversarialStrategy::DoubleGender(0.5),
+        ];
+
+        for seed in 0..30 {
+            let config = RandomConfig {
+                person_count: 10 + (seed % 10) as usize,
+                with_places: true,
+                with_citations: true,
+                with_notes: true,
+                seed: Some(seed),
+                ..RandomConfig::default()
+            };
+            for strategy in &validity_preserving {
+                let adversarial_config = AdversarialConfig {
+                    enabled: true,
+                    strategies: vec![strategy.clone()],
+                };
+                let result = generate_random(&config, &adversarial_config, &schema);
+                if let Ok(result) = result {
+                    let mut graph = result.graph;
+                    let errors = graph.validate(&schema);
+                    assert!(
+                        errors.is_empty(),
+                        "Seed {}, strategy {:?}: validation failed with {} errors",
+                        seed,
+                        strategy,
+                        errors.len()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn property_adversarial_disabled_produces_valid_graph() {
+        let schema = crate::Schema::new();
+        for seed in 0..30 {
+            let config = RandomConfig {
+                person_count: 15,
+                seed: Some(seed),
+                ..RandomConfig::default()
+            };
+            let adversarial_config = AdversarialConfig {
+                enabled: false,
+                strategies: vec![],
+            };
+            let result = generate_random(&config, &adversarial_config, &schema);
+            assert!(
+                result.is_ok(),
+                "Seed {}: generation should succeed with adversarial disabled",
+                seed
+            );
+            if let Ok(result) = result {
+                let mut graph = result.graph;
+                let errors = graph.validate(&schema);
+                assert!(
+                    errors.is_empty(),
+                    "Seed {}: adversarial-disabled graph should be valid: {:?}",
+                    seed,
+                    errors
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn property_multiple_validity_preserving_strategies_compose() {
+        let schema = crate::Schema::new();
+        let combined_strategies = vec![
+            AdversarialStrategy::DisconnectedSubgraphs,
+            AdversarialStrategy::DeepNesting,
+        ];
+        for seed in 0..20 {
+            let config = RandomConfig {
+                person_count: 20,
+                with_places: true,
+                with_citations: true,
+                seed: Some(seed),
+                ..RandomConfig::default()
+            };
+            let adversarial_config = AdversarialConfig {
+                enabled: true,
+                strategies: combined_strategies.clone(),
+            };
+            let result = generate_random(&config, &adversarial_config, &schema);
+            if let Ok(result) = result {
+                let mut graph = result.graph;
+                let errors = graph.validate(&schema);
+                assert!(
+                    errors.is_empty(),
+                    "Seed {}: combined strategies failed validation: {:?}",
+                    seed,
+                    errors
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn property_category_a_and_b_compose() {
+        let schema = crate::Schema::new();
+        for seed in 0..20 {
+            let config = RandomConfig {
+                person_count: 15,
+                seed: Some(seed),
+                ..RandomConfig::default()
+            };
+            let adversarial_config = AdversarialConfig {
+                enabled: true,
+                strategies: vec![
+                    AdversarialStrategy::OneParentFamilies(0.5),
+                    AdversarialStrategy::DisconnectedSubgraphs,
+                ],
+            };
+            let result = generate_random(&config, &adversarial_config, &schema);
+            assert!(
+                result.is_ok(),
+                "Seed {}: combined Category A + B strategies failed: {:?}",
+                seed,
+                result
+            );
+        }
+    }
 }
