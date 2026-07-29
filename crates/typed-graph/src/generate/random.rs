@@ -1640,6 +1640,18 @@ pub fn generate_random(
     generate_events(&mut graph, config, &mut rng)?;
 
     // -----------------------------------------------------------------------
+    // Apply Category B (post-generation) adversarial strategies
+    // -----------------------------------------------------------------------
+    let adversarial_result =
+        crate::generate::adversarial::apply_adversarial_strategies(graph, adversarial_config);
+    graph = adversarial_result.graph;
+
+    // Collect any warnings from adversarial strategies
+    for error in &adversarial_result.errors {
+        warnings.push(format!("adversarial strategy: {}", error));
+    }
+
+    // -----------------------------------------------------------------------
     // Collect statistics
     // -----------------------------------------------------------------------
     let stats = collect_stats(&graph);

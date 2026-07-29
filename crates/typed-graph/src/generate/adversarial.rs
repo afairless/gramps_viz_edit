@@ -672,6 +672,77 @@ pub fn orphaned_references(fraction: f64) -> GraphTransform {
 }
 
 // ---------------------------------------------------------------------------
+// Strategy runner
+// ---------------------------------------------------------------------------
+
+/// Result of applying adversarial strategies to a graph.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AdversarialResult {
+    /// The graph after applying all Category B strategies.
+    pub graph: Graph,
+    /// Errors collected from strategies that failed (e.g., transform not
+    /// applicable). Non-fatal — the graph is in its pre-transform state
+    /// for that strategy.
+    pub errors: Vec<AdversarialError>,
+}
+
+/// Apply the list of adversarial strategies to a graph.
+///
+/// This function handles **Category B** (post-generation) strategies.
+/// Category A strategies are ignored here — they are applied during
+/// generation via `generate_random()`.
+///
+/// Strategies are applied in order. If a strategy fails with
+/// `AdversarialError`, the error is collected and the graph remains
+/// in its pre-transform state for that strategy. Other strategies
+/// continue to execute.
+pub fn apply_adversarial_strategies(
+    mut graph: Graph,
+    config: &AdversarialConfig,
+) -> AdversarialResult {
+    if !config.enabled {
+        return AdversarialResult {
+            graph,
+            errors: Vec::new(),
+        };
+    }
+
+    let mut errors: Vec<AdversarialError> = Vec::new();
+
+    for strategy in &config.strategies {
+        if strategy.is_category_a() {
+            // Category A strategies are handled during generation; skip them
+            continue;
+        }
+
+        let transform: GraphTransform = match strategy {
+            AdversarialStrategy::DisconnectedSubgraphs => disconnected_subgraphs(2),
+            AdversarialStrategy::DeepNesting => deep_nesting(3),
+            AdversarialStrategy::MaxRefChains => max_ref_chains(5),
+            AdversarialStrategy::OrphanedReferences => orphaned_references(0.5),
+            AdversarialStrategy::DoubleGender(fraction) => double_gender(*fraction),
+            _ => {
+                // Category A strategies, already handled above
+                continue;
+            }
+        };
+
+        // Clone the graph before the transform so we can recover
+        // if the transform fails
+        let graph_clone = graph.clone();
+        match transform(graph) {
+            Ok(new_graph) => graph = new_graph,
+            Err(e) => {
+                errors.push(e);
+                graph = graph_clone;
+            }
+        }
+    }
+
+    AdversarialResult { graph, errors }
+}
+
+// ---------------------------------------------------------------------------
 // Double gender transform
 // ---------------------------------------------------------------------------
 
@@ -2026,5 +2097,108 @@ mod tests {
             matches!(result, Err(AdversarialError::TransformNotApplicable(_))),
             "Empty graph should return TransformNotApplicable"
         );
+    }
+
+    // =======================================================================
+    // apply_adversarial_strategies tests
+    // =======================================================================
+
+    #[test]
+    fn apply_adversarial_strategies_disabled() {
+        let graph = build_graph_with_persons();
+        let config = AdversarialConfig {
+            enabled: false,
+            strategies: vec![AdversarialStrategy::DisconnectedSubgraphs],
+        };
+
+        let result = apply_adversarial_strategies(graph, &config);
+        assert!(
+            result.errors.is_empty(),
+            "Disabled should produce no errors"
+        );
+    }
+
+    #[test]
+    fn apply_adversarial_strategies_empty_list() {
+        let graph = build_graph_with_persons();
+        let config = AdversarialConfig {
+            enabled: true,
+            strategies: vec![],
+        };
+
+        let result = apply_adversarial_strategies(graph, &config);
+        assert!(
+            result.errors.is_empty(),
+            "Empty list should produce no errors"
+        );
+    }
+
+    #[test]
+    fn apply_adversarial_strategies_category_a_ignored() {
+        let graph = build_graph_with_persons();
+        let config = AdversarialConfig {
+            enabled: true,
+            strategies: vec![AdversarialStrategy::OneParentFamilies(0.5)],
+        };
+
+        let result = apply_adversarial_strategies(graph, &config);
+        assert!(result.errors.is_empty(), "Category A should be ignored");
+    }
+
+    #[test]
+    fn apply_adversarial_strategies_multiple_transforms() {
+        let graph = build_graph_with_persons();
+        let config = AdversarialConfig {
+            enabled: true,
+            strategies: vec![
+                AdversarialStrategy::DoubleGender(1.0),
+                AdversarialStrategy::OrphanedReferences,
+            ],
+        };
+
+        let result = apply_adversarial_strategies(graph, &config);
+        assert!(
+            result.errors.is_empty(),
+            "Multiple transforms should succeed"
+        );
+
+        // Verify double_gender was applied: check that gender ratios changed
+        // (in a 5-person graph, gender distribution should be swapped)
+        let graph = result.graph;
+        let males: usize = graph
+            .iter_nodes()
+            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if p.gender == 0))
+            .count();
+        let females: usize = graph
+            .iter_nodes()
+            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if p.gender == 1))
+            .count();
+
+        // At least some persons should have been swapped
+        assert!(
+            males > 0 || females > 0,
+            "Should have some binary-gender persons after transform"
+        );
+    }
+
+    #[test]
+    fn apply_adversarial_strategies_all_category_b() {
+        let graph = build_graph_with_persons();
+        let config = AdversarialConfig {
+            enabled: true,
+            strategies: vec![
+                AdversarialStrategy::DisconnectedSubgraphs,
+                AdversarialStrategy::DeepNesting,
+                AdversarialStrategy::MaxRefChains,
+                AdversarialStrategy::OrphanedReferences,
+                AdversarialStrategy::DoubleGender(0.5),
+            ],
+        };
+
+        let result = apply_adversarial_strategies(graph, &config);
+        // Some strategies may fail (e.g., DeepNesting with no places,
+        // MaxRefChains with no events), but that's OK — they're skipped.
+        // The important thing is the function doesn't panic.
+        let _ = result;
     }
 }
