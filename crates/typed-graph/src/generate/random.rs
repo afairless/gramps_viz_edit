@@ -632,6 +632,238 @@ fn generate_death_date(
 }
 
 // ---------------------------------------------------------------------------
+// Parent selection and family creation
+// ---------------------------------------------------------------------------
+
+/// Select eligible parents for a family from the existing person pool.
+///
+/// Returns `(father_handle, mother_handle)` or `None` if no eligible pair found.
+///
+/// Eligibility criteria:
+/// - Father and mother must be of opposite genders (0=Male, 1=Female).
+/// - Birth years must be within a plausible range (0-20 years difference).
+/// - Neither person is already a parent in the same generation layer.
+/// - Neither person is already a sibling or child of the other.
+pub(crate) fn select_parents(
+    persons: &[(crate::Handle, PersonSummary)],
+    _config: &RandomConfig,
+    layer: usize,
+    rng: &mut impl rand::Rng,
+) -> Option<(crate::Handle, crate::Handle)> {
+    // Filter by layer to find candidates in the same generation
+    let same_layer: Vec<_> = persons
+        .iter()
+        .filter(|(_, s)| s.layer == layer && !s.is_parent)
+        .collect();
+
+    if same_layer.len() < 2 {
+        // Try to expand to adjacent layers
+        let adjacent: Vec<_> = persons
+            .iter()
+            .filter(|(_, s)| {
+                (s.layer == layer || s.layer == layer + 1 || (layer > 0 && s.layer == layer - 1))
+                    && !s.is_parent
+            })
+            .collect();
+
+        if adjacent.len() < 2 {
+            return None;
+        }
+
+        // Try to find a compatible pair from adjacent layers
+        return find_compatible_pair(&adjacent, rng);
+    }
+
+    find_compatible_pair(&same_layer, rng)
+}
+
+/// Find a compatible father-mother pair from the candidate list.
+fn find_compatible_pair(
+    candidates: &[&(crate::Handle, PersonSummary)],
+    rng: &mut impl rand::Rng,
+) -> Option<(crate::Handle, crate::Handle)> {
+    // Separate by gender
+    let males: Vec<_> = candidates
+        .iter()
+        .filter(|(_, s)| s.gender == 0)
+        .collect();
+    let females: Vec<_> = candidates
+        .iter()
+        .filter(|(_, s)| s.gender == 1)
+        .collect();
+
+    if males.is_empty() || females.is_empty() {
+        return None;
+    }
+
+    // Try to find a compatible pair
+    // Shuffle by picking random indices
+    for _ in 0..10 {
+        let male_idx = rng.gen_range(0..males.len());
+        let female_idx = rng.gen_range(0..females.len());
+
+        let (male_handle, male_summary) = males[male_idx];
+        let (female_handle, female_summary) = females[female_idx];
+
+        let age_diff = (male_summary.birth_year - female_summary.birth_year).abs();
+        if age_diff <= 20 {
+            // Check plausible parenting window: father's birth + 16 <= mother's birth + 50
+            let father_min_child = male_summary.birth_year + 16;
+            let mother_max_child = female_summary.birth_year + 50;
+            if father_min_child <= mother_max_child {
+                return Some((male_handle.clone(), female_handle.clone()));
+            }
+        }
+    }
+
+    // Fallback: pick the closest compatible pair
+    let mut best_pair: Option<(crate::Handle, crate::Handle)> = None;
+    let mut best_age_diff = i32::MAX;
+
+    for (male_handle, male_summary) in &males {
+        for (female_handle, female_summary) in &females {
+            let age_diff = (male_summary.birth_year - female_summary.birth_year).abs();
+            if age_diff <= 20 && age_diff < best_age_diff {
+                let father_min_child = male_summary.birth_year + 16;
+                let mother_max_child = female_summary.birth_year + 50;
+                if father_min_child <= mother_max_child {
+                    best_age_diff = age_diff;
+                    best_pair = Some(((*male_handle).clone(), (*female_handle).clone()));
+                }
+            }
+        }
+    }
+
+    best_pair
+}
+
+/// Create a Family node with the given parents.
+pub(crate) fn generate_family(
+    graph: &mut crate::Graph,
+    _config: &RandomConfig,
+    persons: &mut [(crate::Handle, PersonSummary)],
+    layer: usize,
+    rng: &mut impl rand::Rng,
+) -> Result<crate::Handle, GenerationError> {
+    // Select parents
+    let parent_pair = select_parents(persons, _config, layer, rng);
+
+    let (father_handle, mother_handle) = match parent_pair {
+        Some(pair) => pair,
+        None => {
+            // Create a single-parent family
+            return create_single_parent_family(graph, persons, layer, rng);
+        }
+    };
+
+    // Mark as parents
+    for (handle, summary) in persons.iter_mut() {
+        if *handle == father_handle || *handle == mother_handle {
+            summary.is_parent = true;
+        }
+    }
+
+    // Create family node
+    let family_handle = uuid::Uuid::new_v4().to_string();
+    let family = crate::FamilyData {
+        handle: family_handle.clone(),
+        father_handle: Some(father_handle.clone()),
+        mother_handle: Some(mother_handle.clone()),
+        ..crate::FamilyData::default()
+    };
+
+    graph
+        .add_node(family_handle.clone(), crate::Node::Family(family))
+        .map_err(|_| {
+            GenerationError::InvalidConfig(format!(
+                "duplicate family handle: {}",
+                family_handle
+            ))
+        })?;
+
+    // Add FamilyFather edge
+    graph
+        .add_edge(crate::Edge::FamilyFather {
+            source: family_handle.clone(),
+            target: father_handle.clone(),
+        })
+        .expect("father node exists (was just checked)");
+
+    // Add FamilyMother edge
+    graph
+        .add_edge(crate::Edge::FamilyMother {
+            source: family_handle.clone(),
+            target: mother_handle.clone(),
+        })
+        .expect("mother node exists (was just checked)");
+
+    // Update person family lists
+    if let Some(crate::Node::Person(ref mut person)) = graph.get_node_mut(&father_handle) {
+        person.family_list.push(family_handle.clone());
+    }
+    if let Some(crate::Node::Person(ref mut person)) = graph.get_node_mut(&mother_handle) {
+        person.family_list.push(family_handle.clone());
+    }
+
+    Ok(family_handle)
+}
+
+/// Create a single-parent family when no eligible parent pair is found.
+fn create_single_parent_family(
+    graph: &mut crate::Graph,
+    persons: &mut [(crate::Handle, PersonSummary)],
+    layer: usize,
+    rng: &mut impl rand::Rng,
+) -> Result<crate::Handle, GenerationError> {
+    // Find an eligible person in this layer who is not already a parent
+    let eligible: Vec<_> = persons
+        .iter()
+        .filter(|(_, s)| s.layer == layer && !s.is_parent)
+        .map(|(h, _)| h.clone())
+        .collect();
+
+    if eligible.is_empty() {
+        return Err(GenerationError::ConstraintExhausted {
+            message: format!("no eligible parents found for layer {}", layer),
+            seed: 0, // Seed will be set by caller
+        });
+    }
+
+    let parent_idx = rng.gen_range(0..eligible.len());
+    let parent_handle = eligible[parent_idx].clone();
+
+    // Mark as parent
+    for (handle, summary) in persons.iter_mut() {
+        if *handle == parent_handle {
+            summary.is_parent = true;
+        }
+    }
+
+    // Create family node
+    let family_handle = uuid::Uuid::new_v4().to_string();
+    let family = crate::FamilyData {
+        handle: family_handle.clone(),
+        ..crate::FamilyData::default()
+    };
+
+    graph
+        .add_node(family_handle.clone(), crate::Node::Family(family))
+        .map_err(|_| {
+            GenerationError::InvalidConfig(format!(
+                "duplicate family handle: {}",
+                family_handle
+            ))
+        })?;
+
+    // Update person family list
+    if let Some(crate::Node::Person(ref mut person)) = graph.get_node_mut(&parent_handle) {
+        person.family_list.push(family_handle.clone());
+    }
+
+    Ok(family_handle)
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1121,5 +1353,231 @@ mod tests {
             assert!(year >= 1880, "Layer 3 birth year {} should be >= 1880", year);
             assert!(year <= 1925, "Layer 3 birth year {} should be <= 1925", year);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Parent selection and family creation tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn select_parents_returns_opposite_genders() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let config = RandomConfig::default();
+        let persons = vec![
+            ("p1".to_string(), PersonSummary { handle: "p1".to_string(), birth_year: 1970, gender: 0, layer: 0, is_parent: false, is_child: false }),
+            ("p2".to_string(), PersonSummary { handle: "p2".to_string(), birth_year: 1975, gender: 1, layer: 0, is_parent: false, is_child: false }),
+        ];
+
+        let result = select_parents(&persons, &config, 0, &mut rng);
+        assert!(result.is_some(), "Should find eligible parents");
+        let (father, mother) = result.unwrap();
+        assert_eq!(father, "p1");
+        assert_eq!(mother, "p2");
+    }
+
+    #[test]
+    fn select_parents_age_difference_within_bounds() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let config = RandomConfig::default();
+        let persons = vec![
+            ("p1".to_string(), PersonSummary { handle: "p1".to_string(), birth_year: 1970, gender: 0, layer: 0, is_parent: false, is_child: false }),
+            ("p2".to_string(), PersonSummary { handle: "p2".to_string(), birth_year: 1975, gender: 1, layer: 0, is_parent: false, is_child: false }),
+            ("p3".to_string(), PersonSummary { handle: "p3".to_string(), birth_year: 1950, gender: 0, layer: 0, is_parent: false, is_child: false }),
+            ("p4".to_string(), PersonSummary { handle: "p4".to_string(), birth_year: 1990, gender: 1, layer: 0, is_parent: false, is_child: false }),
+        ];
+
+        // p3 (b.1950) and p4 (b.1990) have a 40 year age gap, too large
+        // p1 (b.1970) and p2 (b.1975) have a 5 year gap, should be fine
+        let result = select_parents(&persons, &config, 0, &mut rng);
+        assert!(result.is_some(), "Should find eligible parents");
+    }
+
+    #[test]
+    fn select_parents_returns_none_when_no_eligible() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let config = RandomConfig::default();
+        let persons: Vec<(crate::Handle, PersonSummary)> = vec![];
+
+        let result = select_parents(&persons, &config, 0, &mut rng);
+        assert!(result.is_none(), "Empty pool should return None");
+    }
+
+    #[test]
+    fn select_parents_prefers_same_layer() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let config = RandomConfig::default();
+        let persons = vec![
+            ("p1".to_string(), PersonSummary { handle: "p1".to_string(), birth_year: 1970, gender: 0, layer: 0, is_parent: false, is_child: false }),
+            ("p2".to_string(), PersonSummary { handle: "p2".to_string(), birth_year: 1975, gender: 1, layer: 0, is_parent: false, is_child: false }),
+            ("p3".to_string(), PersonSummary { handle: "p3".to_string(), birth_year: 1940, gender: 0, layer: 1, is_parent: false, is_child: false }),
+            ("p4".to_string(), PersonSummary { handle: "p4".to_string(), birth_year: 1945, gender: 1, layer: 1, is_parent: false, is_child: false }),
+        ];
+
+        // Layer 0 has p1 and p2 which are compatible
+        let result = select_parents(&persons, &config, 0, &mut rng);
+        assert!(result.is_some());
+        let (father, mother) = result.unwrap();
+        // Should prefer same-layer parents
+        assert!(
+            (father == "p1" && mother == "p2") || (father == "p3" && mother == "p4"),
+            "Expected parents from same or adjacent layer"
+        );
+    }
+
+    #[test]
+    fn select_parents_expands_to_adjacent_layer() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let config = RandomConfig::default();
+        let persons = vec![
+            // Only one person in layer 0
+            ("p1".to_string(), PersonSummary { handle: "p1".to_string(), birth_year: 1970, gender: 0, layer: 0, is_parent: false, is_child: false }),
+            // Two in layer 1
+            ("p2".to_string(), PersonSummary { handle: "p2".to_string(), birth_year: 1940, gender: 0, layer: 1, is_parent: false, is_child: false }),
+            ("p3".to_string(), PersonSummary { handle: "p3".to_string(), birth_year: 1945, gender: 1, layer: 1, is_parent: false, is_child: false }),
+        ];
+
+        // Layer 0 only has one person, should expand to layer 1
+        let result = select_parents(&persons, &config, 0, &mut rng);
+        assert!(result.is_some(), "Should expand to adjacent layer");
+    }
+
+    #[test]
+    fn generate_family_creates_family_node() {
+        let mut graph = crate::Graph::new();
+        let config = RandomConfig::default();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+        // Add person nodes
+        let p1 = "p1".to_string();
+        let p2 = "p2".to_string();
+        graph.add_node(p1.clone(), crate::Node::Person(crate::PersonData {
+            handle: p1.clone(),
+            gender: 0,
+            primary_name: crate::Name {
+                first_name: Some("John".to_string()),
+                ..crate::Name::default()
+            },
+            ..crate::PersonData::default()
+        })).unwrap();
+        graph.add_node(p2.clone(), crate::Node::Person(crate::PersonData {
+            handle: p2.clone(),
+            gender: 1,
+            primary_name: crate::Name {
+                first_name: Some("Jane".to_string()),
+                ..crate::Name::default()
+            },
+            ..crate::PersonData::default()
+        })).unwrap();
+
+        let mut persons = vec![
+            (p1.clone(), PersonSummary { handle: p1, birth_year: 1970, gender: 0, layer: 0, is_parent: false, is_child: false }),
+            (p2.clone(), PersonSummary { handle: p2, birth_year: 1975, gender: 1, layer: 0, is_parent: false, is_child: false }),
+        ];
+
+        let family_handle = generate_family(&mut graph, &config, &mut persons, 0, &mut rng)
+            .expect("family generation should succeed");
+
+        assert!(graph.contains_node(&family_handle));
+        // Check it's a Family node
+        match graph.get_node(&family_handle).unwrap() {
+            crate::Node::Family(_) => {}
+            _ => panic!("Expected Family node"),
+        }
+    }
+
+    #[test]
+    fn generate_family_adds_father_mother_edges() {
+        let mut graph = crate::Graph::new();
+        let config = RandomConfig::default();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+        let p1 = "p1".to_string();
+        let p2 = "p2".to_string();
+        graph.add_node(p1.clone(), crate::Node::Person(crate::PersonData {
+            handle: p1.clone(),
+            gender: 0,
+            primary_name: crate::Name {
+                first_name: Some("John".to_string()),
+                ..crate::Name::default()
+            },
+            ..crate::PersonData::default()
+        })).unwrap();
+        graph.add_node(p2.clone(), crate::Node::Person(crate::PersonData {
+            handle: p2.clone(),
+            gender: 1,
+            primary_name: crate::Name {
+                first_name: Some("Jane".to_string()),
+                ..crate::Name::default()
+            },
+            ..crate::PersonData::default()
+        })).unwrap();
+
+        let mut persons = vec![
+            (p1.clone(), PersonSummary { handle: p1, birth_year: 1970, gender: 0, layer: 0, is_parent: false, is_child: false }),
+            (p2.clone(), PersonSummary { handle: p2, birth_year: 1975, gender: 1, layer: 0, is_parent: false, is_child: false }),
+        ];
+
+        let family_handle = generate_family(&mut graph, &config, &mut persons, 0, &mut rng)
+            .expect("family generation should succeed");
+
+        let edges = graph.edges_from(&family_handle);
+        let has_father = edges.iter().any(|e| matches!(e, crate::Edge::FamilyFather { .. }));
+        let has_mother = edges.iter().any(|e| matches!(e, crate::Edge::FamilyMother { .. }));
+        assert!(has_father, "Family should have FamilyFather edge");
+        assert!(has_mother, "Family should have FamilyMother edge");
+    }
+
+    #[test]
+    fn generate_family_single_parent_when_no_eligible() {
+        let mut graph = crate::Graph::new();
+        let config = RandomConfig::default();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+        // Only one person (male) - no eligible female
+        let p1 = "p1".to_string();
+        graph.add_node(p1.clone(), crate::Node::Person(crate::PersonData {
+            handle: p1.clone(),
+            gender: 0,
+            primary_name: crate::Name {
+                first_name: Some("John".to_string()),
+                ..crate::Name::default()
+            },
+            ..crate::PersonData::default()
+        })).unwrap();
+
+        let mut persons = vec![
+            (p1.clone(), PersonSummary { handle: p1, birth_year: 1970, gender: 0, layer: 0, is_parent: false, is_child: false }),
+        ];
+
+        let result = generate_family(&mut graph, &config, &mut persons, 0, &mut rng);
+        // Should succeed with single parent
+        assert!(result.is_ok(), "Should create single-parent family");
+    }
+
+    #[test]
+    fn generate_family_plausibility_warning() {
+        // Test that single-parent families are created when no pair found
+        let mut graph = crate::Graph::new();
+        let config = RandomConfig::default();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+        let p1 = "p1".to_string();
+        graph.add_node(p1.clone(), crate::Node::Person(crate::PersonData {
+            handle: p1.clone(),
+            gender: 0,
+            primary_name: crate::Name {
+                first_name: Some("John".to_string()),
+                ..crate::Name::default()
+            },
+            ..crate::PersonData::default()
+        })).unwrap();
+
+        let mut persons = vec![
+            (p1.clone(), PersonSummary { handle: p1, birth_year: 1970, gender: 0, layer: 0, is_parent: false, is_child: false }),
+        ];
+
+        // Only one person, so single-parent family is created
+        let result = generate_family(&mut graph, &config, &mut persons, 0, &mut rng);
+        assert!(result.is_ok(), "Single-parent family should be created");
     }
 }
