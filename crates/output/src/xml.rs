@@ -4,6 +4,13 @@
 //! and produces Gramps XML (`.gramps` format) following the RelaxNG schema.
 
 use crate::serialization_map::SerializationMap;
+use crate::serialization_map::XmlChild;
+use crate::serialization_map::XmlChildSource;
+use crate::serialization_map::XmlTypeInfo;
+use typed_graph::Edge;
+use typed_graph::Graph;
+use typed_graph::Handle;
+use typed_graph::Node;
 
 /// Errors that can occur during XML serialization.
 #[derive(Clone, Debug, PartialEq)]
@@ -31,7 +38,11 @@ impl std::fmt::Display for SerializationError {
                 write!(f, "unsupported node type: {}", t)
             }
             SerializationError::MissingRequiredField { handle, field } => {
-                write!(f, "missing required field '{}' on node '{}'", field, handle)
+                write!(
+                    f,
+                    "missing required field '{}' on node '{}'",
+                    field, handle
+                )
             }
         }
     }
@@ -51,13 +62,13 @@ impl From<std::io::Error> for SerializationError {
 /// names, walks the graph's nodes grouped by type, and emits XML following the
 /// Gramps RelaxNG schema.
 pub struct GraphXmlWriter {
-    _map: SerializationMap,
+    map: SerializationMap,
 }
 
 impl GraphXmlWriter {
     /// Create a new `GraphXmlWriter` with the given [`SerializationMap`].
     pub fn new(map: SerializationMap) -> Self {
-        GraphXmlWriter { _map: map }
+        GraphXmlWriter { map }
     }
 
     /// Serialize the graph to the given writer.
@@ -66,74 +77,1315 @@ impl GraphXmlWriter {
     /// writing to the output fails.
     pub fn write(
         &self,
-        _graph: &typed_graph::Graph,
+        graph: &Graph,
         writer: &mut impl std::io::Write,
     ) -> Result<(), SerializationError> {
-        // Placeholder: write a minimal XML declaration
+        // Write XML declaration
         writeln!(writer, r#"<?xml version="1.0" encoding="UTF-8"?>"#)?;
         writeln!(
             writer,
             r#"<database xmlns="http://gramps-project.org/xml/1.7.2/">"#
         )?;
-        writeln!(writer, "  <!-- output crate scaffold -->")?;
+
+        // Write each section in order
+        for section_name in &self.map.section_order {
+            self.write_section(graph, writer, section_name)?;
+        }
+
         writeln!(writer, "</database>")?;
         Ok(())
     }
+
+    /// Write a single section (e.g., `<people>...</people>`) for the given type.
+    fn write_section(
+        &self,
+        graph: &Graph,
+        writer: &mut impl std::io::Write,
+        section_name: &str,
+    ) -> Result<(), SerializationError> {
+        // Find the type whose section_name matches
+        let type_info: Option<&XmlTypeInfo> = self
+            .map
+            .type_map
+            .values()
+            .find(|info| info.section_name == section_name);
+
+        let type_info = match type_info {
+            Some(info) => info,
+            None => return Ok(()), // Unknown section, skip
+        };
+
+        // Collect nodes of this type
+        let mut nodes: Vec<(Handle, Node)> = graph
+            .iter_nodes()
+            .filter(|(_, node)| node_type_name(node) == Some(&type_info.element_name))
+            .map(|(h, n)| (h.clone(), n.clone()))
+            .collect::<Vec<_>>();
+
+        // Sort by handle for deterministic output
+        nodes.sort_by(|a, b| a.0.cmp(&b.0));
+
+        if nodes.is_empty() {
+            return Ok(()); // Skip empty sections
+        }
+
+        // Open section element
+        write!(writer, "  <{}>", section_name)?;
+
+        // Write each node
+        for (handle, node) in &nodes {
+            write!(writer, "\n    ")?;
+            self.write_node_element(graph, writer, handle, node, type_info)?;
+        }
+
+        writeln!(writer, "\n  </{}>", section_name)?;
+        Ok(())
+    }
+
+    /// Write a single node as an XML element with attributes and children.
+    fn write_node_element(
+        &self,
+        graph: &Graph,
+        writer: &mut impl std::io::Write,
+        handle: &str,
+        node: &Node,
+        type_info: &XmlTypeInfo,
+    ) -> Result<(), SerializationError> {
+        // Write opening tag with attributes
+        write!(writer, "<{}", type_info.element_name)?;
+
+        for attr in &type_info.attributes {
+            if let Some(value) = self.get_field_value(node, &attr.field) {
+                write!(writer, " {}=\"{}\"", attr.attr_name, escape_xml(&value))?;
+            }
+        }
+
+        // Check if there are children to write
+        let has_children = !type_info.children.is_empty()
+            && self.has_children_for_node(graph, handle, node, &type_info.children);
+
+        if has_children {
+            writeln!(writer, ">")?;
+            self.write_children(graph, writer, handle, node, &type_info.children)?;
+            write!(writer, "    </{}>", type_info.element_name)?;
+        } else {
+            write!(writer, "/>")?;
+        }
+
+        Ok(())
+    }
+
+    /// Check if a node has any actual children to write.
+    fn has_children_for_node(
+        &self,
+        graph: &Graph,
+        handle: &str,
+        node: &Node,
+        children: &[XmlChild],
+    ) -> bool {
+        let handle_owned = handle.to_string();
+        for child in children {
+            match &child.source {
+                XmlChildSource::InlineStruct(field_name) => {
+                    if self.has_inline_struct_value(node, field_name) {
+                        return true;
+                    }
+                }
+                XmlChildSource::Array(field_name) => {
+                    if self.has_array_items(node, field_name) {
+                        return true;
+                    }
+                }
+                XmlChildSource::Edge(edge_name) => {
+                    let edges_from = graph.edges_from(&handle_owned);
+                    if edges_from
+                        .iter()
+                        .any(|e| edge_variant_name(e) == Some(edge_name))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Check if an inline struct field has a value.
+    fn has_inline_struct_value(&self, node: &Node, field_name: &str) -> bool {
+        match field_name {
+            "primary_name" => true, // Always present on Person
+            "event_type" => true,   // Always present on Event
+            "date" => {
+                matches!(node, Node::Event(_)) && {
+                    if let Node::Event(e) = node { e.date.is_some() } else { false }
+                }
+            }
+            "description" => {
+                (matches!(node, Node::Event(_)) && {
+                    if let Node::Event(e) = node { e.description.is_some() } else { false }
+                }) || (matches!(node, Node::Media(_)) && {
+                    if let Node::Media(m) = node { m.desc.is_some() } else { false }
+                })
+            }
+            "name" => matches!(node, Node::Tag(_) | Node::Repository(_)),
+            "color" => {
+                matches!(node, Node::Tag(_)) && {
+                    if let Node::Tag(t) = node { t.color.is_some() } else { false }
+                }
+            }
+            "priority" => {
+                matches!(node, Node::Tag(_)) && {
+                    if let Node::Tag(t) = node { t.priority.is_some() } else { false }
+                }
+            }
+            "confidence" => {
+                matches!(node, Node::Citation(_)) && {
+                    if let Node::Citation(c) = node { c.confidence.is_some() } else { false }
+                }
+            }
+            "title" => matches!(node, Node::Source(_) | Node::Place(_)),
+            "abbrev" => {
+                matches!(node, Node::Source(_)) && {
+                    if let Node::Source(s) = node { s.author.is_some() || s.pubinfo.is_some() } else { false }
+                }
+            }
+            "file" => {
+                matches!(node, Node::Media(_)) && {
+                    if let Node::Media(m) = node { m.path.is_some() } else { false }
+                }
+            }
+            "text" => matches!(node, Node::Note(_)),
+            "format" => {
+                matches!(node, Node::Note(_)) && {
+                    if let Node::Note(n) = node { n.format.is_some() } else { false }
+                }
+            }
+            _ => false,
+        }
+    }
+
+    /// Check if an array field has items.
+    fn has_array_items(&self, node: &Node, field_name: &str) -> bool {
+        match field_name {
+            "alternate_names" => {
+                matches!(node, Node::Person(_)) && {
+                    if let Node::Person(p) = node { !p.alternate_names.is_empty() } else { false }
+                }
+            }
+            _ => false,
+        }
+    }
+
+    /// Write child elements for a node.
+    fn write_children(
+        &self,
+        graph: &Graph,
+        writer: &mut impl std::io::Write,
+        handle: &str,
+        node: &Node,
+        children: &[XmlChild],
+    ) -> Result<(), SerializationError> {
+        for child in children {
+            match &child.source {
+                XmlChildSource::InlineStruct(field_name) => {
+                    self.write_inline_struct(graph, writer, handle, node, child, field_name)?;
+                }
+                XmlChildSource::Array(field_name) => {
+                    self.write_array_items(graph, writer, handle, node, child, field_name)?;
+                }
+                XmlChildSource::Edge(edge_name) => {
+                    self.write_edge_items(graph, writer, handle, child, edge_name)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Write an inline struct field as child elements.
+    fn write_inline_struct(
+        &self,
+        _graph: &Graph,
+        writer: &mut impl std::io::Write,
+        _handle: &str,
+        node: &Node,
+        child: &XmlChild,
+        field_name: &str,
+    ) -> Result<(), SerializationError> {
+        match field_name {
+            // Person: primary_name is a Name struct
+            "primary_name" => {
+                if let Node::Person(p) = node {
+                    self.write_name_element(writer, &child.element_name, &p.primary_name)?;
+                }
+            }
+            // Event: event_type is an EventType enum
+            "event_type" => {
+                if let Node::Event(e) = node {
+                    let type_str = format!("{:?}", e.event_type);
+                    writeln!(
+                        writer,
+                        "      <{}><type>{}</type></{}>",
+                        child.element_name,
+                        escape_xml(&type_str),
+                        child.element_name
+                    )?;
+                }
+            }
+            // Event: date is an Option<DateValue>
+            "date" => {
+                if let Node::Event(e) = node {
+                    self.write_date_element(writer, &child.element_name, &e.date)?;
+                }
+            }
+            // Event or Media: description
+            "description" => {
+                if let Node::Event(e) = node {
+                    if let Some(ref desc) = e.description {
+                        writeln!(
+                            writer,
+                            "      <{}>{}</{}>",
+                            child.element_name,
+                            escape_xml(desc),
+                            child.element_name
+                        )?;
+                    }
+                }
+                if let Node::Media(m) = node {
+                    if let Some(ref desc) = m.desc {
+                        writeln!(
+                            writer,
+                            "      <{}>{}</{}>",
+                            child.element_name,
+                            escape_xml(desc),
+                            child.element_name
+                        )?;
+                    }
+                }
+            }
+            // Tag: name or Repository: name
+            "name" => {
+                if let Node::Tag(t) = node {
+                    writeln!(
+                        writer,
+                        "      <{}>{}</{}>",
+                        child.element_name,
+                        escape_xml(&t.name),
+                        child.element_name
+                    )?;
+                } else if let Node::Repository(r) = node {
+                    if let Some(ref name) = r.name {
+                        writeln!(
+                            writer,
+                            "      <{}>{}</{}>",
+                            child.element_name,
+                            escape_xml(name),
+                            child.element_name
+                        )?;
+                    }
+                }
+            }
+            // Tag: color (optional)
+            "color" => {
+                if let Node::Tag(t) = node {
+                    if let Some(ref color) = t.color {
+                        writeln!(
+                            writer,
+                            "      <{}>{}</{}>",
+                            child.element_name,
+                            escape_xml(color),
+                            child.element_name
+                        )?;
+                    }
+                }
+            }
+            // Tag: priority (optional)
+            "priority" => {
+                if let Node::Tag(t) = node {
+                    if let Some(priority) = t.priority {
+                        writeln!(
+                            writer,
+                            "      <{}>{}</{}>",
+                            child.element_name,
+                            priority,
+                            child.element_name
+                        )?;
+                    }
+                }
+            }
+            // Citation: confidence (optional)
+            "confidence" => {
+                if let Node::Citation(c) = node {
+                    if let Some(conf) = c.confidence {
+                        writeln!(
+                            writer,
+                            "      <{}>{}</{}>",
+                            child.element_name,
+                            conf,
+                            child.element_name
+                        )?;
+                    }
+                }
+            }
+            // Source: title (required)
+            "title" => {
+                if let Node::Source(s) = node {
+                    writeln!(
+                        writer,
+                        "      <stitle>{}</stitle>",
+                        escape_xml(&s.title)
+                    )?;
+                }
+                // Place: name is a Location struct
+                if let Node::Place(p) = node {
+                    writeln!(
+                        writer,
+                        "      <ptitle>{}</ptitle>",
+                        escape_xml(p.name.city.as_deref().unwrap_or(""))
+                    )?;
+                }
+            }
+            // Source: abbrev (author or pubinfo)
+            "abbrev" => {
+                if let Node::Source(s) = node {
+                    let abbrev = s
+                        .author
+                        .as_deref()
+                        .or(s.pubinfo.as_deref())
+                        .unwrap_or("");
+                    if !abbrev.is_empty() {
+                        writeln!(
+                            writer,
+                            "      <sabbrev>{}</sabbrev>",
+                            escape_xml(abbrev)
+                        )?;
+                    }
+                }
+            }
+            // Media: file path
+            "file" => {
+                if let Node::Media(m) = node {
+                    if let Some(ref path) = m.path {
+                        writeln!(
+                            writer,
+                            "      <file>{}</file>",
+                            escape_xml(path)
+                        )?;
+                    }
+                }
+            }
+            // Note: text (required)
+            "text" => {
+                if let Node::Note(n) = node {
+                    writeln!(
+                        writer,
+                        "      <text>{}</text>",
+                        escape_xml(&n.text)
+                    )?;
+                }
+            }
+            // Note: format (optional)
+            "format" => {
+                if let Node::Note(n) = node {
+                    if let Some(fmt) = n.format {
+                        writeln!(
+                            writer,
+                            "      <format>{}</format>",
+                            fmt
+                        )?;
+                    }
+                }
+            }
+            // Repository: name (optional) — handled by "name" above
+            _ => {
+                // Unknown inline struct field, skip
+            }
+        }
+        Ok(())
+    }
+
+    /// Write a Name struct as an XML element.
+    fn write_name_element(
+        &self,
+        writer: &mut impl std::io::Write,
+        element_name: &str,
+        name: &typed_graph::Name,
+    ) -> Result<(), SerializationError> {
+        let first = name.first_name.as_deref().unwrap_or("");
+        let surname = name
+            .surname_list
+            .first()
+            .and_then(|s| s.surname.as_deref())
+            .unwrap_or("");
+        writeln!(
+            writer,
+            "      <{}><first>{}</first><surname>{}</surname></{}>",
+            element_name,
+            escape_xml(first),
+            escape_xml(surname),
+            element_name
+        )?;
+        Ok(())
+    }
+
+    /// Write a DateValue as an XML element.
+    fn write_date_element(
+        &self,
+        writer: &mut impl std::io::Write,
+        element_name: &str,
+        date: &Option<typed_graph::DateValue>,
+    ) -> Result<(), SerializationError> {
+        if let Some(ref d) = date {
+            let date_str = if let (Some(month), Some(day)) = (d.month, d.day) {
+                format!("{:04}-{:02}-{:02}", d.year, month, day)
+            } else if let Some(month) = d.month {
+                format!("{:04}-{:02}", d.year, month)
+            } else {
+                format!("{:04}", d.year)
+            };
+            writeln!(
+                writer,
+                "      <{} val=\"{}\"/>",
+                element_name,
+                escape_xml(&date_str)
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Write array items as child elements.
+    fn write_array_items(
+        &self,
+        _graph: &Graph,
+        writer: &mut impl std::io::Write,
+        _handle: &str,
+        node: &Node,
+        child: &XmlChild,
+        _field_name: &str,
+    ) -> Result<(), SerializationError> {
+        match child.element_name.as_str() {
+            "name" => {
+                // alternate_names
+                if let Node::Person(p) = node {
+                    for alt_name in &p.alternate_names {
+                        self.write_name_element(writer, "name", alt_name)?;
+                    }
+                }
+            }
+            _ => {
+                // Unknown array, skip
+            }
+        }
+        Ok(())
+    }
+
+    /// Write edge items as child elements.
+    fn write_edge_items(
+        &self,
+        graph: &Graph,
+        writer: &mut impl std::io::Write,
+        handle: &str,
+        child: &XmlChild,
+        edge_name: &str,
+    ) -> Result<(), SerializationError> {
+        let handle_owned = handle.to_string();
+        let edges_from = graph.edges_from(&handle_owned);
+        let matching_edges: Vec<&Edge> = edges_from
+            .iter()
+            .filter(|e| edge_variant_name(e) == Some(edge_name))
+            .copied()
+            .collect();
+
+        if matching_edges.is_empty() {
+            return Ok(());
+        }
+
+        for edge in &matching_edges {
+            let target_handle = edge_target_handle(edge);
+            match child.element_name.as_str() {
+                // --- Simple hlink refs ---
+                "childin" | "parentin" | "father" | "mother" | "place" | "sourceref"
+                | "placeref" => {
+                    writeln!(
+                        writer,
+                        "      <{} hlink=\"{}\"/>",
+                        child.element_name,
+                        escape_xml(&target_handle)
+                    )?;
+                }
+
+                // --- Citation refs ---
+                "citationref" => {
+                    writeln!(
+                        writer,
+                        "      <{} hlink=\"{}\"/>",
+                        child.element_name,
+                        escape_xml(&target_handle)
+                    )?;
+                }
+
+                // --- Note refs ---
+                "noteref" => {
+                    writeln!(
+                        writer,
+                        "      <{} hlink=\"{}\"/>",
+                        child.element_name,
+                        escape_xml(&target_handle)
+                    )?;
+                }
+
+                // --- Media refs ---
+                "mediaref" => {
+                    writeln!(
+                        writer,
+                        "      <{} hlink=\"{}\"/>",
+                        child.element_name,
+                        escape_xml(&target_handle)
+                    )?;
+                }
+
+                // --- Tag refs ---
+                "tagref" => {
+                    writeln!(
+                        writer,
+                        "      <{} hlink=\"{}\"/>",
+                        child.element_name,
+                        escape_xml(&target_handle)
+                    )?;
+                }
+
+                // --- Event refs (with role metadata) ---
+                "eventref" => {
+                    let role = get_edge_role(edge);
+                    writeln!(
+                        writer,
+                        "      <{} hlink=\"{}\"><role>{}</role></{}>",
+                        child.element_name,
+                        escape_xml(&target_handle),
+                        escape_xml(&role),
+                        child.element_name
+                    )?;
+                }
+
+                // --- Child refs (with relation metadata) ---
+                "childref" => {
+                    let rel = get_edge_relation(edge);
+                    writeln!(
+                        writer,
+                        "      <{} hlink=\"{}\" rel=\"{}\"/>",
+                        child.element_name,
+                        escape_xml(&target_handle),
+                        escape_xml(&rel)
+                    )?;
+                }
+
+                // --- Person refs ---
+                "personref" => {
+                    writeln!(
+                        writer,
+                        "      <{} hlink=\"{}\"/>",
+                        child.element_name,
+                        escape_xml(&target_handle)
+                    )?;
+                }
+
+                // --- Repo refs ---
+                "reporef" => {
+                    writeln!(
+                        writer,
+                        "      <{} hlink=\"{}\"/>",
+                        child.element_name,
+                        escape_xml(&target_handle)
+                    )?;
+                }
+
+                _ => {
+                    // Unknown edge element, skip
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Extract a field value from a Node by field name.
+    fn get_field_value(&self, node: &Node, field_name: &str) -> Option<String> {
+        match node {
+            Node::Person(p) => match field_name {
+                "handle" => Some(p.handle.clone()),
+                "gramps_id" => p.gramps_id.clone(),
+                "gender" => Some(p.gender.to_string()),
+                _ => None,
+            },
+            Node::Family(f) => match field_name {
+                "handle" => Some(f.handle.clone()),
+                "gramps_id" => f.gramps_id.clone(),
+                _ => None,
+            },
+            Node::Event(e) => match field_name {
+                "handle" => Some(e.handle.clone()),
+                "gramps_id" => e.gramps_id.clone(),
+                _ => None,
+            },
+            Node::Place(p) => match field_name {
+                "handle" => Some(p.handle.clone()),
+                "gramps_id" => p.gramps_id.clone(),
+                _ => None,
+            },
+            Node::Source(s) => match field_name {
+                "handle" => Some(s.handle.clone()),
+                "gramps_id" => s.gramps_id.clone(),
+                _ => None,
+            },
+            Node::Citation(c) => match field_name {
+                "handle" => Some(c.handle.clone()),
+                "gramps_id" => c.gramps_id.clone(),
+                _ => None,
+            },
+            Node::Repository(r) => match field_name {
+                "handle" => Some(r.handle.clone()),
+                "gramps_id" => r.gramps_id.clone(),
+                _ => None,
+            },
+            Node::Media(m) => match field_name {
+                "handle" => Some(m.handle.clone()),
+                "gramps_id" => m.gramps_id.clone(),
+                _ => None,
+            },
+            Node::Note(n) => match field_name {
+                "handle" => Some(n.handle.clone()),
+                "gramps_id" => n.gramps_id.clone(),
+                _ => None,
+            },
+            Node::Tag(t) => match field_name {
+                "handle" => Some(t.handle.clone()),
+                "gramps_id" => t.gramps_id.clone(),
+                _ => None,
+            },
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helper functions
+// ---------------------------------------------------------------------------
+
+/// Return the XML element name for a node, based on its type.
+fn node_type_name(node: &Node) -> Option<&'static str> {
+    match node {
+        Node::Person(_) => Some("person"),
+        Node::Family(_) => Some("family"),
+        Node::Event(_) => Some("event"),
+        Node::Place(_) => Some("placeobj"),
+        Node::Source(_) => Some("source"),
+        Node::Citation(_) => Some("citation"),
+        Node::Repository(_) => Some("repository"),
+        Node::Media(_) => Some("object"),
+        Node::Note(_) => Some("note"),
+        Node::Tag(_) => Some("tag"),
+    }
+}
+
+/// Return the edge variant name as a string for lookup in the edge map.
+fn edge_variant_name(edge: &Edge) -> Option<&'static str> {
+    match edge {
+        Edge::PersonFamily { .. } => Some("PersonFamily"),
+        Edge::PersonParentFamily { .. } => Some("PersonParentFamily"),
+        Edge::PersonEventRef { .. } => Some("PersonEventRef"),
+        Edge::FamilyFather { .. } => Some("FamilyFather"),
+        Edge::FamilyMother { .. } => Some("FamilyMother"),
+        Edge::FamilyChildRef { .. } => Some("FamilyChildRef"),
+        Edge::FamilyEventRef { .. } => Some("FamilyEventRef"),
+        Edge::EventPlace { .. } => Some("EventPlace"),
+        Edge::CitationSource { .. } => Some("CitationSource"),
+        Edge::PersonPersonRef { .. } => Some("PersonPersonRef"),
+        Edge::SourceRepoRef { .. } => Some("SourceRepoRef"),
+        Edge::PlacePlaceRef { .. } => Some("PlacePlaceRef"),
+        // Mixin refs (used across multiple types)
+        Edge::CitationRef { .. } => Some("CitationRef"),
+        Edge::NoteRef { .. } => Some("NoteRef"),
+        Edge::MediaRef { .. } => Some("MediaRef"),
+        Edge::TagRef { .. } => Some("TagRef"),
+        // Person-specific edges
+        Edge::PersonCitation { .. } => Some("PersonCitation"),
+        Edge::PersonNote { .. } => Some("PersonNote"),
+        Edge::PersonMediaRef { .. } => Some("PersonMediaRef"),
+        Edge::PersonTag { .. } => Some("PersonTag"),
+        // Event-specific edges
+        Edge::EventCitation { .. } => Some("EventCitation"),
+        Edge::EventNote { .. } => Some("EventNote"),
+        Edge::EventMediaRef { .. } => Some("EventMediaRef"),
+        Edge::EventTag { .. } => Some("EventTag"),
+        // Family-specific edges
+        Edge::FamilyCitation { .. } => Some("FamilyCitation"),
+        Edge::FamilyNote { .. } => Some("FamilyNote"),
+        Edge::FamilyMediaRef { .. } => Some("FamilyMediaRef"),
+        Edge::FamilyTag { .. } => Some("FamilyTag"),
+        // Citation-specific edges
+        Edge::CitationMediaRef { .. } => Some("CitationMediaRef"),
+        Edge::CitationNote { .. } => Some("CitationNote"),
+        Edge::CitationTag { .. } => Some("CitationTag"),
+        // Media-specific edges
+        Edge::MediaCitation { .. } => Some("MediaCitation"),
+        Edge::MediaNote { .. } => Some("MediaNote"),
+        Edge::MediaTag { .. } => Some("MediaTag"),
+        // Note-specific edges
+        Edge::NoteCitation { .. } => Some("NoteCitation"),
+        Edge::NoteTag { .. } => Some("NoteTag"),
+        // Source-specific edges
+        Edge::SourceMediaRef { .. } => Some("SourceMediaRef"),
+        Edge::SourceNote { .. } => Some("SourceNote"),
+        Edge::SourceTag { .. } => Some("SourceTag"),
+        // Place-specific edges
+        Edge::PlaceCitation { .. } => Some("PlaceCitation"),
+        Edge::PlaceMediaRef { .. } => Some("PlaceMediaRef"),
+        Edge::PlaceNote { .. } => Some("PlaceNote"),
+        Edge::PlaceTag { .. } => Some("PlaceTag"),
+        // Repository-specific edges
+        Edge::RepositoryMediaRef { .. } => Some("RepositoryMediaRef"),
+        Edge::RepositoryNote { .. } => Some("RepositoryNote"),
+        Edge::RepositoryTag { .. } => Some("RepositoryTag"),
+        // Tag-specific
+        Edge::TagTag { .. } => Some("TagTag"),
+    }
+}
+
+/// Return the target handle of an edge.
+fn edge_target_handle(edge: &Edge) -> Handle {
+    match edge {
+        Edge::PersonFamily { target, .. } => target.clone(),
+        Edge::PersonParentFamily { target, .. } => target.clone(),
+        Edge::PersonEventRef { target, .. } => target.clone(),
+        Edge::FamilyFather { target, .. } => target.clone(),
+        Edge::FamilyMother { target, .. } => target.clone(),
+        Edge::FamilyChildRef { target, .. } => target.clone(),
+        Edge::FamilyEventRef { target, .. } => target.clone(),
+        Edge::EventPlace { target, .. } => target.clone(),
+        Edge::CitationSource { target, .. } => target.clone(),
+        Edge::PersonPersonRef { target, .. } => target.clone(),
+        Edge::SourceRepoRef { target, .. } => target.clone(),
+        Edge::PlacePlaceRef { target, .. } => target.clone(),
+        Edge::CitationRef { target, .. } => target.clone(),
+        Edge::NoteRef { target, .. } => target.clone(),
+        Edge::MediaRef { target, .. } => target.clone(),
+        Edge::TagRef { target, .. } => target.clone(),
+        Edge::PersonCitation { target, .. } => target.clone(),
+        Edge::PersonNote { target, .. } => target.clone(),
+        Edge::PersonMediaRef { target, .. } => target.clone(),
+        Edge::PersonTag { target, .. } => target.clone(),
+        Edge::EventCitation { target, .. } => target.clone(),
+        Edge::EventNote { target, .. } => target.clone(),
+        Edge::EventMediaRef { target, .. } => target.clone(),
+        Edge::EventTag { target, .. } => target.clone(),
+        Edge::FamilyCitation { target, .. } => target.clone(),
+        Edge::FamilyNote { target, .. } => target.clone(),
+        Edge::FamilyMediaRef { target, .. } => target.clone(),
+        Edge::FamilyTag { target, .. } => target.clone(),
+        Edge::CitationMediaRef { target, .. } => target.clone(),
+        Edge::CitationNote { target, .. } => target.clone(),
+        Edge::CitationTag { target, .. } => target.clone(),
+        Edge::MediaCitation { target, .. } => target.clone(),
+        Edge::MediaNote { target, .. } => target.clone(),
+        Edge::MediaTag { target, .. } => target.clone(),
+        Edge::NoteCitation { target, .. } => target.clone(),
+        Edge::NoteTag { target, .. } => target.clone(),
+        Edge::SourceMediaRef { target, .. } => target.clone(),
+        Edge::SourceNote { target, .. } => target.clone(),
+        Edge::SourceTag { target, .. } => target.clone(),
+        Edge::PlaceCitation { target, .. } => target.clone(),
+        Edge::PlaceMediaRef { target, .. } => target.clone(),
+        Edge::PlaceNote { target, .. } => target.clone(),
+        Edge::PlaceTag { target, .. } => target.clone(),
+        Edge::RepositoryMediaRef { target, .. } => target.clone(),
+        Edge::RepositoryNote { target, .. } => target.clone(),
+        Edge::RepositoryTag { target, .. } => target.clone(),
+        Edge::TagTag { target, .. } => target.clone(),
+    }
+}
+
+/// Get the role string from an event ref edge.
+fn get_edge_role(edge: &Edge) -> String {
+    match edge {
+        Edge::PersonEventRef { metadata, .. } | Edge::FamilyEventRef { metadata, .. } => {
+            format!("{:?}", metadata.role.as_ref().unwrap_or(&typed_graph::EventRoleType::Primary))
+        }
+        _ => "Primary".to_string(),
+    }
+}
+
+/// Get the relation string from a child ref edge.
+fn get_edge_relation(edge: &Edge) -> String {
+    match edge {
+        Edge::FamilyChildRef { metadata, .. } => {
+            format!("{:?}", metadata.relation.as_ref().unwrap_or(&typed_graph::ChildRefType::Birth))
+        }
+        _ => "Birth".to_string(),
+    }
+}
+
+/// Escape special XML characters in a string.
+fn escape_xml(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => result.push_str("&amp;"),
+            '<' => result.push_str("&lt;"),
+            '>' => result.push_str("&gt;"),
+            '"' => result.push_str("&quot;"),
+            '\'' => result.push_str("&apos;"),
+            _ => result.push(c),
+        }
+    }
+    result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SerializationMap;
     use typed_graph::graph::Graph;
+    use typed_graph::*;
 
-    #[test]
-    fn serialization_error_display_and_error_traits() {
-        let err = SerializationError::UnsupportedType("Foo".to_string());
-        let display = format!("{}", err);
-        assert!(display.contains("Foo"));
-
-        let err = SerializationError::MissingRequiredField {
-            handle: "h1".to_string(),
-            field: "name",
-        };
-        let display = format!("{}", err);
-        assert!(display.contains("h1"));
-        assert!(display.contains("name"));
-
-        let err = SerializationError::Io(std::io::ErrorKind::NotFound, "file not found".to_string());
-        let display = format!("{}", err);
-        assert!(display.contains("NotFound"));
+    /// Helper: create a minimal Person node.
+    fn make_person(handle: &str, gramps_id: Option<&str>) -> Node {
+        Node::Person(PersonData {
+            handle: handle.to_string(),
+            gramps_id: gramps_id.map(|s| s.to_string()),
+            gender: 0,
+            primary_name: Name {
+                first_name: Some("John".to_string()),
+                surname_list: vec![Surname {
+                    surname: Some("Doe".to_string()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            alternate_names: vec![],
+            event_ref_list: vec![],
+            family_list: vec![],
+            parent_family_list: vec![],
+            person_ref_list: vec![],
+            citation_list: vec![],
+            note_list: vec![],
+            media_list: vec![],
+            tag_list: vec![],
+            attribute_list: vec![],
+            address_list: vec![],
+            url_list: vec![],
+            lds_ord_list: vec![],
+        })
     }
 
-    #[test]
-    fn serialization_error_io_from() {
-        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
-        let err: SerializationError = io_err.into();
-        match err {
-            SerializationError::Io(std::io::ErrorKind::PermissionDenied, _) => {}
-            _ => panic!("Expected Io(PermissionDenied, _)"),
-        }
+    /// Helper: create a minimal Family node.
+    fn make_family(handle: &str, gramps_id: Option<&str>) -> Node {
+        Node::Family(FamilyData {
+            handle: handle.to_string(),
+            gramps_id: gramps_id.map(|s| s.to_string()),
+            father_handle: None,
+            mother_handle: None,
+            child_ref_list: vec![],
+            event_ref_list: vec![],
+            citation_list: vec![],
+            note_list: vec![],
+            media_list: vec![],
+            tag_list: vec![],
+            attribute_list: vec![],
+        })
     }
 
+    /// Helper: create a minimal Event node.
+    fn make_event(handle: &str, event_type: EventType) -> Node {
+        Node::Event(EventData {
+            handle: handle.to_string(),
+            gramps_id: None,
+            event_type,
+            date: None,
+            place_handle: None,
+            description: None,
+            citation_list: vec![],
+            note_list: vec![],
+            media_list: vec![],
+            tag_list: vec![],
+            attribute_list: vec![],
+        })
+    }
+
+    /// Helper: create a minimal Source node.
+    fn make_source(handle: &str, title: &str) -> Node {
+        Node::Source(SourceData {
+            handle: handle.to_string(),
+            gramps_id: None,
+            title: title.to_string(),
+            author: None,
+            pubinfo: None,
+            reporef_list: vec![],
+            note_list: vec![],
+            media_list: vec![],
+            attribute_list: vec![],
+            tag_list: vec![],
+        })
+    }
+
+    /// Helper: create a minimal Citation node.
+    fn make_citation(handle: &str) -> Node {
+        Node::Citation(CitationData {
+            handle: handle.to_string(),
+            gramps_id: None,
+            source_handle: "s1".to_string(),
+            confidence: None,
+            page: None,
+            note_list: vec![],
+            media_list: vec![],
+            tag_list: vec![],
+        })
+    }
+
+    /// Helper: create a minimal Place node.
+    fn make_place(handle: &str, city: &str) -> Node {
+        Node::Place(PlaceData {
+            handle: handle.to_string(),
+            gramps_id: None,
+            name: Location {
+                city: Some(city.to_string()),
+                ..Default::default()
+            },
+            place_ref_list: vec![],
+            citation_list: vec![],
+            note_list: vec![],
+            media_list: vec![],
+            tag_list: vec![],
+            attribute_list: vec![],
+        })
+    }
+
+    /// Helper: create a minimal Repository node.
+    fn make_repository(handle: &str, name: &str) -> Node {
+        Node::Repository(RepositoryData {
+            handle: handle.to_string(),
+            gramps_id: None,
+            name: Some(name.to_string()),
+            type_field: None,
+            address_list: vec![],
+            note_list: vec![],
+            media_list: vec![],
+            tag_list: vec![],
+            url_list: vec![],
+        })
+    }
+
+    /// Helper: create a minimal Media node.
+    fn make_media(handle: &str, path: &str, desc: Option<&str>) -> Node {
+        Node::Media(MediaData {
+            handle: handle.to_string(),
+            gramps_id: None,
+            path: Some(path.to_string()),
+            desc: desc.map(|s| s.to_string()),
+            mime_type: None,
+            checksum: None,
+            citation_list: vec![],
+            note_list: vec![],
+            tag_list: vec![],
+            attribute_list: vec![],
+        })
+    }
+
+    /// Helper: create a minimal Note node.
+    fn make_note(handle: &str, text: &str) -> Node {
+        Node::Note(NoteData {
+            handle: handle.to_string(),
+            gramps_id: None,
+            text: text.to_string(),
+            format: None,
+            type_field: None,
+            citation_list: vec![],
+            tag_list: vec![],
+        })
+    }
+
+    /// Helper: create a minimal Tag node.
+    fn make_tag(handle: &str, name: &str, color: Option<&str>, priority: Option<i32>) -> Node {
+        Node::Tag(TagData {
+            handle: handle.to_string(),
+            gramps_id: None,
+            name: name.to_string(),
+            color: color.map(|s| s.to_string()),
+            priority,
+            tag_list: vec![],
+        })
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for all 10 primary types
+    // -----------------------------------------------------------------------
+
     #[test]
-    fn xml_writer_new() {
+    fn serialize_person_element() {
         let map = SerializationMap::new();
         let writer = GraphXmlWriter::new(map);
-        // Just verify it constructs without panicking
-        let _ = writer;
-    }
+        let mut graph = Graph::new();
+        graph
+            .add_node("p1".to_string(), make_person("p1", Some("I0001")))
+            .unwrap();
 
-    #[test]
-    fn xml_writer_empty_graph() {
-        let map = SerializationMap::new();
-        let writer = GraphXmlWriter::new(map);
-        let graph = Graph::new();
         let mut output = Vec::new();
-        let result = writer.write(&graph, &mut output);
-        assert!(result.is_ok());
+        writer.write(&graph, &mut output).unwrap();
         let xml = String::from_utf8(output).unwrap();
-        assert!(xml.starts_with(r#"<?xml version="1.0" encoding="UTF-8"?>"#));
-        assert!(xml.contains("<database"));
-        assert!(xml.contains("</database>"));
+
+        assert!(xml.contains(r#"<person handle="p1" id="I0001""#));
+        assert!(xml.contains("<first>John</first>"));
+        assert!(xml.contains("<surname>Doe</surname>"));
+    }
+
+    #[test]
+    fn serialize_person_optional_attributes() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        // gramps_id is None
+        graph
+            .add_node("p1".to_string(), make_person("p1", None))
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"<person handle="p1""#));
+        // id attribute should not be present when gramps_id is None
+        assert!(!xml.contains(r#"id=""#));
+    }
+
+    #[test]
+    fn serialize_family_element() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        graph
+            .add_node("f1".to_string(), make_family("f1", None))
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"<family handle="f1""#));
+    }
+
+    #[test]
+    fn serialize_event_element() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        graph
+            .add_node("e1".to_string(), make_event("e1", EventType::Birth))
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"<event handle="e1""#));
+        // Event should have eventtype with type child
+        assert!(xml.contains("<eventtype><type>Birth</type></eventtype>"));
+    }
+
+    #[test]
+    fn serialize_place_element() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        graph
+            .add_node("pl1".to_string(), make_place("pl1", "Springfield"))
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"<placeobj handle="pl1""#));
+        assert!(xml.contains("<ptitle>Springfield</ptitle>"));
+    }
+
+    #[test]
+    fn serialize_source_element() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        graph
+            .add_node("s1".to_string(), make_source("s1", "Census 1900"))
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"<source handle="s1""#));
+        assert!(xml.contains("<stitle>Census 1900</stitle>"));
+    }
+
+    #[test]
+    fn serialize_citation_element() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        graph
+            .add_node("c1".to_string(), make_citation("c1"))
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"<citation handle="c1""#));
+    }
+
+    #[test]
+    fn serialize_repository_element() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        graph
+            .add_node("r1".to_string(), make_repository("r1", "National Archives"))
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"<repository handle="r1""#));
+        assert!(xml.contains("<rname>National Archives</rname>"));
+    }
+
+    #[test]
+    fn serialize_media_element() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        graph
+            .add_node(
+                "m1".to_string(),
+                make_media("m1", "photo.jpg", Some("Wedding photo")),
+            )
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"<object handle="m1""#));
+        assert!(xml.contains("<file>photo.jpg</file>"));
+        assert!(xml.contains("<description>Wedding photo</description>"));
+    }
+
+    #[test]
+    fn serialize_note_element() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        graph
+            .add_node("n1".to_string(), make_note("n1", "Some notes here"))
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"<note handle="n1""#));
+        assert!(xml.contains("<text>Some notes here</text>"));
+    }
+
+    #[test]
+    fn serialize_tag_element() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        graph
+            .add_node(
+                "t1".to_string(),
+                make_tag("t1", "Complete", Some("red"), Some(1)),
+            )
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"<tag handle="t1""#));
+        assert!(xml.contains("<name>Complete</name>"));
+        assert!(xml.contains("<color>red</color>"));
+        assert!(xml.contains("<priority>1</priority>"));
+    }
+
+    #[test]
+    fn serialize_empty_person_omits_optional_nested() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        graph
+            .add_node("p1".to_string(), make_person("p1", None))
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        // Only one <name> element (primary name), no alternate names
+        assert_eq!(xml.matches("<name>").count(), 1);
+    }
+
+    #[test]
+    fn serialize_event_with_date() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        let mut event = make_event("e1", EventType::Birth);
+        if let Node::Event(ref mut e) = event {
+            e.date = Some(DateValue::new_ymd(1890, 6, 15));
+        }
+        graph.add_node("e1".to_string(), event).unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"val="1890-06-15""#));
+    }
+
+    #[test]
+    fn serialize_tag_minimal_fields() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        graph
+            .add_node(
+                "t1".to_string(),
+                make_tag("t1", "Unfinished", None, None),
+            )
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"<tag handle="t1""#));
+        // Optional fields should be absent
+        assert!(!xml.contains("<color>"));
+        assert!(!xml.contains("<priority>"));
+    }
+
+    #[test]
+    fn serialize_source_with_author() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        let mut source = make_source("s1", "Some Book");
+        if let Node::Source(ref mut s) = source {
+            s.author = Some("John Smith".to_string());
+        }
+        graph.add_node("s1".to_string(), source).unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains("<sabbrev>John Smith</sabbrev>"));
     }
 }
