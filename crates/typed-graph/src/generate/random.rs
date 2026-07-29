@@ -451,13 +451,16 @@ pub(crate) struct PersonSummary {
 ///
 /// Returns the handle of the created person node.
 /// The person is added to the graph via the `Graph` API.
+/// Returns `(handle, warning)` where `warning` is `Some` if events were
+/// skipped due to the missing-events strategy.
 pub(crate) fn generate_random_person(
     graph: &mut crate::Graph,
     config: &RandomConfig,
     used_names: &mut std::collections::HashSet<String>,
     rng: &mut impl rand::Rng,
     generation_layer: usize,
-) -> Result<crate::Handle, GenerationError> {
+    missing_events_fraction: f64,
+) -> Result<(crate::Handle, Option<String>), GenerationError> {
     let handle = uuid::Uuid::new_v4().to_string();
 
     // Generate a given name and surname
@@ -513,63 +516,76 @@ pub(crate) fn generate_random_person(
         .add_node(handle.clone(), crate::Node::Person(person))
         .map_err(|_| GenerationError::InvalidConfig(format!("duplicate handle: {}", handle)))?;
 
-    // Create birth event
-    let event_handle = uuid::Uuid::new_v4().to_string();
-    let birth_event = crate::EventData {
-        handle: event_handle.clone(),
-        event_type: crate::EventType::Birth,
-        date: Some(birth_date),
-        ..crate::EventData::default()
-    };
-    graph
-        .add_node(event_handle.clone(), crate::Node::Event(birth_event))
-        .map_err(|_| {
-            GenerationError::InvalidConfig(format!("duplicate event handle: {}", event_handle))
-        })?;
+    // Check missing-events strategy: skip events for this person?
+    let skip_events =
+        missing_events_fraction > 0.0 && rng.gen_bool(missing_events_fraction.clamp(0.0, 1.0));
 
-    // Link birth event to person
-    graph
-        .add_edge(crate::Edge::PersonEventRef {
-            source: handle.clone(),
-            target: event_handle,
-            metadata: Box::new(crate::EventRef {
-                ref_field: handle.clone(),
-                role: Some(crate::EventRoleType::Primary),
-            }),
-        })
-        .expect("birth event target exists (just added)");
+    let mut warning: Option<String> = None;
 
-    // Create death event if death date is set
-    if let Some(death_date) = death_date {
-        let death_event_handle = uuid::Uuid::new_v4().to_string();
-        let death_event = crate::EventData {
-            handle: death_event_handle.clone(),
-            event_type: crate::EventType::Death,
-            date: Some(death_date),
+    if skip_events {
+        warning = Some(format!(
+            "Person {}: missing events (strategy: missing-events, fraction: {})",
+            handle, missing_events_fraction
+        ));
+    } else {
+        // Create birth event
+        let event_handle = uuid::Uuid::new_v4().to_string();
+        let birth_event = crate::EventData {
+            handle: event_handle.clone(),
+            event_type: crate::EventType::Birth,
+            date: Some(birth_date),
             ..crate::EventData::default()
         };
         graph
-            .add_node(death_event_handle.clone(), crate::Node::Event(death_event))
+            .add_node(event_handle.clone(), crate::Node::Event(birth_event))
             .map_err(|_| {
-                GenerationError::InvalidConfig(format!(
-                    "duplicate event handle: {}",
-                    death_event_handle
-                ))
+                GenerationError::InvalidConfig(format!("duplicate event handle: {}", event_handle))
             })?;
 
+        // Link birth event to person
         graph
             .add_edge(crate::Edge::PersonEventRef {
                 source: handle.clone(),
-                target: death_event_handle,
+                target: event_handle,
                 metadata: Box::new(crate::EventRef {
                     ref_field: handle.clone(),
                     role: Some(crate::EventRoleType::Primary),
                 }),
             })
-            .expect("death event target exists (just added)");
+            .expect("birth event target exists (just added)");
+
+        // Create death event if death date is set
+        if let Some(death_date) = death_date {
+            let death_event_handle = uuid::Uuid::new_v4().to_string();
+            let death_event = crate::EventData {
+                handle: death_event_handle.clone(),
+                event_type: crate::EventType::Death,
+                date: Some(death_date),
+                ..crate::EventData::default()
+            };
+            graph
+                .add_node(death_event_handle.clone(), crate::Node::Event(death_event))
+                .map_err(|_| {
+                    GenerationError::InvalidConfig(format!(
+                        "duplicate event handle: {}",
+                        death_event_handle
+                    ))
+                })?;
+
+            graph
+                .add_edge(crate::Edge::PersonEventRef {
+                    source: handle.clone(),
+                    target: death_event_handle,
+                    metadata: Box::new(crate::EventRef {
+                        ref_field: handle.clone(),
+                        role: Some(crate::EventRoleType::Primary),
+                    }),
+                })
+                .expect("death event target exists (just added)");
+        }
     }
 
-    Ok(handle)
+    Ok((handle, warning))
 }
 
 /// Determine the birth year for a person in the given generation layer.
@@ -1372,6 +1388,23 @@ pub fn generate_random(
         0.0
     };
 
+    let missing_events_fraction: f64 = if adversarial_config.enabled {
+        adversarial_config
+            .strategies
+            .iter()
+            .filter_map(|s| {
+                if let AdversarialStrategy::MissingEvents(f) = s {
+                    Some(*f)
+                } else {
+                    None
+                }
+            })
+            .next()
+            .unwrap_or(0.0)
+    } else {
+        0.0
+    };
+
     // Create seeded RNG
     let seed = config.seed.unwrap_or_else(|| rand::rngs::OsRng.gen());
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
@@ -1399,8 +1432,18 @@ pub fn generate_random(
         };
 
         for _ in 0..layer_count {
-            let handle =
-                generate_random_person(&mut graph, config, &mut used_names, &mut rng, layer)?;
+            let (handle, person_warning) = generate_random_person(
+                &mut graph,
+                config,
+                &mut used_names,
+                &mut rng,
+                layer,
+                missing_events_fraction,
+            )?;
+
+            if let Some(w) = person_warning {
+                warnings.push(w);
+            }
 
             // Extract birth year from the birth event
             let birth_year = get_person_birth_year(&graph, &handle).unwrap_or(1970);
@@ -1869,8 +1912,9 @@ mod tests {
         let mut used_names = std::collections::HashSet::new();
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
-        let handle = generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0)
-            .expect("person generation should succeed");
+        let (handle, _person_warning) =
+            generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0, 0.0)
+                .expect("person generation should succeed");
 
         assert!(graph.contains_node(&handle));
         assert_eq!(graph.node_count(), 2); // Person + birth event
@@ -1883,8 +1927,9 @@ mod tests {
         let mut used_names = std::collections::HashSet::new();
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
-        let handle = generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0)
-            .expect("person generation should succeed");
+        let (handle, _person_warning) =
+            generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0, 0.0)
+                .expect("person generation should succeed");
 
         match graph.get_node(&handle).unwrap() {
             crate::Node::Person(person) => {
@@ -1901,8 +1946,9 @@ mod tests {
         let mut used_names = std::collections::HashSet::new();
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
-        let handle = generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0)
-            .expect("person generation should succeed");
+        let (handle, _person_warning) =
+            generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0, 0.0)
+                .expect("person generation should succeed");
 
         match graph.get_node(&handle).unwrap() {
             crate::Node::Person(person) => {
@@ -1927,8 +1973,9 @@ mod tests {
         let mut used_names = std::collections::HashSet::new();
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
-        let _handle = generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 1)
-            .expect("person generation should succeed");
+        let (_handle, _person_warning) =
+            generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 1, 0.0)
+                .expect("person generation should succeed");
 
         // Layer 1: end_year-85 to end_year-55 = 1915 to 1945
         // Check that a birth event exists with a date in the expected range
@@ -1956,8 +2003,9 @@ mod tests {
         let mut used_names = std::collections::HashSet::new();
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
-        let handle = generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0)
-            .expect("person generation should succeed");
+        let (handle, _person_warning) =
+            generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0, 0.0)
+                .expect("person generation should succeed");
 
         // Check that if death event exists, its date is after birth
         let mut birth_year = 0i32;
@@ -2004,9 +2052,9 @@ mod tests {
         let mut rng1 = rand::rngs::StdRng::seed_from_u64(42);
         let mut rng2 = rand::rngs::StdRng::seed_from_u64(42);
 
-        let h1 = generate_random_person(&mut graph1, &config, &mut used1, &mut rng1, 0)
+        let (h1, _pw) = generate_random_person(&mut graph1, &config, &mut used1, &mut rng1, 0, 0.0)
             .expect("person gen should succeed");
-        let h2 = generate_random_person(&mut graph2, &config, &mut used2, &mut rng2, 0)
+        let (h2, _pw) = generate_random_person(&mut graph2, &config, &mut used2, &mut rng2, 0, 0.0)
             .expect("person gen should succeed");
 
         // Same seed should produce the same person data (excluding UUID handle)
@@ -2675,6 +2723,165 @@ mod tests {
             .expect("single person generation should succeed");
         assert_eq!(result.stats.person_count, 1);
         assert_eq!(result.stats.family_count, 0);
+    }
+
+    // =======================================================================
+    // Step 3: Missing events adversarial strategy tests
+    // =======================================================================
+
+    #[test]
+    fn missing_events_zero_fraction() {
+        let config = RandomConfig {
+            person_count: 20,
+            family_count: 5,
+            generations: 2,
+            seed: Some(1001),
+            ..RandomConfig::default()
+        };
+        let adversarial = AdversarialConfig {
+            enabled: true,
+            strategies: vec![AdversarialStrategy::MissingEvents(0.0)],
+        };
+        let schema = crate::Schema::new();
+        let result =
+            generate_random(&config, &adversarial, &schema).expect("generation should succeed");
+
+        // With fraction 0.0, all persons should have events.
+        // No missing-events warnings should appear.
+        let missing_warnings: Vec<_> = result
+            .warnings
+            .iter()
+            .filter(|w| w.contains("missing events"))
+            .collect();
+        assert!(
+            missing_warnings.is_empty(),
+            "Zero fraction should produce no missing-events warnings, got: {:?}",
+            missing_warnings
+        );
+    }
+
+    #[test]
+    fn missing_events_all_missing() {
+        let config = RandomConfig {
+            person_count: 20,
+            family_count: 5,
+            generations: 2,
+            seed: Some(2002),
+            ..RandomConfig::default()
+        };
+        let adversarial = AdversarialConfig {
+            enabled: true,
+            strategies: vec![AdversarialStrategy::MissingEvents(1.0)],
+        };
+        let schema = crate::Schema::new();
+        let result =
+            generate_random(&config, &adversarial, &schema).expect("generation should succeed");
+
+        // With fraction 1.0, all persons should have missing events
+        let missing_warnings: Vec<_> = result
+            .warnings
+            .iter()
+            .filter(|w| w.contains("missing events"))
+            .collect();
+        assert!(
+            !missing_warnings.is_empty(),
+            "All persons should have missing events warnings"
+        );
+        assert_eq!(
+            missing_warnings.len(),
+            result.stats.person_count,
+            "Every person should have a missing-events warning"
+        );
+    }
+
+    #[test]
+    fn missing_events_validates_ok() {
+        let config = RandomConfig {
+            person_count: 20,
+            family_count: 5,
+            generations: 2,
+            seed: Some(3003),
+            ..RandomConfig::default()
+        };
+        let adversarial = AdversarialConfig {
+            enabled: true,
+            strategies: vec![AdversarialStrategy::MissingEvents(0.5)],
+        };
+        let schema = crate::Schema::new();
+        let mut result =
+            generate_random(&config, &adversarial, &schema).expect("generation should succeed");
+
+        // Missing events should still pass validation
+        let errors = result.graph.validate(&schema);
+        assert!(
+            errors.is_empty(),
+            "Missing events should pass validation, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn missing_events_some_missing_some_present() {
+        let config = RandomConfig {
+            person_count: 30,
+            family_count: 8,
+            generations: 2,
+            seed: Some(4004),
+            ..RandomConfig::default()
+        };
+        let adversarial = AdversarialConfig {
+            enabled: true,
+            strategies: vec![AdversarialStrategy::MissingEvents(0.5)],
+        };
+        let schema = crate::Schema::new();
+        let result =
+            generate_random(&config, &adversarial, &schema).expect("generation should succeed");
+
+        // With fraction 0.5, roughly half should be missing
+        // (statistical, so check for some but not all)
+        let missing_warnings: Vec<_> = result
+            .warnings
+            .iter()
+            .filter(|w| w.contains("missing events"))
+            .collect();
+        assert!(
+            !missing_warnings.is_empty(),
+            "Should have some missing events"
+        );
+        assert!(
+            missing_warnings.len() < result.stats.person_count,
+            "Should not have all persons missing events"
+        );
+    }
+
+    #[test]
+    fn missing_events_warning_emitted() {
+        let config = RandomConfig {
+            person_count: 10,
+            family_count: 3,
+            generations: 1,
+            seed: Some(5005),
+            ..RandomConfig::default()
+        };
+        let adversarial = AdversarialConfig {
+            enabled: true,
+            strategies: vec![AdversarialStrategy::MissingEvents(1.0)],
+        };
+        let schema = crate::Schema::new();
+        let result =
+            generate_random(&config, &adversarial, &schema).expect("generation should succeed");
+
+        // Every warning should mention "missing events"
+        let missing_warnings: Vec<_> = result
+            .warnings
+            .iter()
+            .filter(|w| w.contains("missing events"))
+            .collect();
+        assert_eq!(
+            missing_warnings.len(),
+            result.stats.person_count,
+            "Each person should have a warning"
+        );
     }
 
     #[test]
