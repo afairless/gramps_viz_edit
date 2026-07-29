@@ -1,0 +1,132 @@
+# AGENTS.md — Agent Instructions for gramps-gen
+
+## Project Overview
+
+**gramps-gen** is a Rust workspace that generates valid, plausible [Gramps](https://gramps-project.org/) family tree datasets. It models Gramps data as a typed directed multigraph, supports both random and configurable scenario-driven generation, and outputs Gramps XML (`.gramps` format).
+
+## Workspace Structure
+
+```
+gramps_viz_edit/
+├── Cargo.toml                    # Workspace root (resolver = "2")
+├── schemas/
+│   └── schema.json               # Canonical Gramps 5.2 schema (committed artifact)
+├── extract/
+│   └── extract_schema.py         # Python extractor (reads Gramps Python classes)
+├── crates/
+│   ├── typed-graph/              # Core: graph model, schema codegen, validation, generation
+│   │   ├── build.rs              # Reads schema.json → generates Rust types at compile time
+│   │   └── src/
+│   │       ├── lib.rs            # Re-exports, unit tests
+│   │       ├── schema.rs         # include!($OUT_DIR/generated_schema.rs)
+│   │       ├── graph.rs          # Graph struct, NodeKind, ValidationState, GraphError
+│   │       ├── validate.rs       # Structural + referential validation
+│   │       ├── date.rs           # DateValue convenience impls (new, new_ymd, display_text, is_valid)
+│   │       └── generate/
+│   │           ├── mod.rs        # Re-exports
+│   │           ├── builder.rs    # GraphBuilder fluent API (separate from Graph)
+│   │           ├── random.rs     # Procedural name/date/place generators, generate_random()
+│   │           └── adversarial.rs # Adversarial strategies (Category A + B), apply_adversarial_strategies()
+│   ├── output/                   # Gramps XML serialization
+│   │   └── src/
+│   │       ├── lib.rs            # Re-exports
+│   │       ├── xml.rs            # GraphXmlWriter (quick-xml based)
+│   │       └── serialization_map.rs # Hand-coded mapping to XML element/attribute names
+│   └── cli/                      # CLI binary
+│       ├── src/
+│       │   ├── main.rs           # Clap parser, command dispatch
+│       │   ├── lib.rs            # Library root
+│       │   ├── error.rs          # CliError enum
+│       │   ├── progress.rs       # ProgressReporter
+│       │   ├── scenario.rs       # YAML scenario parsing
+│       │   └── commands/
+│       │       ├── mod.rs
+│       │       ├── generate.rs   # Full 5-stage pipeline
+│       │       ├── validate.rs   # Minimal XML structure check
+│       │       └── extract_schema.rs # Stub
+│       └── tests/
+│           ├── e2e.rs            # Subprocess-based E2E tests
+│           └── integration.rs    # Integration tests
+```
+
+## Key Design Rules
+
+### 1. Schema-driven codegen
+
+- `schemas/schema.json` is the **sole source of truth** for Gramps data types, edges, required fields, and cardinality.
+- `typed-graph/build.rs` reads `schema.json` at compile time and generates `$OUT_DIR/generated_schema.rs` containing: `Node` enum, `Edge` enum, all `XxxData` structs, secondary/embedded ref structs, enum types, and `Schema` runtime metadata.
+- `typed-graph/src/schema.rs` includes the generated code via `include!`.
+- To update the schema: update `schema.json` and rebuild. The Python extractor at `extract/extract_schema.py` can regenerate `schema.json` from a Gramps Python source checkout.
+
+### 2. Graph model invariants
+
+- `Graph` is a **concrete** (not generic) typed directed multigraph.
+- Nodes are stored in `HashMap<Handle, Node>`. `Node` is an enum over 10 primary types: Person, Family, Event, Place, Source, Citation, Repository, Media, Note, Tag.
+- Edges are stored in `Vec<Edge>` with forward (`source → [indices]`) and reverse (`target → [indices]`) indexes.
+- `add_node` and `add_edge` both reset `validation_state` to `Unvalidated`.
+- Handles are plain `String` (type alias, typically UUID v4).
+
+### 3. Five-stage pipeline
+
+```
+Generate → Validate (Gate 1) → Adversarial Transform → Validate (Gate 2) → Serialize
+```
+
+- Random generation uses `generate_random(config, adversarial_config, schema)`.
+- Adversarial Category A strategies apply **during** generation via config flags.
+- Adversarial Category B strategies apply **after** Gate 1 via `apply_adversarial_strategies()`.
+- Validation uses `graph.validate(&schema)` which sets `ValidationState` on the graph.
+- Serialization uses `GraphXmlWriter` with a hand-coded `SerializationMap`.
+
+### 4. GraphBuilder is separate from Graph
+
+- `GraphBuilder` takes `&mut Graph`, not an internal `Graph`.
+- Builders for each primary type live in `builder.rs` (PersonBuilder, FamilyBuilder, EventBuilder, etc.).
+- `build()` returns `Result<Handle, BuilderError>` — it validates required fields and handle references at build time.
+- Birth/death dates on `PersonBuilder` auto-create Event nodes and PersonEventRef edges.
+- Marriage date on `FamilyBuilder` auto-creates a Marriage event and FamilyEventRef edge.
+
+### 5. Naming conventions
+
+- Generated structs use `XxxData` naming (e.g., `PersonData`, `FamilyData`).
+- Ref structs carry metadata: `EventRef` has `ref_field` + `role`; `ChildRef` has `ref_field` + `relation`.
+- Edge variants that carry metadata use `Box<RefType>` (e.g., `PersonEventRef { source, target, metadata: Box<EventRef> }`).
+- Rust keywords in field names are escaped: `ref` → `ref_field`, `type` → `type_field`.
+
+## Running Tests
+
+```bash
+# All tests (workspace)
+cargo test --workspace
+
+# Specific crate
+cargo test -p typed-graph
+cargo test -p output
+cargo test -p cli
+
+# E2E tests (need the binary built)
+cargo test -p cli --test e2e
+
+# Linting
+cargo clippy --all-targets --all-features -- -D warnings
+```
+
+## Key Dependencies
+
+| Dependency | Use |
+|---|---|
+| `serde` / `serde_json` | Schema parsing in build.rs |
+| `quick-xml` | XML serialization in output crate |
+| `clap` (derive) | CLI argument parsing |
+| `serde_yaml` | YAML scenario file parsing |
+| `rand` | RNG for procedural generation |
+| `uuid` (v4) | Auto-generated handles |
+
+## Code Conventions
+
+- All public types must implement `Debug`, most implement `Clone` and `PartialEq`.
+- Error types implement `std::error::Error` and `Display`.
+- Unit tests live in `#[cfg(test)] mod tests` at the bottom of each source file.
+- Tests cover: normal cases, empty/null edge cases, error conditions, type shape existence, and validation state transitions.
+- Doc comments use `///` with `# Examples` for public API, `//` for internal notes.
+- Procedural generators (names, places) take `&mut impl Rng` explicitly — no global state.
