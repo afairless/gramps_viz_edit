@@ -111,6 +111,7 @@ impl AdversarialStrategy {
             AdversarialStrategy::DisconnectedSubgraphs
                 | AdversarialStrategy::DeepNesting
                 | AdversarialStrategy::MaxRefChains
+                | AdversarialStrategy::OrphanedReferences
         )
     }
 
@@ -559,6 +560,113 @@ pub fn max_ref_chains(chain_length: usize) -> GraphTransform {
 }
 
 // ---------------------------------------------------------------------------
+// Orphaned references transform
+// ---------------------------------------------------------------------------
+
+/// Remove some edges from citation/note/media references while keeping the
+/// target nodes in the graph.
+///
+/// This produces dangling references: the target node still exists, but the
+/// edge from the source to the target is removed, while the source node still
+/// holds the handle in its field/list.
+///
+/// This is a **validity-preserving** transform — the resulting graph
+/// passes structural and referential validation, but annotation nodes
+/// (citations, notes, media, tags) become orphaned in the sense that
+/// no edge connects them to the rest of the graph.
+///
+/// # Parameters
+///
+/// * `fraction` — fraction of soft reference edges to remove (0.0–1.0).
+pub fn orphaned_references(fraction: f64) -> GraphTransform {
+    Box::new(move |mut graph: Graph| -> Result<Graph, AdversarialError> {
+        let effective_fraction = fraction.clamp(0.0, 1.0);
+
+        if effective_fraction == 0.0 {
+            return Ok(graph);
+        }
+
+        // Collect indices of "soft" reference edges (not structural)
+        let soft_edge_indices: Vec<usize> = graph
+            .iter_edges()
+            .enumerate()
+            .filter(|(_, edge)| {
+                matches!(
+                    edge,
+                    // Mixin citations
+                    crate::Edge::CitationRef { .. } |
+                crate::Edge::NoteRef { .. } |
+                crate::Edge::MediaRef { .. } |
+                crate::Edge::TagRef { .. } |
+                // Person reference edges (non-structural)
+                crate::Edge::PersonCitation { .. } |
+                crate::Edge::PersonNote { .. } |
+                crate::Edge::PersonTag { .. } |
+                crate::Edge::PersonMediaRef { .. } |
+                // Event reference edges (non-structural)
+                crate::Edge::EventCitation { .. } |
+                crate::Edge::EventNote { .. } |
+                crate::Edge::EventTag { .. } |
+                crate::Edge::EventMediaRef { .. } |
+                // Family reference edges (non-structural)
+                crate::Edge::FamilyCitation { .. } |
+                crate::Edge::FamilyNote { .. } |
+                crate::Edge::FamilyTag { .. } |
+                crate::Edge::FamilyMediaRef { .. } |
+                // Place reference edges (non-structural)
+                crate::Edge::PlaceCitation { .. } |
+                crate::Edge::PlaceNote { .. } |
+                crate::Edge::PlaceTag { .. } |
+                crate::Edge::PlaceMediaRef { .. } |
+                // Source reference edges (non-structural)
+                crate::Edge::SourceNote { .. } |
+                crate::Edge::SourceTag { .. } |
+                crate::Edge::SourceMediaRef { .. } |
+                // Repository reference edges (non-structural)
+                crate::Edge::RepositoryNote { .. } |
+                crate::Edge::RepositoryTag { .. } |
+                crate::Edge::RepositoryMediaRef { .. } |
+                // Media reference edges
+                crate::Edge::MediaCitation { .. } |
+                crate::Edge::MediaNote { .. } |
+                crate::Edge::MediaTag { .. } |
+                // Note reference edges
+                crate::Edge::NoteCitation { .. } |
+                crate::Edge::NoteTag { .. } |
+                // Citation reference edges
+                crate::Edge::CitationNote { .. } |
+                crate::Edge::CitationTag { .. } |
+                crate::Edge::CitationMediaRef { .. }
+                )
+            })
+            .map(|(i, _)| i)
+            .collect();
+
+        if soft_edge_indices.is_empty() {
+            return Ok(graph);
+        }
+
+        // Determine which soft edges to remove based on the fraction
+        let remove_count = (soft_edge_indices.len() as f64 * effective_fraction).ceil() as usize;
+
+        let remove_set: std::collections::HashSet<usize> =
+            soft_edge_indices.into_iter().take(remove_count).collect();
+
+        // Collect the edges to remove and remove by identity
+        let edges_to_remove: Vec<crate::Edge> = graph
+            .iter_edges()
+            .enumerate()
+            .filter(|(i, _)| remove_set.contains(i))
+            .map(|(_, e)| e.clone())
+            .collect();
+
+        graph.remove_edges(|edge| edges_to_remove.contains(edge));
+
+        Ok(graph)
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -617,7 +725,8 @@ mod tests {
         assert!(AdversarialStrategy::MaxRefChains.is_validity_preserving());
 
         // Validity-breaking
-        assert!(AdversarialStrategy::OrphanedReferences.is_validity_breaking());
+        assert!(!AdversarialStrategy::OrphanedReferences.is_validity_breaking());
+        assert!(AdversarialStrategy::OrphanedReferences.is_validity_preserving());
 
         // Category A are neither
         assert!(!AdversarialStrategy::OneParentFamilies(0.5).is_validity_preserving());
@@ -1417,6 +1526,251 @@ mod tests {
         assert!(
             matches!(result, Err(AdversarialError::TransformNotApplicable(_))),
             "Empty graph should return TransformNotApplicable"
+        );
+    }
+
+    // =======================================================================
+    // orphaned_references tests
+    // =======================================================================
+
+    /// Build a graph with persons, families, events, places, sources,
+    /// repositories, media, notes, and tags so there are plenty of soft
+    /// reference edges to remove.
+    fn build_graph_with_soft_edges() -> Graph {
+        use crate::generate::random::RandomConfig;
+
+        let schema = crate::Schema::new();
+        let config = RandomConfig {
+            person_count: 3,
+            family_count: 2,
+            with_places: true,
+            with_citations: true,
+            with_notes: true,
+            with_media: true,
+            with_tags: true,
+            seed: Some(42),
+            ..RandomConfig::default()
+        };
+        let adversarial_config = crate::generate::AdversarialConfig::default();
+        let result =
+            crate::generate::random::generate_random(&config, &adversarial_config, &schema)
+                .unwrap();
+        result.graph
+    }
+
+    #[test]
+    fn orphaned_references_validity_preserving() {
+        let schema = crate::Schema::new();
+        let graph = build_graph_with_soft_edges();
+
+        let transform = orphaned_references(0.5);
+        let mut result = transform(graph).unwrap();
+
+        let errors = result.validate(&schema);
+        assert!(
+            errors.is_empty(),
+            "orphaned_references is validity-preserving: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn orphaned_references_removes_some_edges() {
+        let graph = build_graph_with_soft_edges();
+        let edge_count_before = graph.edge_count();
+
+        let transform = orphaned_references(0.5);
+        let result = transform(graph).unwrap();
+
+        let edge_count_after = result.edge_count();
+        assert!(
+            edge_count_after < edge_count_before,
+            "orphaned_references(0.5) should remove some edges (before={}, after={})",
+            edge_count_before,
+            edge_count_after
+        );
+        assert!(
+            edge_count_after > 0,
+            "At least some structural edges should remain"
+        );
+    }
+
+    #[test]
+    fn orphaned_references_keeps_all_nodes() {
+        let graph = build_graph_with_soft_edges();
+        let node_count_before = graph.node_count();
+
+        let transform = orphaned_references(0.5);
+        let result = transform(graph).unwrap();
+
+        assert_eq!(
+            result.node_count(),
+            node_count_before,
+            "No nodes should be removed by orphaned_references"
+        );
+    }
+
+    #[test]
+    fn orphaned_references_orphans_targets() {
+        let graph = build_graph_with_soft_edges();
+
+        let transform = orphaned_references(1.0);
+        let result = transform(graph).unwrap();
+
+        // The graph is still structurally valid (edge targets still exist),
+        // but citation/note/media nodes are orphaned — no edge references them.
+        let has_orphans = result.iter_nodes().any(|(handle, node)| {
+            let is_annotation = matches!(
+                node,
+                crate::Node::Citation(_)
+                    | crate::Node::Note(_)
+                    | crate::Node::Media(_)
+                    | crate::Node::Tag(_)
+            );
+            if !is_annotation {
+                return false;
+            }
+            // Check if this node has any incoming edges
+            let has_incoming = !result.edges_to(handle).is_empty();
+            !has_incoming
+        });
+
+        assert!(
+            has_orphans,
+            "orphaned_references should create orphaned annotation nodes"
+        );
+    }
+
+    #[test]
+    fn orphaned_references_keeps_structural_edges() {
+        let graph = build_graph_with_soft_edges();
+        let structural_before: Vec<crate::Edge> = graph
+            .iter_edges()
+            .filter(|e| {
+                matches!(
+                    e,
+                    crate::Edge::PersonFamily { .. }
+                        | crate::Edge::PersonParentFamily { .. }
+                        | crate::Edge::FamilyFather { .. }
+                        | crate::Edge::FamilyMother { .. }
+                        | crate::Edge::FamilyChildRef { .. }
+                        | crate::Edge::PersonEventRef { .. }
+                        | crate::Edge::FamilyEventRef { .. }
+                        | crate::Edge::EventPlace { .. }
+                        | crate::Edge::CitationSource { .. }
+                        | crate::Edge::PlacePlaceRef { .. }
+                        | crate::Edge::PersonPersonRef { .. }
+                        | crate::Edge::SourceRepoRef { .. }
+                )
+            })
+            .cloned()
+            .collect();
+
+        let transform = orphaned_references(0.5);
+        let result = transform(graph).unwrap();
+
+        let structural_after: Vec<crate::Edge> = result
+            .iter_edges()
+            .filter(|e| {
+                matches!(
+                    e,
+                    crate::Edge::PersonFamily { .. }
+                        | crate::Edge::PersonParentFamily { .. }
+                        | crate::Edge::FamilyFather { .. }
+                        | crate::Edge::FamilyMother { .. }
+                        | crate::Edge::FamilyChildRef { .. }
+                        | crate::Edge::PersonEventRef { .. }
+                        | crate::Edge::FamilyEventRef { .. }
+                        | crate::Edge::EventPlace { .. }
+                        | crate::Edge::CitationSource { .. }
+                        | crate::Edge::PlacePlaceRef { .. }
+                        | crate::Edge::PersonPersonRef { .. }
+                        | crate::Edge::SourceRepoRef { .. }
+                )
+            })
+            .cloned()
+            .collect();
+
+        assert_eq!(
+            structural_before.len(),
+            structural_after.len(),
+            "Structural edges should not be removed by orphaned_references"
+        );
+    }
+
+    #[test]
+    fn orphaned_references_fraction_zero() {
+        let graph = build_graph_with_soft_edges();
+        let edge_count_before = graph.edge_count();
+
+        let transform = orphaned_references(0.0);
+        let result = transform(graph).unwrap();
+
+        assert_eq!(
+            result.edge_count(),
+            edge_count_before,
+            "fraction=0.0 should not remove any edges"
+        );
+    }
+
+    #[test]
+    fn orphaned_references_fraction_one() {
+        let graph = build_graph_with_soft_edges();
+
+        let transform = orphaned_references(1.0);
+        let result = transform(graph).unwrap();
+
+        // All soft edges should be removed; only structural edges remain
+        let soft_remaining: usize = result
+            .iter_edges()
+            .filter(|e| {
+                matches!(
+                    e,
+                    crate::Edge::CitationRef { .. }
+                        | crate::Edge::NoteRef { .. }
+                        | crate::Edge::MediaRef { .. }
+                        | crate::Edge::TagRef { .. }
+                        | crate::Edge::PersonCitation { .. }
+                        | crate::Edge::PersonNote { .. }
+                        | crate::Edge::PersonTag { .. }
+                        | crate::Edge::PersonMediaRef { .. }
+                        | crate::Edge::EventCitation { .. }
+                        | crate::Edge::EventNote { .. }
+                        | crate::Edge::EventTag { .. }
+                        | crate::Edge::EventMediaRef { .. }
+                        | crate::Edge::FamilyCitation { .. }
+                        | crate::Edge::FamilyNote { .. }
+                        | crate::Edge::FamilyTag { .. }
+                        | crate::Edge::FamilyMediaRef { .. }
+                        | crate::Edge::PlaceCitation { .. }
+                        | crate::Edge::PlaceNote { .. }
+                        | crate::Edge::PlaceTag { .. }
+                        | crate::Edge::PlaceMediaRef { .. }
+                        | crate::Edge::SourceNote { .. }
+                        | crate::Edge::SourceTag { .. }
+                        | crate::Edge::SourceMediaRef { .. }
+                        | crate::Edge::RepositoryNote { .. }
+                        | crate::Edge::RepositoryTag { .. }
+                        | crate::Edge::RepositoryMediaRef { .. }
+                        | crate::Edge::MediaCitation { .. }
+                        | crate::Edge::MediaNote { .. }
+                        | crate::Edge::MediaTag { .. }
+                        | crate::Edge::NoteCitation { .. }
+                        | crate::Edge::NoteTag { .. }
+                        | crate::Edge::CitationNote { .. }
+                        | crate::Edge::CitationTag { .. }
+                        | crate::Edge::CitationMediaRef { .. }
+                )
+            })
+            .count();
+
+        assert_eq!(
+            soft_remaining, 0,
+            "fraction=1.0 should remove all soft edges"
+        );
+        assert!(
+            result.edge_count() > 0,
+            "Structural edges should remain after removing all soft edges"
         );
     }
 }
