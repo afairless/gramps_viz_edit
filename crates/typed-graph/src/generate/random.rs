@@ -952,6 +952,231 @@ pub(crate) fn assign_children(
 }
 
 // ---------------------------------------------------------------------------
+// Event generation
+// ---------------------------------------------------------------------------
+
+/// Generate event nodes (birth, death, marriage) for persons and families.
+///
+/// For each person:
+/// - A Birth event node is created with the person's birth date.
+/// - If the person has a death date, a Death event node is created.
+///
+/// For each family:
+/// - A Marriage event node is created with a date between the parents'
+///   birth dates and the first child's birth date.
+pub(crate) fn generate_events(
+    graph: &mut crate::Graph,
+    config: &RandomConfig,
+    rng: &mut impl rand::Rng,
+) -> Result<(), GenerationError> {
+    // Collect family handles
+    let family_handles: Vec<crate::Handle> = graph
+        .iter_nodes()
+        .filter(|(_, node)| matches!(node, crate::Node::Family(_)))
+        .map(|(h, _)| h.clone())
+        .collect();
+
+    // Generate marriage events for families
+    for family_handle in &family_handles {
+        if let Some(crate::Node::Family(family)) = graph.get_node(family_handle).cloned() {
+            // Check if family has both parents
+            if let (Some(ref father_handle), Some(ref mother_handle)) =
+                (&family.father_handle, &family.mother_handle)
+            {
+                // Find birth years of parents
+                let father_birth = get_person_birth_year(graph, father_handle);
+                let mother_birth = get_person_birth_year(graph, mother_handle);
+
+                if let (Some(fb), Some(mb)) = (father_birth, mother_birth) {
+                    // Marriage date: between later parent's birth + 16 and earliest child's birth
+                    let min_marriage = std::cmp::max(fb + 16, mb + 16);
+
+                    // Find earliest child's birth year
+                    let earliest_child = family
+                        .child_ref_list
+                        .iter()
+                        .filter_map(|cr| get_person_birth_year(graph, &cr.ref_field))
+                        .min();
+
+                    let max_marriage = earliest_child.unwrap_or(min_marriage + 10);
+
+                    if min_marriage <= max_marriage {
+                        let marriage_year = rng.gen_range(min_marriage..=max_marriage);
+                        let marriage_month = rng.gen_range(1..=12);
+                        let marriage_day = rng.gen_range(1..=28);
+
+                        let marriage_date = crate::DateValue::new_ymd(
+                            marriage_year,
+                            marriage_month,
+                            marriage_day,
+                        );
+
+                        // Create marriage event
+                        let event_handle = uuid::Uuid::new_v4().to_string();
+                        let event = crate::EventData {
+                            handle: event_handle.clone(),
+                            event_type: crate::EventType::Marriage,
+                            date: Some(marriage_date),
+                            ..crate::EventData::default()
+                        };
+
+                        graph
+                            .add_node(event_handle.clone(), crate::Node::Event(event))
+                            .map_err(|_| {
+                                GenerationError::InvalidConfig(format!(
+                                    "duplicate event handle: {}",
+                                    event_handle
+                                ))
+                            })?;
+
+                        // Link marriage event to family
+                        graph
+                            .add_edge(crate::Edge::FamilyEventRef {
+                                source: family_handle.clone(),
+                                target: event_handle,
+                                metadata: Box::new(crate::EventRef {
+                                    ref_field: family_handle.clone(),
+                                    role: Some(crate::EventRoleType::Family),
+                                }),
+                            })
+                            .expect("marriage event target exists (just added)");
+                    }
+                }
+            }
+        }
+    }
+
+    // If with_places, assign places to events
+    if config.with_places {
+        let event_handles: Vec<crate::Handle> = graph
+            .iter_nodes()
+            .filter(|(_, node)| matches!(node, crate::Node::Event(_)))
+            .map(|(h, _)| h.clone())
+            .collect();
+
+        let mut used_place_names = std::collections::HashSet::new();
+
+        for event_handle in &event_handles {
+            let place = generate_place(config.place_depth, &used_place_names, rng);
+            used_place_names.insert(place.city.clone());
+
+            let place_handle = uuid::Uuid::new_v4().to_string();
+            let place_node = crate::PlaceData {
+                handle: place_handle.clone(),
+                name: crate::Location {
+                    city: Some(place.city),
+                    county: Some(place.county),
+                    state: Some(place.state),
+                    country: Some(place.country),
+                    ..crate::Location::default()
+                },
+                ..crate::PlaceData::default()
+            };
+
+            graph
+                .add_node(place_handle.clone(), crate::Node::Place(place_node))
+                .map_err(|_| {
+                    GenerationError::InvalidConfig(format!(
+                        "duplicate place handle: {}",
+                        place_handle
+                    ))
+                })?;
+
+            // Update event's place_handle
+            if let Some(crate::Node::Event(ref mut event)) = graph.get_node_mut(event_handle) {
+                event.place_handle = Some(place_handle.clone());
+            }
+
+            // Add EventPlace edge
+            graph
+                .add_edge(crate::Edge::EventPlace {
+                    source: event_handle.clone(),
+                    target: place_handle,
+                })
+                .expect("place node exists (just added)");
+        }
+    }
+
+    // If with_citations, create a Source node and Citation edges for events
+    if config.with_citations {
+        let event_handles: Vec<crate::Handle> = graph
+            .iter_nodes()
+            .filter(|(_, node)| matches!(node, crate::Node::Event(_)))
+            .map(|(h, _)| h.clone())
+            .collect();
+
+        // Create a single source for all citations
+        let source_handle = uuid::Uuid::new_v4().to_string();
+        let source = crate::SourceData {
+            handle: source_handle.clone(),
+            title: "Generated dataset".to_string(),
+            ..crate::SourceData::default()
+        };
+
+        graph
+            .add_node(source_handle.clone(), crate::Node::Source(source))
+            .map_err(|_| {
+                GenerationError::InvalidConfig(format!(
+                    "duplicate source handle: {}",
+                    source_handle
+                ))
+            })?;
+
+        // Add citations for a fraction of events
+        for event_handle in &event_handles {
+            if rng.gen_bool(0.3) {
+                // 30% of events get citations
+                let citation_handle = uuid::Uuid::new_v4().to_string();
+                let citation = crate::CitationData {
+                    handle: citation_handle.clone(),
+                    source_handle: source_handle.clone(),
+                    ..crate::CitationData::default()
+                };
+
+                graph
+                    .add_node(
+                        citation_handle.clone(),
+                        crate::Node::Citation(citation),
+                    )
+                    .map_err(|_| {
+                        GenerationError::InvalidConfig(format!(
+                            "duplicate citation handle: {}",
+                            citation_handle
+                        ))
+                    })?;
+
+                // Link citation to event
+                graph
+                    .add_edge(crate::Edge::EventCitation {
+                        source: event_handle.clone(),
+                        target: citation_handle,
+                    })
+                    .expect("citation node exists (just added)");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Get the birth year of a person from their birth event in the graph.
+fn get_person_birth_year(graph: &crate::Graph, person_handle: &crate::Handle) -> Option<i32> {
+    let edges = graph.edges_from(person_handle);
+    for edge in &edges {
+        if let crate::Edge::PersonEventRef { target, .. } = edge {
+            if let Some(crate::Node::Event(event)) = graph.get_node(target) {
+                if event.event_type == crate::EventType::Birth {
+                    if let Some(ref date) = event.date {
+                        return Some(date.year);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1916,5 +2141,294 @@ mod tests {
                 );
             }
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Event generation tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn generate_events_marriage_events() {
+        let mut graph = crate::Graph::new();
+        let config = RandomConfig::default();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+        // Create a family with parents
+        let father_handle = "father".to_string();
+        let mother_handle = "mother".to_string();
+        let family_handle = "f1".to_string();
+
+        graph.add_node(father_handle.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
+        graph.add_node(mother_handle.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
+
+        // Add birth events for parents
+        let birth_event_f = uuid::Uuid::new_v4().to_string();
+        graph.add_node(birth_event_f.clone(), crate::Node::Event(crate::EventData {
+            handle: birth_event_f.clone(),
+            event_type: crate::EventType::Birth,
+            date: Some(crate::DateValue::new(1970)),
+            ..crate::EventData::default()
+        })).unwrap();
+        graph.add_edge(crate::Edge::PersonEventRef {
+            source: father_handle.clone(),
+            target: birth_event_f,
+            metadata: Box::new(crate::EventRef::default()),
+        }).unwrap();
+
+        let birth_event_m = uuid::Uuid::new_v4().to_string();
+        graph.add_node(birth_event_m.clone(), crate::Node::Event(crate::EventData {
+            handle: birth_event_m.clone(),
+            event_type: crate::EventType::Birth,
+            date: Some(crate::DateValue::new(1975)),
+            ..crate::EventData::default()
+        })).unwrap();
+        graph.add_edge(crate::Edge::PersonEventRef {
+            source: mother_handle.clone(),
+            target: birth_event_m,
+            metadata: Box::new(crate::EventRef::default()),
+        }).unwrap();
+
+        graph.add_node(family_handle.clone(), crate::Node::Family(crate::FamilyData {
+            handle: family_handle.clone(),
+            father_handle: Some(father_handle),
+            mother_handle: Some(mother_handle),
+            ..crate::FamilyData::default()
+        })).unwrap();
+
+        generate_events(&mut graph, &config, &mut rng).expect("event generation should succeed");
+
+        // Check that a marriage event exists
+        let edges = graph.edges_from(&family_handle);
+        let has_marriage = edges.iter().any(|e| matches!(e, crate::Edge::FamilyEventRef { .. }));
+        assert!(has_marriage, "Family should have a marriage event");
+    }
+
+    #[test]
+    fn generate_events_marriage_date_after_birth() {
+        let mut graph = crate::Graph::new();
+        let config = RandomConfig::default();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+        let father_handle = "father".to_string();
+        let mother_handle = "mother".to_string();
+        let family_handle = "f1".to_string();
+
+        graph.add_node(father_handle.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
+        graph.add_node(mother_handle.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
+
+        let birth_event_f = uuid::Uuid::new_v4().to_string();
+        graph.add_node(birth_event_f.clone(), crate::Node::Event(crate::EventData {
+            handle: birth_event_f.clone(),
+            event_type: crate::EventType::Birth,
+            date: Some(crate::DateValue::new(1970)),
+            ..crate::EventData::default()
+        })).unwrap();
+        graph.add_edge(crate::Edge::PersonEventRef {
+            source: father_handle.clone(),
+            target: birth_event_f,
+            metadata: Box::new(crate::EventRef::default()),
+        }).unwrap();
+
+        let birth_event_m = uuid::Uuid::new_v4().to_string();
+        graph.add_node(birth_event_m.clone(), crate::Node::Event(crate::EventData {
+            handle: birth_event_m.clone(),
+            event_type: crate::EventType::Birth,
+            date: Some(crate::DateValue::new(1975)),
+            ..crate::EventData::default()
+        })).unwrap();
+        graph.add_edge(crate::Edge::PersonEventRef {
+            source: mother_handle.clone(),
+            target: birth_event_m,
+            metadata: Box::new(crate::EventRef::default()),
+        }).unwrap();
+
+        graph.add_node(family_handle.clone(), crate::Node::Family(crate::FamilyData {
+            handle: family_handle.clone(),
+            father_handle: Some(father_handle),
+            mother_handle: Some(mother_handle),
+            ..crate::FamilyData::default()
+        })).unwrap();
+
+        generate_events(&mut graph, &config, &mut rng).expect("event generation should succeed");
+
+        // Check marriage date is after both parents' birth dates
+        let edges = graph.edges_from(&family_handle);
+        for edge in &edges {
+            if let crate::Edge::FamilyEventRef { target, .. } = edge {
+                if let Some(crate::Node::Event(event)) = graph.get_node(target) {
+                    if event.event_type == crate::EventType::Marriage {
+                        if let Some(ref date) = event.date {
+                            assert!(date.year >= 1970, "Marriage year should be after father's birth");
+                            assert!(date.year >= 1975, "Marriage year should be after mother's birth");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn generate_events_with_places() {
+        let mut graph = crate::Graph::new();
+        let config = RandomConfig {
+            with_places: true,
+            ..RandomConfig::default()
+        };
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+        // Add a minimal person with birth event
+        let p1 = "p1".to_string();
+        graph.add_node(p1.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
+
+        let birth_event = uuid::Uuid::new_v4().to_string();
+        graph.add_node(birth_event.clone(), crate::Node::Event(crate::EventData {
+            handle: birth_event.clone(),
+            event_type: crate::EventType::Birth,
+            date: Some(crate::DateValue::new(2000)),
+            ..crate::EventData::default()
+        })).unwrap();
+        graph.add_edge(crate::Edge::PersonEventRef {
+            source: p1.clone(),
+            target: birth_event,
+            metadata: Box::new(crate::EventRef::default()),
+        }).unwrap();
+
+        generate_events(&mut graph, &config, &mut rng).expect("event generation should succeed");
+
+        // Check that Place nodes were created
+        let place_count = graph.nodes_by_kind(crate::NodeKind::Place).len();
+        assert!(place_count > 0, "Places should be created when with_places is true");
+    }
+
+    #[test]
+    fn generate_events_with_citations() {
+        let mut graph = crate::Graph::new();
+        let config = RandomConfig {
+            with_citations: true,
+            ..RandomConfig::default()
+        };
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+        // Add a minimal person with birth event
+        let p1 = "p1".to_string();
+        graph.add_node(p1.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
+
+        let birth_event = uuid::Uuid::new_v4().to_string();
+        graph.add_node(birth_event.clone(), crate::Node::Event(crate::EventData {
+            handle: birth_event.clone(),
+            event_type: crate::EventType::Birth,
+            date: Some(crate::DateValue::new(2000)),
+            ..crate::EventData::default()
+        })).unwrap();
+        graph.add_edge(crate::Edge::PersonEventRef {
+            source: p1.clone(),
+            target: birth_event,
+            metadata: Box::new(crate::EventRef::default()),
+        }).unwrap();
+
+        generate_events(&mut graph, &config, &mut rng).expect("event generation should succeed");
+
+        // Check that Source and Citation nodes were created
+        let source_count = graph.nodes_by_kind(crate::NodeKind::Source).len();
+        assert!(source_count > 0, "Sources should be created when with_citations is true");
+    }
+
+    #[test]
+    fn generate_events_empty_graph() {
+        let mut graph = crate::Graph::new();
+        let config = RandomConfig::default();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+        let result = generate_events(&mut graph, &config, &mut rng);
+        assert!(result.is_ok(), "Empty graph should not cause errors");
+        assert_eq!(graph.node_count(), 0);
+    }
+
+    #[test]
+    fn generate_events_event_links_correct() {
+        let mut graph = crate::Graph::new();
+        let config = RandomConfig::default();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+        let father_handle = "father".to_string();
+        let mother_handle = "mother".to_string();
+        let family_handle = "f1".to_string();
+
+        graph.add_node(father_handle.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
+        graph.add_node(mother_handle.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
+
+        let birth_event_f = uuid::Uuid::new_v4().to_string();
+        graph.add_node(birth_event_f.clone(), crate::Node::Event(crate::EventData {
+            handle: birth_event_f.clone(),
+            event_type: crate::EventType::Birth,
+            date: Some(crate::DateValue::new(1970)),
+            ..crate::EventData::default()
+        })).unwrap();
+        graph.add_edge(crate::Edge::PersonEventRef {
+            source: father_handle.clone(),
+            target: birth_event_f,
+            metadata: Box::new(crate::EventRef::default()),
+        }).unwrap();
+
+        let birth_event_m = uuid::Uuid::new_v4().to_string();
+        graph.add_node(birth_event_m.clone(), crate::Node::Event(crate::EventData {
+            handle: birth_event_m.clone(),
+            event_type: crate::EventType::Birth,
+            date: Some(crate::DateValue::new(1975)),
+            ..crate::EventData::default()
+        })).unwrap();
+        graph.add_edge(crate::Edge::PersonEventRef {
+            source: mother_handle.clone(),
+            target: birth_event_m,
+            metadata: Box::new(crate::EventRef::default()),
+        }).unwrap();
+
+        graph.add_node(family_handle.clone(), crate::Node::Family(crate::FamilyData {
+            handle: family_handle.clone(),
+            father_handle: Some(father_handle),
+            mother_handle: Some(mother_handle),
+            ..crate::FamilyData::default()
+        })).unwrap();
+
+        generate_events(&mut graph, &config, &mut rng).expect("event generation should succeed");
+
+        // Check that FamilyEventRef edge exists
+        let edges = graph.edges_from(&family_handle);
+        let has_event_ref = edges.iter().any(|e| matches!(e, crate::Edge::FamilyEventRef { .. }));
+        assert!(has_event_ref, "Family should have FamilyEventRef edge");
+    }
+
+    #[test]
+    fn generate_events_death_event_type() {
+        let mut graph = crate::Graph::new();
+
+        // Person with a death event already created
+        let p1 = "p1".to_string();
+        graph.add_node(p1.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
+
+        let death_event = uuid::Uuid::new_v4().to_string();
+        graph.add_node(death_event.clone(), crate::Node::Event(crate::EventData {
+            handle: death_event.clone(),
+            event_type: crate::EventType::Death,
+            date: Some(crate::DateValue::new(2050)),
+            ..crate::EventData::default()
+        })).unwrap();
+        graph.add_edge(crate::Edge::PersonEventRef {
+            source: p1.clone(),
+            target: death_event,
+            metadata: Box::new(crate::EventRef::default()),
+        }).unwrap();
+
+        // Verify death event exists
+        let edges = graph.edges_from(&p1);
+        let has_death = edges.iter().any(|e| {
+            if let crate::Edge::PersonEventRef { target, .. } = e {
+                if let Some(crate::Node::Event(event)) = graph.get_node(target) {
+                    return event.event_type == crate::EventType::Death;
+                }
+            }
+            false
+        });
+        assert!(has_death, "Death event should exist");
     }
 }
