@@ -1405,6 +1405,40 @@ pub fn generate_random(
         0.0
     };
 
+    let solo_persons_fraction: f64 = if adversarial_config.enabled {
+        adversarial_config
+            .strategies
+            .iter()
+            .filter_map(|s| {
+                if let AdversarialStrategy::SoloPersons(f) = s {
+                    Some(*f)
+                } else {
+                    None
+                }
+            })
+            .next()
+            .unwrap_or(0.0)
+    } else {
+        0.0
+    };
+
+    let many_alternate_names_fraction: f64 = if adversarial_config.enabled {
+        adversarial_config
+            .strategies
+            .iter()
+            .filter_map(|s| {
+                if let AdversarialStrategy::ManyAlternateNames(f) = s {
+                    Some(*f)
+                } else {
+                    None
+                }
+            })
+            .next()
+            .unwrap_or(0.0)
+    } else {
+        0.0
+    };
+
     // Create seeded RNG
     let seed = config.seed.unwrap_or_else(|| rand::rngs::OsRng.gen());
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
@@ -1465,6 +1499,66 @@ pub fn generate_random(
                     is_child: false,
                 },
             ));
+        }
+    }
+
+    // ---- Solo-persons strategy ----
+    // Mark a fraction of persons as solo: they won't participate in families
+    if solo_persons_fraction > 0.0 {
+        let target_solo_count =
+            (persons.len() as f64 * solo_persons_fraction.clamp(0.0, 1.0)) as usize;
+        // Randomly select persons to be solo (shuffle and take first N)
+        let mut indices: Vec<usize> = (0..persons.len()).collect();
+        // Fisher-Yates partial shuffle for first target_solo_count elements
+        for i in 0..target_solo_count.min(persons.len()) {
+            let j = rng.gen_range(i..persons.len());
+            indices.swap(i, j);
+        }
+        for &idx in indices.iter().take(target_solo_count.min(persons.len())) {
+            persons[idx].1.is_parent = true;
+            persons[idx].1.is_child = true;
+            warnings.push(format!(
+                "Person {}: solo person — excluded from families (strategy: solo-persons, fraction: {})",
+                persons[idx].0, solo_persons_fraction
+            ));
+        }
+    }
+
+    // ---- Many-alternate-names strategy ----
+    if many_alternate_names_fraction > 0.0 {
+        let mut alt_names_rng = rand::rngs::StdRng::seed_from_u64(seed.wrapping_add(1));
+        for (handle, _summary) in &persons {
+            if alt_names_rng.gen_bool(many_alternate_names_fraction.clamp(0.0, 1.0)) {
+                let name_count: usize = alt_names_rng.gen_range(5..=20);
+                let mut alternate_names = Vec::with_capacity(name_count);
+                for _ in 0..name_count {
+                    let alt_given =
+                        generate_given_name(&config.name_style, &used_names, &mut alt_names_rng);
+                    let alt_surname =
+                        generate_surname(&config.name_style, &used_names, &mut alt_names_rng);
+                    used_names.insert(alt_given.clone());
+                    used_names.insert(alt_surname.clone());
+                    alternate_names.push(crate::Name {
+                        first_name: Some(alt_given),
+                        surname_list: vec![crate::Surname {
+                            surname: Some(alt_surname),
+                            ..crate::Surname::default()
+                        }],
+                        type_field: Some(crate::NameType::Unknown),
+                        ..crate::Name::default()
+                    });
+                }
+                // Update the person node with alternate names
+                if let Some(crate::Node::Person(ref mut person)) = graph.get_node_mut(handle) {
+                    person.alternate_names = alternate_names;
+                }
+                if name_count >= 10 {
+                    warnings.push(format!(
+                        "Person {}: many alternate names ({}) (strategy: many-alternate-names, fraction: {})",
+                        handle, name_count, many_alternate_names_fraction
+                    ));
+                }
+            }
         }
     }
 
