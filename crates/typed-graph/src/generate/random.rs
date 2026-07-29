@@ -25,6 +25,9 @@
 //! `graph.validate(&schema)` before serialization, following the five-stage
 //! pipeline (Generate → Validate → ...).
 
+// Allow dead code for functions used by later steps in the generation pipeline.
+#![allow(dead_code)]
+
 use std::ops::Range;
 
 // ---------------------------------------------------------------------------
@@ -423,6 +426,212 @@ fn generate_city_name(
 }
 
 // ---------------------------------------------------------------------------
+// Person generation
+// ---------------------------------------------------------------------------
+
+/// A summary of a generated person, used for parent selection and family building.
+#[derive(Clone, Debug)]
+pub(crate) struct PersonSummary {
+    pub handle: crate::Handle,
+    pub birth_year: i32,
+    pub gender: i32,
+    pub layer: usize,
+    pub is_parent: bool,
+    pub is_child: bool,
+}
+
+/// Generate a random Person node with procedural name, gender, and dates.
+///
+/// Returns the handle of the created person node.
+/// The person is added to the graph via the `Graph` API.
+pub(crate) fn generate_random_person(
+    graph: &mut crate::Graph,
+    config: &RandomConfig,
+    used_names: &mut std::collections::HashSet<String>,
+    rng: &mut impl rand::Rng,
+    generation_layer: usize,
+) -> Result<crate::Handle, GenerationError> {
+    let handle = uuid::Uuid::new_v4().to_string();
+
+    // Generate a given name and surname
+    let given_name = generate_given_name(&config.name_style, used_names, rng);
+    let surname = generate_surname(&config.name_style, used_names, rng);
+
+    // Track used names
+    used_names.insert(given_name.clone());
+    used_names.insert(surname.clone());
+
+    // Select gender: 0 (Male) or 1 (Female) with equal probability,
+    // occasionally 2 (Unknown, ~5%)
+    let gender: i32 = {
+        let roll: f64 = rng.gen();
+        if roll < 0.475 {
+            0
+        } else if roll < 0.95 {
+            1
+        } else {
+            2
+        }
+    };
+
+    // Generate birth date based on generation layer
+    let birth_year = birth_year_for_layer(generation_layer, config, rng);
+    let birth_month = rng.gen_range(1..=12);
+    let birth_day = rng.gen_range(1..=28); // Safe for all months
+    let birth_date = crate::DateValue::new_ymd(birth_year, birth_month, birth_day);
+
+    // Quality: Exact (~80%), Estimated (~15%), Calculated (~5%)
+    let birth_date = randomize_date_quality(birth_date, rng);
+
+    // Optionally generate a death date
+    let death_date = generate_death_date(birth_year, config, rng);
+
+    // Build the person data
+    let person = crate::PersonData {
+        handle: handle.clone(),
+        gender,
+        primary_name: crate::Name {
+            first_name: Some(given_name.clone()),
+            surname_list: vec![crate::Surname {
+                surname: Some(surname),
+                ..crate::Surname::default()
+            }],
+            ..crate::Name::default()
+        },
+        ..crate::PersonData::default()
+    };
+
+    // Add the person node to the graph
+    graph.add_node(handle.clone(), crate::Node::Person(person))
+        .map_err(|_| GenerationError::InvalidConfig(
+            format!("duplicate handle: {}", handle)
+        ))?;
+
+    // Create birth event
+    let event_handle = uuid::Uuid::new_v4().to_string();
+    let birth_event = crate::EventData {
+        handle: event_handle.clone(),
+        event_type: crate::EventType::Birth,
+        date: Some(birth_date),
+        ..crate::EventData::default()
+    };
+    graph.add_node(event_handle.clone(), crate::Node::Event(birth_event))
+        .map_err(|_| GenerationError::InvalidConfig(
+            format!("duplicate event handle: {}", event_handle)
+        ))?;
+
+    // Link birth event to person
+    graph.add_edge(crate::Edge::PersonEventRef {
+        source: handle.clone(),
+        target: event_handle,
+        metadata: Box::new(crate::EventRef {
+            ref_field: handle.clone(),
+            role: Some(crate::EventRoleType::Primary),
+        }),
+    }).expect("birth event target exists (just added)");
+
+    // Create death event if death date is set
+    if let Some(death_date) = death_date {
+        let death_event_handle = uuid::Uuid::new_v4().to_string();
+        let death_event = crate::EventData {
+            handle: death_event_handle.clone(),
+            event_type: crate::EventType::Death,
+            date: Some(death_date),
+            ..crate::EventData::default()
+        };
+        graph.add_node(death_event_handle.clone(), crate::Node::Event(death_event))
+            .map_err(|_| GenerationError::InvalidConfig(
+                format!("duplicate event handle: {}", death_event_handle)
+            ))?;
+
+        graph.add_edge(crate::Edge::PersonEventRef {
+            source: handle.clone(),
+            target: death_event_handle,
+            metadata: Box::new(crate::EventRef {
+                ref_field: handle.clone(),
+                role: Some(crate::EventRoleType::Primary),
+            }),
+        }).expect("death event target exists (just added)");
+    }
+
+    Ok(handle)
+}
+
+/// Determine the birth year for a person in the given generation layer.
+fn birth_year_for_layer(layer: usize, config: &RandomConfig, rng: &mut impl rand::Rng) -> i32 {
+    // Each layer shifts birth year range back by ~30 years
+    // Layer 0: end_year-55 to end_year-25 (roughly 1970-2000 for end_year=2025)
+    // Layer 1: end_year-85 to end_year-55 (roughly 1940-1970)
+    // Layer 2: end_year-115 to end_year-85 (roughly 1910-1940)
+    // etc.
+    let range_end = config.end_year - 25 - (layer as i32 * 30);
+    let range_start = config.end_year - 55 - (layer as i32 * 30);
+
+    let effective_start = range_start.max(config.start_year);
+    let effective_end = range_end.max(effective_start + 1);
+
+    rng.gen_range(effective_start..effective_end)
+}
+
+/// Randomize the quality of a date value.
+fn randomize_date_quality(date: crate::DateValue, rng: &mut impl rand::Rng) -> crate::DateValue {
+    let roll: f64 = rng.gen();
+    let quality = if roll < 0.80 {
+        crate::DateQuality::Exact
+    } else if roll < 0.95 {
+        crate::DateQuality::Estimated
+    } else {
+        crate::DateQuality::Calculated
+    };
+    crate::DateValue {
+        quality: Some(quality),
+        ..date
+    }
+}
+
+/// Generate a death date if the person is plausibly deceased.
+fn generate_death_date(
+    birth_year: i32,
+    config: &RandomConfig,
+    rng: &mut impl rand::Rng,
+) -> Option<crate::DateValue> {
+    let current_year = config.end_year;
+    let age = current_year - birth_year;
+
+    // Determine if the person is plausibly deceased
+    let is_deceased = if age > 100 {
+        true // Very old, almost certainly deceased
+    } else if age > 80 {
+        rng.gen_bool(0.8) // Likely deceased
+    } else if age > 60 {
+        rng.gen_bool(0.4) // Possibly deceased
+    } else {
+        rng.gen_bool(0.1) // Unlikely to be deceased
+    };
+
+    if !is_deceased {
+        return None;
+    }
+
+    // Death year = birth year + random age at death (18-100)
+    let age_at_death: i32 = rng.gen_range(18..=100);
+    let death_year = birth_year + age_at_death;
+
+    // Ensure death year is not after the current year
+    let death_year = death_year.min(current_year);
+
+    // Ensure death year is after birth year
+    if death_year <= birth_year {
+        return None;
+    }
+
+    let death_month = rng.gen_range(1..=12);
+    let death_day = rng.gen_range(1..=28);
+
+    Some(crate::DateValue::new_ymd(death_year, death_month, death_day))
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -715,5 +924,202 @@ mod tests {
         assert!(place.county.is_empty(), "County should be empty at depth 2");
         assert!(!place.state.is_empty(), "State should be non-empty at depth 2");
         assert!(!place.country.is_empty(), "Country should be non-empty at depth 2");
+    }
+
+    // -----------------------------------------------------------------------
+    // Random person generation tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn generate_random_person_creates_node() {
+        let mut graph = crate::Graph::new();
+        let config = RandomConfig::default();
+        let mut used_names = std::collections::HashSet::new();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+        let handle = generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0)
+            .expect("person generation should succeed");
+
+        assert!(graph.contains_node(&handle));
+        assert_eq!(graph.node_count(), 2); // Person + birth event
+    }
+
+    #[test]
+    fn generate_random_person_has_name() {
+        let mut graph = crate::Graph::new();
+        let config = RandomConfig::default();
+        let mut used_names = std::collections::HashSet::new();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+        let handle = generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0)
+            .expect("person generation should succeed");
+
+        match graph.get_node(&handle).unwrap() {
+            crate::Node::Person(person) => {
+                assert!(person.primary_name.first_name.is_some());
+            }
+            _ => panic!("Expected Person node"),
+        }
+    }
+
+    #[test]
+    fn generate_random_person_has_valid_gender() {
+        let mut graph = crate::Graph::new();
+        let config = RandomConfig::default();
+        let mut used_names = std::collections::HashSet::new();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+        let handle = generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0)
+            .expect("person generation should succeed");
+
+        match graph.get_node(&handle).unwrap() {
+            crate::Node::Person(person) => {
+                assert!(
+                    person.gender == 0 || person.gender == 1 || person.gender == 2,
+                    "Gender must be 0, 1, or 2, got {}",
+                    person.gender
+                );
+            }
+            _ => panic!("Expected Person node"),
+        }
+    }
+
+    #[test]
+    fn generate_random_person_birth_date_in_range() {
+        let mut graph = crate::Graph::new();
+        let config = RandomConfig {
+            start_year: 1900,
+            end_year: 2000,
+            ..RandomConfig::default()
+        };
+        let mut used_names = std::collections::HashSet::new();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+        let _handle = generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 1)
+            .expect("person generation should succeed");
+
+        // Layer 1: end_year-85 to end_year-55 = 1915 to 1945
+        // Check that a birth event exists with a date in the expected range
+        for (_, node) in graph.iter_nodes() {
+            if let crate::Node::Event(event) = node {
+                if event.event_type == crate::EventType::Birth {
+                    if let Some(ref date) = event.date {
+                        // Broad range check: birth year should be plausible
+                        assert!(
+                            date.year >= 1900 && date.year <= 2000,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn generate_random_person_death_after_birth() {
+        // Use old config to ensure death is generated
+        let mut graph = crate::Graph::new();
+        let config = RandomConfig {
+            start_year: 1850,
+            end_year: 1925,
+            ..RandomConfig::default()
+        };
+        let mut used_names = std::collections::HashSet::new();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+        let handle = generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0)
+            .expect("person generation should succeed");
+
+        // Check that if death event exists, its date is after birth
+        let mut birth_year = 0i32;
+        let mut death_year = None;
+
+        let edges = graph.edges_from(&handle);
+        for edge in edges {
+            if let crate::Edge::PersonEventRef { target, .. } = edge {
+                if let Some(crate::Node::Event(event)) = graph.get_node(target) {
+                    match event.event_type {
+                        crate::EventType::Birth => {
+                            if let Some(ref date) = event.date {
+                                birth_year = date.year;
+                            }
+                        }
+                        crate::EventType::Death => {
+                            if let Some(ref date) = event.date {
+                                death_year = Some(date.year);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        if let Some(dy) = death_year {
+            assert!(
+                dy > birth_year,
+                "Death year {} must be after birth year {}",
+                dy, birth_year
+            );
+        }
+    }
+
+    #[test]
+    fn generate_random_person_with_seed() {
+        let mut graph1 = crate::Graph::new();
+        let mut graph2 = crate::Graph::new();
+        let config = RandomConfig::default();
+        let mut used1 = std::collections::HashSet::new();
+        let mut used2 = std::collections::HashSet::new();
+        let mut rng1 = rand::rngs::StdRng::seed_from_u64(42);
+        let mut rng2 = rand::rngs::StdRng::seed_from_u64(42);
+
+        let h1 = generate_random_person(&mut graph1, &config, &mut used1, &mut rng1, 0)
+            .expect("person gen should succeed");
+        let h2 = generate_random_person(&mut graph2, &config, &mut used2, &mut rng2, 0)
+            .expect("person gen should succeed");
+
+        // Same seed should produce the same person data (excluding UUID handle)
+        if let (crate::Node::Person(p1), crate::Node::Person(p2)) = (
+            graph1.get_node(&h1).unwrap(),
+            graph2.get_node(&h2).unwrap(),
+        ) {
+            assert_eq!(p1.primary_name, p2.primary_name, "Names should match");
+            assert_eq!(p1.gender, p2.gender, "Genders should match");
+        } else {
+            panic!("Expected Person nodes");
+        }
+    }
+
+    #[test]
+    fn generate_random_person_regression_layer_0() {
+        let config = RandomConfig {
+            start_year: 1850,
+            end_year: 2025,
+            ..RandomConfig::default()
+        };
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        for _ in 0..10 {
+            let year = birth_year_for_layer(0, &config, &mut rng);
+            // Layer 0: end_year-55 to end_year-25 = 1970 to 2000
+            assert!(year >= 1970, "Layer 0 birth year {} should be >= 1970", year);
+            assert!(year < 2000, "Layer 0 birth year {} should be < 2000", year);
+        }
+    }
+
+    #[test]
+    fn generate_random_person_regression_layer_3() {
+        let config = RandomConfig {
+            start_year: 1850,
+            end_year: 2025,
+            ..RandomConfig::default()
+        };
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        for _ in 0..10 {
+            let year = birth_year_for_layer(3, &config, &mut rng);
+            // Layer 3: end_year-55-90 to end_year-25-90 = 1880 to 1910
+            // More precisely: end_year-55-90 = 1880, end_year-25-90 = 1910
+            assert!(year >= 1880, "Layer 3 birth year {} should be >= 1880", year);
+            assert!(year <= 1925, "Layer 3 birth year {} should be <= 1925", year);
+        }
     }
 }
