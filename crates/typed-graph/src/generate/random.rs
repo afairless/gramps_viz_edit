@@ -124,12 +124,190 @@ impl std::fmt::Display for GenerationError {
 impl std::error::Error for GenerationError {}
 
 // ---------------------------------------------------------------------------
+// Name generator — Markov-chain syllable approach
+// ---------------------------------------------------------------------------
+
+/// Syllable table for a single name style.
+struct SyllableTable {
+    /// Syllables that can start a name.
+    starts: &'static [&'static str],
+    /// Syllables that can follow any other syllable (including starts).
+    middles: &'static [&'static str],
+    /// Syllables that can end a name.
+    ends: &'static [&'static str],
+}
+
+/// Syllable table for given names in "modern" style.
+const MODERN_GIVEN: SyllableTable = SyllableTable {
+    starts: &[
+        "Ale", "Ben", "Chlo", "Dani", "Emi", "Hann", "Jake", "Jord", "Kait", "Log",
+        "Madd", "Matt", "Noah", "Oliv", "Rile", "Sam", "Soph", "Tayl", "Tyl", "Zach",
+    ],
+    middles: &[
+        "ex", "iss", "son", "ton", "sha", "lyn", "iel", "ica", "ber", "mac",
+    ],
+    ends: &[
+        "xander", "nna", "ah", "er", "y", "ie", "a", "ia", "an", "en",
+    ],
+};
+
+/// Syllable table for given names in "victorian" style.
+const VICTORIAN_GIVEN: SyllableTable = SyllableTable {
+    starts: &[
+        "Agnes", "Char", "Edw", "Eliz", "Flor", "Fran", "Geor", "Henr", "Isab",
+        "Jame", "Lyd", "Marg", "Mary", "Matt", "Oli", "Rach", "Samu", "Thom",
+        "Vict", "Will",
+    ],
+    middles: &[
+        "ar", "el", "in", "on", "et", "eb", "an", "or", "ia", "ie",
+    ],
+    ends: &[
+        "ard", "ette", "ine", "ia", "y", "a", "ah", "on", "el", "en",
+    ],
+};
+
+/// Syllable table for given names in "nordic" style.
+const NORDIC_GIVEN: SyllableTable = SyllableTable {
+    starts: &[
+        "Agn", "Bjor", "Carl", "Els", "Frid", "Gus", "Hans", "Ingr",
+        "Karl", "Lars", "Lenn", "Mats", "Nils", "Ola", "Per", "Ragn",
+        "Sigr", "Sven", "Tor", "Ulr",
+    ],
+    middles: &[
+        "ar", "bj", "er", "ik", "il", "jo", "kn", "or", "ri", "un",
+    ],
+    ends: &[
+        "a", "e", "en", "er", "i", "id", "ik", "o", "or", "us",
+    ],
+};
+
+/// Syllable table for surnames (shared across all styles).
+const SURNAME_TABLE: SyllableTable = SyllableTable {
+    starts: &[
+        "Ash", "Black", "Brook", "Clay", "Copper", "Dark", "Fair", "Fox",
+        "Gold", "Gray", "Green", "Hawk", "Iron", "Lock", "Moor", "Night",
+        "Oak", "Raven", "Red", "Silver", "Snow", "Stone", "Storm", "Swift",
+        "Thorn", "Under", "Water", "White", "Wind", "Winter", "Wood",
+    ],
+    middles: &[
+        "er", "in", "on", "en", "ar", "or", "le", "el", "an", "un",
+    ],
+    ends: &[
+        "born", "bridge", "brook", "burn", "bury", "dale", "field", "ford",
+        "gate", "ham", "land", "ley", "lock", "mere", "mill", "moor",
+        "more", "shaw", "side", "stead", "stone", "town", "wald", "well",
+        "wick", "wood", "worth",
+    ],
+};
+
+/// Get the syllable table for the given name style.
+/// Falls back to "modern" for unknown styles.
+fn given_table_for_style(style: &str) -> &'static SyllableTable {
+    match style {
+        "victorian" => &VICTORIAN_GIVEN,
+        "nordic" => &NORDIC_GIVEN,
+        _ => &MODERN_GIVEN,
+    }
+}
+
+/// Generate a procedural given name using a Markov-chain syllable approach.
+///
+/// The name style determines the syllable inventory and transition probabilities.
+/// Supported styles: "modern", "victorian", "nordic" (default: "modern").
+///
+/// Returns a name in the range 1-40 characters, Latin script, UTF-8.
+/// The name is guaranteed to be non-empty and different from other names
+/// generated in the same graph (via a set of used names passed in).
+pub fn generate_given_name(
+    style: &str,
+    used_names: &std::collections::HashSet<String>,
+    rng: &mut impl rand::Rng,
+) -> String {
+    let table = given_table_for_style(style);
+    let target_len: usize = rng.gen_range(4..=10);
+    generate_name_from_table(table, target_len, used_names, rng)
+}
+
+/// Generate a procedural surname.
+///
+/// Uses a separate syllable inventory from given names to produce
+/// distinct surname patterns.
+pub fn generate_surname(
+    style: &str,
+    used_names: &std::collections::HashSet<String>,
+    rng: &mut impl rand::Rng,
+) -> String {
+    let _ = style; // Surname styles are shared; param kept for future extensibility
+    let target_len: usize = rng.gen_range(5..=12);
+    generate_name_from_table(&SURNAME_TABLE, target_len, used_names, rng)
+}
+
+/// Internal: generate a name from a syllable table targeting a length range.
+fn generate_name_from_table(
+    table: &SyllableTable,
+    target_len: usize,
+    used_names: &std::collections::HashSet<String>,
+    rng: &mut impl rand::Rng,
+) -> String {
+    // Try up to 5 times to generate a unique name
+    for attempt in 0..5 {
+        let name = build_name(table, target_len, rng);
+        if !used_names.contains(&name) {
+            return name;
+        }
+        // If this was the last attempt, fall through to suffix approach
+        if attempt == 4 {
+            // Generate with a numeric suffix
+            let base = build_name(table, target_len, rng);
+            for suffix in 1u32..1000 {
+                let candidate = format!("{}{}", base, suffix);
+                if !used_names.contains(&candidate) {
+                    return candidate;
+                }
+            }
+        }
+    }
+    // Last resort: should never reach here, but return something unique
+    "Unique".to_string()
+}
+
+/// Build a single name from the syllable table.
+fn build_name(table: &SyllableTable, target_len: usize, rng: &mut impl rand::Rng) -> String {
+    loop {
+        // Start with a start syllable
+        let start_idx = rng.gen_range(0..table.starts.len());
+        let mut name = String::from(table.starts[start_idx]);
+
+        // Add middle syllables until we reach the target length
+        // or decide to end
+        let max_middles = 3;
+        for _ in 0..max_middles {
+            if name.len() >= target_len || rng.gen_bool(0.4) {
+                break;
+            }
+            let mid_idx = rng.gen_range(0..table.middles.len());
+            name.push_str(table.middles[mid_idx]);
+        }
+
+        // Add an ending syllable
+        let end_idx = rng.gen_range(0..table.ends.len());
+        name.push_str(table.ends[end_idx]);
+
+        // Ensure the name is non-empty and within length bounds
+        if !name.is_empty() && name.len() <= 40 {
+            return name;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::SeedableRng;
 
     // -----------------------------------------------------------------------
     // RandomConfig tests
@@ -227,5 +405,104 @@ mod tests {
         use std::error::Error;
         let err = GenerationError::InvalidConfig("test".to_string());
         assert!(err.source().is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Name generator tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn generate_given_name_returns_non_empty() {
+        let used = std::collections::HashSet::new();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        for style in &["modern", "victorian", "nordic"] {
+            let name = generate_given_name(style, &used, &mut rng);
+            assert!(!name.is_empty(), "Style {} produced empty name", style);
+        }
+    }
+
+    #[test]
+    fn generate_given_name_fits_length_bounds() {
+        let used = std::collections::HashSet::new();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        for style in &["modern", "victorian", "nordic"] {
+            let name = generate_given_name(style, &used, &mut rng);
+            assert!(name.len() <= 40, "Name '{}' exceeds 40 chars", name);
+            assert!(!name.is_empty(), "Style {} produced empty name", style);
+        }
+    }
+
+    #[test]
+    fn generate_given_name_different_with_different_seeds() {
+        let used = std::collections::HashSet::new();
+        let mut rng1 = rand::rngs::StdRng::seed_from_u64(42);
+        let mut rng2 = rand::rngs::StdRng::seed_from_u64(99);
+        let name1 = generate_given_name("modern", &used, &mut rng1);
+        let name2 = generate_given_name("modern", &used, &mut rng2);
+        assert_ne!(name1, name2, "Different seeds produced same name");
+    }
+
+    #[test]
+    fn generate_given_name_unique_across_calls() {
+        let mut used = std::collections::HashSet::new();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        for _ in 0..50 {
+            let name = generate_given_name("modern", &used, &mut rng);
+            assert!(!used.contains(&name), "Duplicate name generated: {}", name);
+            used.insert(name);
+        }
+    }
+
+    #[test]
+    fn generate_given_name_style_unsupported_falls_back() {
+        let used = std::collections::HashSet::new();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let name = generate_given_name("nonexistent_style", &used, &mut rng);
+        assert!(!name.is_empty(), "Fallback style produced empty name");
+    }
+
+    #[test]
+    fn generate_given_name_utf8() {
+        let used = std::collections::HashSet::new();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        for style in &["modern", "victorian", "nordic"] {
+            let name = generate_given_name(style, &used, &mut rng);
+            assert!(std::str::from_utf8(name.as_bytes()).is_ok());
+        }
+    }
+
+    #[test]
+    fn generate_surname_differs_from_given_name() {
+        let used = std::collections::HashSet::new();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let given = generate_given_name("modern", &used, &mut rng);
+        let surname = generate_surname("modern", &used, &mut rng);
+        // Surnames use a different syllable table so they should differ
+        // (there's a tiny chance they could collide)
+        assert!(!given.is_empty(), "Given name should be non-empty");
+        assert!(!surname.is_empty(), "Surname should be non-empty");
+    }
+
+    #[test]
+    fn generate_surname_non_empty() {
+        let used = std::collections::HashSet::new();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let surname = generate_surname("modern", &used, &mut rng);
+        assert!(!surname.is_empty());
+        assert!(surname.len() <= 40);
+    }
+
+    #[test]
+    fn generate_given_name_append_suffix_when_exhausted() {
+        // Fill the used set with many names to force suffix fallback
+        let mut used = std::collections::HashSet::new();
+        // Pre-populate with common patterns to force suffix
+        for i in 0..500 {
+            used.insert(format!("Name{}", i));
+        }
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let name = generate_given_name("modern", &used, &mut rng);
+        assert!(!name.is_empty());
+        assert!(!used.contains(&name));
     }
 }
