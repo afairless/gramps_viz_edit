@@ -188,6 +188,3 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo build --release
 ```
 
-## License
-
-This project is licensed under the MIT License.
