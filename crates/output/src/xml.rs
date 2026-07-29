@@ -1388,4 +1388,238 @@ mod tests {
 
         assert!(xml.contains("<sabbrev>John Smith</sabbrev>"));
     }
+
+    // -----------------------------------------------------------------------
+    // Tests for embedded refs and mixins (Step 3)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn serialize_person_eventref() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        graph.add_node("p1".to_string(), make_person("p1", None)).unwrap();
+        graph.add_node("e1".to_string(), make_event("e1", EventType::Birth)).unwrap();
+        graph
+            .add_edge(Edge::PersonEventRef {
+                source: "p1".to_string(),
+                target: "e1".to_string(),
+                metadata: Box::new(EventRef {
+                    ref_field: "e1".to_string(),
+                    role: Some(EventRoleType::Primary),
+                }),
+            })
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"<eventref hlink="e1""#));
+        assert!(xml.contains("<role>Primary</role>"));
+    }
+
+    #[test]
+    fn serialize_family_childref() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        graph.add_node("f1".to_string(), make_family("f1", None)).unwrap();
+        graph.add_node("p1".to_string(), make_person("p1", None)).unwrap();
+        graph
+            .add_edge(Edge::FamilyChildRef {
+                source: "f1".to_string(),
+                target: "p1".to_string(),
+                metadata: Box::new(ChildRef {
+                    ref_field: "p1".to_string(),
+                    relation: Some(ChildRefType::Birth),
+                }),
+            })
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"<childref hlink="p1" rel="Birth""#));
+    }
+
+    #[test]
+    fn serialize_person_personref() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        graph.add_node("p1".to_string(), make_person("p1", None)).unwrap();
+        graph.add_node("p2".to_string(), make_person("p2", None)).unwrap();
+        graph
+            .add_edge(Edge::PersonPersonRef {
+                source: "p1".to_string(),
+                target: "p2".to_string(),
+                metadata: Box::new(PersonRef {
+                    ref_field: "p2".to_string(),
+                    relation: Some(FamilyRelType::Married),
+                }),
+            })
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"<personref hlink="p2""#));
+    }
+
+    #[test]
+    fn serialize_source_reporef() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        graph
+            .add_node("s1".to_string(), make_source("s1", "Some Source"))
+            .unwrap();
+        graph
+            .add_node("r1".to_string(), make_repository("r1", "Archive"))
+            .unwrap();
+        graph
+            .add_edge(Edge::SourceRepoRef {
+                source: "s1".to_string(),
+                target: "r1".to_string(),
+                metadata: Box::new(RepoRef {
+                    ref_field: "r1".to_string(),
+                    call_number: None,
+                    media_type: None,
+                }),
+            })
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"<reporef hlink="r1""#));
+    }
+
+    #[test]
+    fn serialize_citationref() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        graph.add_node("p1".to_string(), make_person("p1", None)).unwrap();
+        graph.add_node("c1".to_string(), make_citation("c1")).unwrap();
+        graph
+            .add_edge(Edge::PersonCitation {
+                source: "p1".to_string(),
+                target: "c1".to_string(),
+            })
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"<citationref hlink="c1""#));
+    }
+
+    #[test]
+    fn serialize_noteref() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        graph.add_node("p1".to_string(), make_person("p1", None)).unwrap();
+        graph
+            .add_node("n1".to_string(), make_note("n1", "A note"))
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonNote {
+                source: "p1".to_string(),
+                target: "n1".to_string(),
+            })
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"<noteref hlink="n1""#));
+    }
+
+    #[test]
+    fn serialize_mediaref() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        graph.add_node("p1".to_string(), make_person("p1", None)).unwrap();
+        graph
+            .add_node("m1".to_string(), make_media("m1", "file.jpg", None))
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonMediaRef {
+                source: "p1".to_string(),
+                target: "m1".to_string(),
+            })
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"<mediaref hlink="m1""#));
+    }
+
+    #[test]
+    fn serialize_tagref() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        graph.add_node("p1".to_string(), make_person("p1", None)).unwrap();
+        graph
+            .add_node("t1".to_string(), make_tag("t1", "Complete", None, None))
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonTag {
+                source: "p1".to_string(),
+                target: "t1".to_string(),
+            })
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"<tagref hlink="t1""#));
+    }
+
+    #[test]
+    fn serialize_multiple_refs() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map);
+        let mut graph = Graph::new();
+        graph.add_node("p1".to_string(), make_person("p1", None)).unwrap();
+        graph
+            .add_node("n1".to_string(), make_note("n1", "Note 1"))
+            .unwrap();
+        graph
+            .add_node("n2".to_string(), make_note("n2", "Note 2"))
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonNote {
+                source: "p1".to_string(),
+                target: "n1".to_string(),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonNote {
+                source: "p1".to_string(),
+                target: "n2".to_string(),
+            })
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        // Both note refs should be present
+        assert!(xml.contains(r#"<noteref hlink="n1"/>"#));
+        assert!(xml.contains(r#"<noteref hlink="n2"/>"#));
+    }
 }
