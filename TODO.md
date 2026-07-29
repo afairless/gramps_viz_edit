@@ -1,655 +1,663 @@
-# Implementation Plan: Phase 5 — Random Generation
+# Implementation Plan: Phase 6 — Adversarial Generation
 
 Source: `docs/research/design.md`
 
-## Phase 5 Scope
+## Phase 6 Scope
 
-Phase 5 builds the random generation engine on top of the completed Phases 1–4 (schema extraction/codegen, graph core/validation, GraphBuilder API, XML serializer). The random generation engine produces full family tree graphs with procedural names, dates, and places, and enforces genealogical plausibility constraints.
+Phase 6 builds the adversarial generation engine on top of the completed Phases 1–5 (schema extraction/codegen, graph core/validation, GraphBuilder API, XML serializer, random generation). Adversarial strategies produce unusual, boundary, or deliberately invalid graph structures for testing downstream tools.
 
-**Key design references**: design §7.1 (Procedural data sources), §7.2 (Random generation algorithm), §7.5 (Configuration schema), §10 Phase 5.
+Two categories of strategies:
 
-All new code lives in `crates/typed-graph/src/generate/random.rs` (and its sub-modules), sharing the `rand` dependency already in the workspace.
+- **Category A (generation-time)**: Modify how the random generation algorithm works, gated by config flags — one-parent families, missing events, solo persons, many alternate names.
+- **Category B (post-generation transforms)**: Composable pure functions `fn(Graph) -> Graph` applied after generation and the first validation gate — disconnected subgraphs, deep nesting, maximum ref chains, orphaned references.
+
+Category B is further split into:
+
+- **Validity-preserving** (passes the second validation gate): disconnected subgraphs, deep nesting, max ref chains.
+- **Validity-breaking** (expected to fail the second validation gate): orphaned references.
+
+**Key design references**: design §7.4 (Adversarial generation), §10 Phase 6, §11 (Pipeline model).
+
+New code lives in `crates/typed-graph/src/generate/adversarial.rs` and its sub-modules.
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `chore: add random generation module with RandomConfig and GenerationError` | Random gen scaffold | `crates/typed-graph/src/generate/random.rs`, `crates/typed-graph/src/generate/mod.rs` | Smoke, Unit |
-| 2 | `feat: implement procedural name generator with Markov-chain syllables` | Name generator | `crates/typed-graph/src/generate/random.rs` | Unit, Property-based |
-| 3 | `feat: implement procedural place generator with hierarchical templates` | Place generator | `crates/typed-graph/src/generate/random.rs` | Unit, Property-based |
-| 4 | `feat: implement random person generation with procedural names and dates` | Random person gen | `crates/typed-graph/src/generate/random.rs` | Unit |
-| 5 | `feat: implement parent selection and family creation algorithm` | Family generation | `crates/typed-graph/src/generate/random.rs` | Unit |
-| 6 | `feat: implement child assignment with genealogical age constraints` | Child assignment | `crates/typed-graph/src/generate/random.rs` | Unit |
-| 7 | `feat: implement event generation (birth, death, marriage) for random graphs` | Event generation | `crates/typed-graph/src/generate/random.rs` | Unit |
-| 8 | `feat: implement generate_random entry point with seeded RNG and config` | Random generation API | `crates/typed-graph/src/generate/random.rs` | Unit, Integration |
-| 9 | `test: add property-based tests for random generation invariants` | Property tests | `crates/typed-graph/src/generate/random.rs` | Property-based |
+| 1 | `feat: add adversarial generation module with strategy enums and config` | Adversarial scaffold | `crates/typed-graph/src/generate/adversarial.rs`, `crates/typed-graph/src/generate/mod.rs` | Unit |
+| 2 | `feat: implement one-parent families generation-time strategy` | Category A — one-parent | `crates/typed-graph/src/generate/adversarial.rs`, `crates/typed-graph/src/generate/random.rs` | Unit |
+| 3 | `feat: implement missing-events generation-time strategy` | Category A — missing events | `crates/typed-graph/src/generate/adversarial.rs`, `crates/typed-graph/src/generate/random.rs` | Unit |
+| 4 | `feat: implement solo-persons generation-time strategy` | Category A — solo persons | `crates/typed-graph/src/generate/adversarial.rs`, `crates/typed-graph/src/generate/random.rs` | Unit |
+| 5 | `feat: implement many-alternate-names generation-time strategy` | Category A — many names | `crates/typed-graph/src/generate/adversarial.rs`, `crates/typed-graph/src/generate/random.rs` | Unit |
+| 6 | `feat: implement disconnected-subgraphs post-generation transform` | Category B — disconnected | `crates/typed-graph/src/generate/adversarial.rs` | Unit |
+| 7 | `feat: implement deep-nesting post-generation transform` | Category B — deep nesting | `crates/typed-graph/src/generate/adversarial.rs` | Unit |
+| 8 | `feat: implement max-ref-chains post-generation transform (validity-preserving)` | Category B — max ref chains | `crates/typed-graph/src/generate/adversarial.rs` | Unit |
+| 9 | `feat: implement orphaned-references post-generation transform (validity-breaking)` | Category B — orphaned refs | `crates/typed-graph/src/generate/adversarial.rs` | Unit |
+| 10 | `feat: add adversarial strategy runner and integrate into generation pipeline` | Strategy runner | `crates/typed-graph/src/generate/adversarial.rs`, `crates/typed-graph/src/generate/random.rs`, `crates/typed-graph/src/lib.rs` | Unit, Integration |
+| 11 | `feat: add CLI --adversarial flag and YAML config support` | CLI integration | `crates/cli/src/main.rs` (or equivalent CLI crate) | Smoke |
+| 12 | `test: add property-based tests for adversarial invariants` | Property tests | `tests/property/adversarial.rs` (or crate-local) | Property-based |
 
 ### Step Details
 
-#### Step 1 — Random gen scaffold
+#### Step 1 — Adversarial scaffold
 
-- Create `crates/typed-graph/src/generate/random.rs` with module-level documentation describing the random generation approach (seeded RNG, procedural data, genealogical constraints).
-- Define `RandomConfig`:
+- Create `crates/typed-graph/src/generate/adversarial.rs` with module-level documentation describing the adversarial generation approach (two categories, post-generation pipeline, validity preservation contract).
+- Define the strategy enum:
 
   ```rust
-  /// Configuration for random graph generation.
+  /// Adversarial strategy selector.
   ///
-  /// Controls the size, depth, date ranges, and optional features
-  /// of the generated family tree graph.
+  /// Each variant represents a single composable adversarial strategy.
+  /// Strategies are divided into two categories:
+  ///
+  /// - **Category A** (generation-time): Affects how the random generation
+  ///   algorithm builds the graph. Gated by config flags on `RandomConfig`.
+  /// - **Category B** (post-generation): Pure function transforms applied
+  ///   to a fully generated graph. Applied in sequence.
   #[derive(Clone, Debug, PartialEq)]
-  pub struct RandomConfig {
-      /// Number of Person nodes to generate (default: 200).
-      pub person_count: usize,
-      /// Number of Family nodes to generate (default: person_count / 2).
-      pub family_count: usize,
-      /// Number of generations (default: 3).
-      /// Used to assign default birth years when no dates are specified.
-      pub generations: usize,
-      /// Children per family range (default: 1–4).
-      pub children_per_family: Range<usize>,
-      /// Start year for date ranges (default: 1850).
-      pub start_year: i32,
-      /// End year for date ranges (default: 2025).
-      pub end_year: i32,
-      /// Name style for procedural generation (default: "modern").
-      pub name_style: String,
-      /// Whether to generate Place nodes (default: false).
-      pub with_places: bool,
-      /// Whether to generate Source nodes and Citation edges (default: false).
-      pub with_citations: bool,
-      /// Whether to generate Note nodes (default: false).
-      pub with_notes: bool,
-      /// Whether to generate Media objects (default: false).
-      pub with_media: bool,
-      /// Whether to generate Tag nodes (default: false).
-      pub with_tags: bool,
-      /// Optional RNG seed for reproducible generation.
-      /// If None, a random seed is generated from OS entropy.
-      pub seed: Option<u64>,
-      /// Place hierarchy depth (default: 3, used when with_places is true).
-      pub place_depth: usize,
+  pub enum AdversarialStrategy {
+      // ---- Category A: generation-time ----
+      /// Skip father or mother assignment for a configurable fraction of families.
+      OneParentFamilies(f64),
+      /// Skip birth/death events for a configurable fraction of persons.
+      MissingEvents(f64),
+      /// Create persons with no families, no events, just a name.
+      SoloPersons(f64),
+      /// Add 5–20 alternate names to a configurable fraction of persons.
+      ManyAlternateNames(f64),
+
+      // ---- Category B: post-generation transforms ----
+      /// Split the graph into multiple unrelated clusters by deleting
+      /// cross-cluster family edges. Validity-preserving.
+      DisconnectedSubgraphs,
+      /// Replace place hierarchies with 5–10 level deep chains.
+      /// Validity-preserving.
+      DeepNesting,
+      /// Create legal maximum-length reference chains
+      /// (Event → Citation → Source → Repository → Note → ...).
+      /// Validity-preserving.
+      MaxRefChains,
+      /// Remove some edges from citation/note/media references while keeping
+      /// the target nodes. Validity-breaking (fails second validation gate).
+      OrphanedReferences,
   }
   ```
 
-  Implement `Default` for `RandomConfig` with sensible defaults.
-
-- Define `GenerationError`:
+- Define `AdversarialConfig`:
 
   ```rust
-  /// Errors that can occur during random graph generation.
+  /// Configuration for adversarial generation.
+  ///
+  /// When `enabled` is false (the default), generation proceeds normally
+  /// with no adversarial strategies applied.
   #[derive(Clone, Debug, PartialEq)]
-  pub enum GenerationError {
-      /// Configuration is invalid (e.g., person_count == 0).
-      InvalidConfig(String),
-      /// Generation failed due to exhausted constraints (e.g., no eligible parents).
-      /// Includes the seed for reproducibility.
-      ConstraintExhausted { message: String, seed: u64 },
+  pub struct AdversarialConfig {
+      /// Whether adversarial generation is enabled.
+      pub enabled: bool,
+      /// List of adversarial strategies to apply.
+      ///
+      /// Category A strategies are applied during generation (they modify
+      /// how `generate_random` behaves). Category B strategies are applied
+      /// as post-generation transforms on a known-valid graph.
+      pub strategies: Vec<AdversarialStrategy>,
+  }
+
+  impl Default for AdversarialConfig {
+      fn default() -> Self {
+          AdversarialConfig {
+              enabled: false,
+              strategies: vec![],
+          }
+      }
+  }
+  ```
+
+- Define `AdversarialError`:
+
+  ```rust
+  /// Errors that can occur during adversarial transformation.
+  #[derive(Clone, Debug, PartialEq)]
+  pub enum AdversarialError {
+      /// A transform cannot be applied because the graph is empty or too small.
+      TransformNotApplicable(String),
+      /// A transform requires features (e.g., places) that are not present.
+      MissingRequiredFeature(String),
   }
   ```
 
   Implement `std::fmt::Display` and `std::error::Error`.
 
+- Define the transform function signature:
+
+  ```rust
+  /// A post-generation graph transform.
+  ///
+  /// Each transform is a pure function that takes a `Graph` and returns
+  /// a modified `Graph`. This composable design allows strategies to be
+  /// applied in sequence and tested independently.
+  pub type GraphTransform = fn(Graph) -> Graph;
+  ```
+
 - Update `crates/typed-graph/src/generate/mod.rs`:
-  - Add `pub mod random;`
-  - Add `pub use random::*;`
+  - Add `pub mod adversarial;`
+  - Add `pub use adversarial::*;`
 
 - **Tests**:
-  - `random_config_defaults`: `RandomConfig::default()` has `person_count == 200`, `generations == 3`, `start_year == 1850`, `end_year == 2025`.
-  - `random_config_custom`: Construct with explicit values, verify all fields.
-  - `generation_error_display`: Both `InvalidConfig` and `ConstraintExhausted` produce actionable messages.
-  - `generation_error_contains_seed`: `ConstraintExhausted` includes the seed in its display.
+  - `adversarial_strategy_variants_exist`: All 7 strategy variants can be constructed.
+  - `adversarial_strategy_one_parent_holds_fraction`: `OneParentFamilies(0.5)` stores the fraction correctly.
+  - `adversarial_config_default_disabled`: `AdversarialConfig::default()` has `enabled == false` and empty strategies.
+  - `adversarial_config_explicit`: Construct with `enabled: true` and two strategies, verify fields.
+  - `adversarial_error_display_basic`: `TransformNotApplicable` and `MissingRequiredFeature` produce actionable messages.
+  - `adversarial_transform_signature`: `GraphTransform` type alias accepts `fn(Graph) -> Graph`.
   - Verify: `cargo build` compiles.
 
-#### Step 2 — Procedural name generator
+#### Step 2 — Category A: one-parent families
 
-- In `crates/typed-graph/src/generate/random.rs`, implement the name generator:
+- Modify the random generation algorithm in `random.rs` to support the **one-parent families** strategy:
+  - When `AdversarialStrategy::OneParentFamilies(fraction)` is active, for the given fraction of families, skip either father or mother assignment.
+  - Modify `select_parents()` and `generate_family()` to accept an optional `one_parent_fraction: f64` parameter or pull it from `RandomConfig`.
+  - For one-parent families: randomly choose whether to skip the father (default) or the mother (flip a coin).
+  - One-parent families are structurally valid (Gramps allows missing father_handle/mother_handle).
+  - Emit a plausibility warning for each one-parent family created.
+
+- **Tests**:
+  - `one_parent_families_strategy_zero_fraction`: fraction=0.0 produces no one-parent families.
+  - `one_parent_families_strategy_all_single`: fraction=1.0 produces all families with one parent.
+  - `one_parent_families_validates_ok`: One-parent families pass structural + referential validation.
+  - `one_parent_families_single_produces_warning`: Plausibility warning is emitted for each one-parent family.
+  - `one_parent_families_edge_case_one_person_pool`: When only one person is available, one-parent family is created.
+  - `one_parent_families_regression_alternating_parents`: Skipped parent alternates between father and mother across families (when fraction >= 0.5 and multiple families exist).
+
+#### Step 3 — Category A: missing events
+
+- Modify the random generation algorithm in `random.rs` to support the **missing events** strategy:
+  - When `AdversarialStrategy::MissingEvents(fraction)` is active, for the given fraction of persons, skip birth event generation entirely.
+  - This means the person node exists but has no associated events at all.
+  - For the same (or a separately configurable) fraction, skip death event generation when the person would normally have a death event.
+  - Persons with missing events are structurally valid (events are optional in Gramps).
+  - Emit a plausibility warning for each person with missing events.
+
+- **Tests**:
+  - `missing_events_zero_fraction`: fraction=0.0 produces normal events for all persons.
+  - `missing_events_all_missing`: fraction=1.0 produces no events for any person.
+  - `missing_events_validates_ok`: Graphs with missing events pass structural + referential validation.
+  - `missing_events_some_missing_some_present`: With fraction=0.5, roughly half of persons miss events (approximate, within statistical bounds).
+  - `missing_events_death_only_preserved`: Birth events can be missing while death events still exist.
+  - `missing_events_warning_emitted`: Plausibility warning emitted for each person with missing events.
+
+#### Step 4 — Category A: solo persons
+
+- Modify the random generation algorithm in `random.rs` to support the **solo persons** strategy:
+  - When `AdversarialStrategy::SoloPersons(fraction)` is active, for the given fraction of persons, do not assign them to any family (as child or parent).
+  - Solo persons have a name and optional dates/events, but no family_list, parent_family_list, or child_ref_list.
+  - They may still have events (birth, death) — that's controlled by the missing-events strategy, not solo-persons.
+  - Solo persons are structurally valid (Gramps allows persons with no family associations).
+  - Emit a plausibility warning for each solo person.
+
+- **Tests**:
+  - `solo_persons_zero_fraction`: fraction=0.0 produces normal families.
+  - `solo_persons_all_solo`: fraction=1.0 produces no families at all (all persons are solo).
+  - `solo_persons_some_solo_some_family`: With fraction=0.3, ~30% of persons are solo.
+  - `solo_persons_validates_ok`: Graphs with solo persons pass structural + referential validation.
+  - `solo_persons_still_have_events`: Solo persons still have birth/death events (unless combined with missing-events).
+  - `solo_persons_warning_emitted`: Plausibility warning emitted for each solo person.
+
+#### Step 5 — Category A: many alternate names
+
+- Modify the random generation algorithm in `random.rs` to support the **many alternate names** strategy:
+  - When `AdversarialStrategy::ManyAlternateNames(fraction)` is active, for the given fraction of persons, add 5–20 alternate names to their `alternate_names` list.
+  - Alternate names follow the same procedural generation as the primary name but use a different style or seed offset to produce distinct names.
+  - Each alternate name is a full `Name` struct with `first_name`, `surname`, and `name_type` set to `NameType::AlsoKnownAs` (or similar).
+  - Persons with many alternate names are structurally valid.
+  - Emit a plausibility warning for each person with 10+ alternate names.
+
+- **Tests**:
+  - `many_alternate_names_zero_fraction`: fraction=0.0 produces no alternate names.
+  - `many_alternate_names_all_affected`: fraction=1.0 adds alternate names to all persons.
+  - `many_alternate_names_count_in_range`: Alternate name count is in 5–20 range.
+  - `many_alternate_names_validates_ok`: Graphs with many alternate names pass structural + referential validation.
+  - `many_alternate_names_names_distinct_from_primary`: Alternate names differ from the primary name.
+  - `many_alternate_names_warning_for_10_plus`: Persons with 10+ alternate names emit a warning.
+
+#### Step 6 — Category B: disconnected subgraphs transform
+
+- In `adversarial.rs`, implement the **disconnected subgraphs** transform:
 
   ```rust
-  /// Generate a procedural given name using a Markov-chain syllable approach.
+  /// Split the graph into `k` unrelated clusters by deleting cross-cluster
+  /// family edges.
   ///
-  /// The name style determines the syllable inventory and transition probabilities.
-  /// Supported styles: "modern", "victorian", "nordic" (default: "modern").
+  /// The graph is partitioned into `k` clusters by dividing the persons
+  /// into groups. Family edges that cross cluster boundaries are removed.
+  /// All other edges (events, citations, notes, etc.) are preserved.
   ///
-  /// Returns a name in the range 1–40 characters, Latin script, UTF-8.
-  /// The name is guaranteed to be non-empty and different from other names
-  /// generated in the same graph (via a set of used names passed in).
-  pub fn generate_given_name(
-      style: &str,
-      used_names: &HashSet<String>,
-      rng: &mut impl Rng,
-  ) -> String { ... }
-
-  /// Generate a procedural surname.
+  /// This produces `k` disconnected genealogical trees within a single graph.
+  /// The transform is validity-preserving: the resulting graph still passes
+  /// structural and referential validation.
   ///
-  /// Uses a separate syllable inventory from given names to produce
-  /// distinct surname patterns.
-  pub fn generate_surname(
-      style: &str,
-      used_names: &HashSet<String>,
-      rng: &mut impl Rng,
-  ) -> String { ... }
+  /// # Parameters
+  ///
+  /// * `k` — number of clusters to create (default: 3, min: 2).
+  pub fn disconnected_subgraphs(k: usize) -> GraphTransform { ... }
   ```
 
   **Algorithm**:
-  - Define syllable tables per style as static arrays of `&[&str]`.
-  - For each style, maintain a separate first-syllable table and a transition table (syllable → possible next syllables with weights).
-  - Generate names by drawing a starting syllable, then repeatedly transitioning until a stopping condition is met (name length target, or a terminal syllable marker).
-  - Target name length: 4–10 characters for given names, 5–12 for surnames.
-  - Ensure the generated name is not already in `used_names` (retry up to 5 times, then append a numeric suffix).
-  - Data contracts: 1–40 characters, UTF-8, Latin script, non-empty.
+  - Collect all person handles from the graph.
+  - Partition persons into `k` roughly equal clusters (round-robin or random assignment based on handle order).
+  - For each cluster, identify which families connect persons across clusters (a family where father and mother are in different clusters, or a child is in a different cluster from its parents).
+  - Remove cross-cluster family edges (FamilyFather, FamilyMother, FamilyChildRef) and their reverse entries.
+  - Remove cross-cluster PersonFamily, PersonParentFamily edges.
+  - All other edges (events, citations, notes, media, places, tags) are preserved.
+  - Return the modified graph (no nodes are removed, only edges).
 
 - **Tests**:
-  - `generate_given_name_returns_non_empty`: For each style, name is non-empty.
-  - `generate_given_name_fits_length_bounds`: Name is ≤ 40 chars.
-  - `generate_given_name_different_with_different_seeds`: Two different seeds produce different names.
-  - `generate_given_name_style_victorian`: Victorian style produces names that look period-appropriate.
-  - `generate_surname_differs_from_given_name`: Surname patterns differ from given name patterns.
-  - `generate_given_name_unique_across_calls`: With a `used_names` set, no duplicates.
-  - `generate_given_name_append_suffix_when_exhausted`: When all names are used, numeric suffix is appended.
-  - `generate_given_name_utf8`: All generated names are valid UTF-8.
-  - `generate_given_name_style_unsupported_falls_back`: Unknown style falls back to "modern".
-  - Property-based: `for all seeds s1, s2 where s1 != s2`, `generate_given_name("modern", set, &mut rng_from(s1))` is not guaranteed to differ (collisions are possible but rare). Instead test: `for all style, seed`, `generate_given_name(style, set, &mut rng(seed))` is non-empty and ≤ 40 chars.
+  - `disconnected_subgraphs_k_2_produces_two_clusters`: With a graph of 10 persons, k=2 produces two disconnected clusters (no family edges between them).
+  - `disconnected_subgraphs_k_3_produces_three_clusters`: k=3 produces three clusters.
+  - `disconnected_subgraphs_validates_ok`: Transformed graph passes structural + referential validation (validity-preserving).
+  - `disconnected_subgraphs_no_nodes_removed`: Node count is unchanged.
+  - `disconnected_subgraphs_empty_graph`: Empty graph returns empty graph.
+  - `disconnected_subgraphs_k_1_clamps_to_min`: k=1 is treated as k=2 (minimum 2 clusters).
+  - `disconnected_subgraphs_single_person`: Graph with one person is unchanged (no cross-cluster edges to remove).
+  - `disconnected_subgraphs_all_event_edges_preserved`: Event edges are not affected by the transform.
 
-#### Step 3 — Procedural place generator
+#### Step 7 — Category B: deep nesting transform
 
-- In `crates/typed-graph/src/generate/random.rs`, implement the place generator:
+- In `adversarial.rs`, implement the **deep nesting** transform:
 
   ```rust
-  /// A generated place with hierarchical components.
-  #[derive(Clone, Debug, PartialEq)]
-  pub struct GeneratedPlace {
-      pub city: String,
-      pub county: String,
-      pub state: String,
-      pub country: String,
-  }
-
-  /// Generate a procedural place name using the hierarchical template system.
+  /// Replace place hierarchies with deep nesting chains.
   ///
-  /// Template: "{prefix}{suffix}, {county} County, {state}"
-  /// Where {prefix} and {suffix} are drawn from procedurally generated tables.
-  pub fn generate_place(
-      depth: usize,
-      used_place_names: &HashSet<String>,
-      rng: &mut impl Rng,
-  ) -> GeneratedPlace { ... }
+  /// Creates chains of Place → Place parent references (PlacePlaceRef edges)
+  /// with configurable depth (5–10 levels) to test downstream tools with
+  /// deeply nested place hierarchies.
+  ///
+  /// If the graph has no Place nodes, the transform is a no-op
+  /// (returns `TransformNotApplicable` error).
+  ///
+  /// The transform is validity-preserving: all place references remain valid.
+  pub fn deep_nesting(depth: usize) -> GraphTransform { ... }
   ```
 
   **Algorithm**:
-  - City names: `{prefix}{suffix}` where prefix is drawn from a static set of city prefixes (e.g., "Ash", "Oak", "River", "Mill", "Spring", "Fair") and suffix from city suffixes (e.g., "ton", "ville", "burg", "field", "bridge", "haven", "brook").
-  - County names: Derived from the city name + " County" (e.g., "Ashfield County").
-  - State names: Drawn from a small fixed set of procedurally named states (e.g., "Northumbria", "Westland", "Southmere", "Eastshire", "Arcadia").
-  - Country names: Drawn from a small fixed set of procedurally named countries (e.g., "Albion", "Valdoria", "Mercia"). Top-level places are reused within a graph for geographic coherence.
-  - Depth controls how many levels are filled: depth=1 → country only, depth=2 → state + country, depth=3 → city + county + state + country.
-  - Ensure city name is not already in `used_place_names` (retry with alternative prefix/suffix combinations).
+  - Collect all Place nodes from the graph.
+  - For each place, create a chain of parent places: Place → ParentPlace1 → ParentPlace2 → ... → ParentPlace_N.
+  - New parent places are created with procedurally generated names ("Greater {name}", "Upper {name}", etc.) using the existing name generator or a simple prefix scheme.
+  - Add PlacePlaceRef edges to link each place to its parent in the chain.
+  - Existing PlacePlaceRef edges in the graph are preserved (the new chain extends them).
+  - If the graph has no Place nodes, return `Err(TransformNotApplicable)`.
 
 - **Tests**:
-  - `generate_place_depth_1`: Only country is non-empty.
-  - `generate_place_depth_3`: All four fields are non-empty.
-  - `generate_place_city_unique`: With `used_place_names`, generated city differs.
-  - `generate_place_country_reused`: Multiple calls with same RNG produce the same country name.
-  - `generate_place_city_not_empty`: City name is non-empty.
-  - `generate_place_all_utf8`: All fields are valid UTF-8.
-  - `generate_place_depth_0`: depth=0 produces place with all empty fields (or defaults to depth=1).
-  - Property-based: `for all depth in [1, 2, 3], seed`, `generate_place(depth, set, &mut rng(seed))` produces a `GeneratedPlace` where all fields at the given depth are non-empty.
+  - `deep_nesting_depth_5`: Places have chains of depth 5.
+  - `deep_nesting_depth_10`: Places have chains of depth 10.
+  - `deep_nesting_preserves_existing_edges`: Existing PlacePlaceRef edges are preserved.
+  - `deep_nesting_new_places_have_unique_handles`: Newly created places have valid unique handles.
+  - `deep_nesting_validates_ok`: All new place references are valid (validity-preserving).
+  - `deep_nesting_empty_graph`: Empty graph unaffected.
+  - `deep_nesting_no_places_noop`: Graph with no places returns `Err(TransformNotApplicable)`.
+  - `deep_nesting_node_count_increases`: Node count increases by (depth × original place count).
 
-#### Step 4 — Random person generation
+#### Step 8 — Category B: maximum ref chains transform
 
-- In `crates/typed-graph/src/generate/random.rs`, implement person generation:
+- In `adversarial.rs`, implement the **maximum ref chains** transform:
 
   ```rust
-  /// Generate a random Person node with procedural name, gender, and dates.
+  /// Create legal maximum-length reference chains.
   ///
-  /// Returns the handle of the created person node.
-  /// The person is added to the graph via the GraphBuilder.
-  fn generate_random_person(
-      graph: &mut Graph,
-      config: &RandomConfig,
-      used_names: &mut HashSet<String>,
-      rng: &mut impl Rng,
-      generation_layer: usize,
-  ) -> Result<Handle, GenerationError> { ... }
+  /// Builds chains of the form:
+  ///   Event → Citation → Source → Repository → Note → ...
+  ///
+  /// Each chain is structurally valid (all handle refs resolve) and tests
+  /// downstream tools for stack overflow or O(n²) traversal when following
+  /// long reference chains.
+  ///
+  /// The transform is validity-preserving: all references remain valid.
+  pub fn max_ref_chains(chain_length: usize) -> GraphTransform { ... }
   ```
 
   **Algorithm**:
-  - Generate a UUID v4 handle via `uuid::Uuid::new_v4()`.
-  - Generate a given name and surname using `generate_given_name` and `generate_surname`.
-  - Select gender randomly: 0 (Male) or 1 (Female) with equal probability, occasionally 2 (Unknown, ~5%).
-  - Generate a birth date:
-    - Base year determined by generation layer: layer 0 = 1970–2000, layer 1 = 1940–1970, layer 2 = 1910–1940, etc.
-    - Each layer shifts birth year range back by ~30 years.
-    - Month and day are random (uniform within valid ranges).
-    - Quality is Exact (~80%), Estimated (~15%), or Calculated (~5%).
-  - Optionally generate a death date (if the person is plausibly deceased, e.g., age > 80 for recent generations or any age > 100 for earlier generations):
-    - Death year = birth year + `random_age_at_death(rng)` where age is 18–100, but must be ≥ 16 and ≥ birth year.
-    - Death date must be after birth date.
-  - Use `GraphBuilder` to add the person to the graph with the generated data.
-  - Track the person's birth year and generation layer for later use in parent selection.
+  - Identify all Event nodes in the graph (or create a small set if none exist).
+  - For each event, build a chain of connected primary objects:
+    - Event → Citation (new Citation node, linked via event.citation_list)
+    - Citation → Source (new Source node, linked via citation.source_handle)
+    - Source → Repository (new Repository node, linked via source.repo_ref_list)
+    - Optionally extend: Repository → Note, Note → Media, Media → Tag, etc.
+  - Each new node is created with default data and a unique UUID v4 handle.
+  - Chain length is configurable (default: 5, max: 10 — limited by available type-to-type refs).
+  - All handle references are valid (target nodes exist). This is validity-preserving.
+  - The transform does NOT create circular references — each chain is linear.
+  - If the graph has no Event nodes, create a minimal set of events from persons' birth dates.
 
 - **Tests**:
-  - `generate_random_person_creates_node`: Graph has one new person node.
-  - `generate_random_person_has_name`: Person has non-empty primary_name.
-  - `generate_random_person_has_valid_gender`: Gender is 0, 1, or 2.
-  - `generate_random_person_birth_date_in_range`: Birth year is within the expected range for the generation layer.
-  - `generate_random_person_death_after_birth`: If death date is set, it's after birth date.
-  - `generate_random_person_with_seed`: Same seed produces same person.
-  - `generate_random_person_regression_layer_0`: Layer 0 persons have birth years in 1970–2000 range.
-  - `generate_random_person_regression_layer_3`: Layer 3 persons have birth years in 1880–1910 range.
+  - `max_ref_chains_length_3`: Chains of length 3 are created (Event → Citation → Source).
+  - `max_ref_chains_length_5`: Chains of length 5 are created (Event → Citation → Source → Repository → Note).
+  - `max_ref_chains_all_refs_resolve`: Every handle reference in the chain resolves to an existing node.
+  - `max_ref_chains_validates_ok`: All references are valid (validity-preserving).
+  - `max_ref_chains_no_circular_refs`: Chains are linear, not circular.
+  - `max_ref_chains_non_event_nodes_also_chained`: Non-event nodes that can start a chain (e.g., Person with citations) are also extended.
+  - `max_ref_chains_empty_graph`: Create minimal nodes to start chains from.
+  - `max_ref_chains_node_count_increases`: New nodes are created for each chain element.
+  - `max_ref_chains_regression_long_chain_does_not_stack_overflow`: A chain of length 10 does not cause recursion issues.
 
-#### Step 5 — Parent selection and family creation
+#### Step 9 — Category B: orphaned references transform
 
-- In `crates/typed-graph/src/generate/random.rs`, implement parent selection:
+- In `adversarial.rs`, implement the **orphaned references** transform:
 
   ```rust
-  /// Select eligible parents for a family from the existing person pool.
+  /// Remove some edges from citation/note/media references while keeping the
+  /// target nodes in the graph.
   ///
-  /// Returns `(father_handle, mother_handle)` or `None` if no eligible pair found.
+  /// This produces dangling references: the target node still exists, but the
+  /// edge from the source to the target is removed, while the source node still
+  /// holds the handle in its field/list.
   ///
-  /// Eligibility criteria:
-  /// - Father and mother must be of opposite genders.
-  /// - Birth years must be within a plausible range (0–20 years difference).
-  /// - Neither person is already a parent in the same generation layer.
-  /// - Neither person is already a sibling or child of the other.
-  fn select_parents(
-      graph: &Graph,
-      persons: &[(Handle, PersonSummary)],
-      config: &RandomConfig,
-      layer: usize,
-      rng: &mut impl Rng,
-  ) -> Option<(Handle, Handle)> { ... }
-
-  /// Create a Family node with the given parents and add children.
-  fn generate_family(
-      graph: &mut Graph,
-      config: &RandomConfig,
-      persons: &[(Handle, PersonSummary)],
-      layer: usize,
-      rng: &mut impl Rng,
-  ) -> Result<Handle, GenerationError> { ... }
+  /// This is a **validity-breaking** transform — the resulting graph is
+  /// expected to fail the second validation gate with `DanglingReference`
+  /// errors.
+  pub fn orphaned_references(fraction: f64) -> GraphTransform { ... }
   ```
 
   **Algorithm**:
-  - Maintain a `PersonSummary` struct that tracks each person's handle, birth year, gender, and assigned roles (parent, child).
-  - Sort persons by birth year (ascending).
-  - For each family, select a father and mother:
-    - Ensure father.gender == 0 and mother.gender == 1.
-    - Their birth year difference ≤ 20 years.
-    - Neither person has already been assigned the opposite role (parent vs. child) in the same layer.
-    - Father's birth year + 16 ≤ mother's birth year + 50 (plausible parenting window).
-  - Start with the oldest eligible persons and work downward.
-  - If no eligible parents found in the current layer, expand to adjacent layers (±1 generation).
-  - If still no eligible parents, emit a plausibility warning and create a single-parent family.
-  - Create the Family node via `GraphBuilder::add_family`.
-  - Add FamilyFather, FamilyMother edges.
+  - Collect all edges that are citation/note/media/tag references (CitationRef, NoteRef, MediaRef, TagRef, PersonCitation, PersonNote, etc.).
+  - For the given fraction of these edges, remove the edge from the graph's edge lists BUT do NOT remove the target node from the graph.
+  - The source node's field/list still contains the handle, creating a dangling reference.
+  - The target node remains in the graph (it may be referenced by other edges).
+  - Do NOT remove edges that are structural (PersonFamily, FamilyFather, FamilyMother, FamilyChildRef, PersonEventRef) — only remove "soft" reference edges.
 
 - **Tests**:
-  - `select_parents_returns_opposite_genders`: Selected parents have genders 0 and 1.
-  - `select_parents_age_difference_within_bounds`: Birth year difference ≤ 20.
-  - `select_parents_returns_none_when_no_eligible`: Empty pool returns None.
-  - `select_parents_prefers_same_layer`: Parents from the same generation layer are preferred.
-  - `select_parents_expands_to_adjacent_layer`: When no eligible parents in current layer, checks adjacent layers.
-  - `generate_family_creates_family_node`: Graph has a new Family node.
-  - `generate_family_adds_father_mother_edges`: Family has father and mother edges.
-  - `generate_family_single_parent_when_no_eligible`: Family created with one parent when no pair found.
-  - `generate_family_plausibility_warning`: When parent selection struggles, a warning is emitted.
+  - `orphaned_references_zero_fraction`: fraction=0.0 removes no edges.
+  - `orphaned_references_all_removed`: fraction=1.0 removes all citation/note/media/tag edges.
+  - `orphaned_references_targets_retained`: Target nodes still exist in the graph after edge removal.
+  - `orphaned_references_structural_edges_untouched`: Family/person structural edges are not removed.
+  - `orphaned_references_fails_validation`: Graph fails Gate 2 validation with `DanglingReference` errors.
+  - `orphaned_references_error_count_matches`: Number of `DanglingReference` errors matches number of removed edges.
+  - `orphaned_references_empty_graph`: Empty graph unaffected.
+  - `orphaned_references_no_reference_edges`: Graph with no citation/note/media edges is unaffected.
 
-#### Step 6 — Child assignment with age constraints
+#### Step 10 — Adversarial strategy runner and pipeline integration
 
-- In `crates/typed-graph/src/generate/random.rs`, implement child assignment:
+- In `adversarial.rs`, implement the strategy runner:
 
   ```rust
-  /// Assign children to a family from the next generation of persons.
+  /// Run the adversarial generation pipeline on a graph.
   ///
-  /// Age constraint: child's birth year must be > max(father_birth + 16,
-  /// mother_birth + 16) and < mother_birth + 50.
+  /// This function:
+  /// 1. Applies each Category B strategy from `config.strategies` in sequence
+  ///    to the input graph.
+  /// 2. Returns the transformed graph and a list of any
+  ///    [`AdversarialError`]s for strategies that could not be applied.
   ///
-  /// Outside this range: plausibility warning, not rejection.
-  fn assign_children(
-      graph: &mut Graph,
-      family_handle: &Handle,
-      father_handle: &Handle,
-      mother_handle: &Handle,
-      persons: &[(Handle, PersonSummary)],
-      config: &RandomConfig,
-      rng: &mut impl Rng,
-  ) -> Vec<Handle> { ... }
+  /// Category A strategies are NOT applied here — they affect how
+  /// `generate_random()` builds the graph and are handled by modifying
+  /// `RandomConfig` before calling `generate_random()`.
+  pub fn apply_adversarial_strategies(
+      graph: Graph,
+      config: &AdversarialConfig,
+  ) -> (Graph, Vec<AdversarialError>) { ... }
   ```
 
   **Algorithm**:
-  - Determine the number of children for this family: `rng.gen_range(config.children_per_family)`.
-  - Filter eligible children from the next generation:
-    - Birth year > max(father_birth + 16, mother_birth + 16).
-    - Birth year < mother_birth + 50.
-    - Not already assigned to another family as a child.
-    - Not already a parent in this layer (a person can be both a parent and a child across layers, but not within the same layer).
-  - Select up to the target number of children from the eligible pool.
-  - If fewer children than target are eligible, emit a plausibility warning and continue with what's available.
-  - Add `FamilyChildRef` edges for each child.
-  - Update `parent_family_list` on each child's Person node.
+  - Filter `config.strategies` to keep only Category B variants.
+  - For each Category B strategy (in order):
+    - Match on the variant and construct the corresponding `GraphTransform`.
+    - Apply the transform: `graph = transform(graph)`.
+    - If the transform returns `Err(AdversarialError)`, collect the error and skip that strategy (the graph remains in its pre-transform state for that strategy).
+  - Return the final graph and collected errors.
+  - Category A strategies are ignored by this function (they're handled in `generate_random`).
 
-- **Tests**:
-  - `assign_children_adds_children`: Graph has child edges for the family.
-  - `assign_children_age_constraint`: All assigned children satisfy the age constraint.
-  - `assign_children_count_in_range`: Number of children is within `config.children_per_family`.
-  - `assign_children_no_eligible_children`: When no eligible children, returns empty list with warning.
-  - `assign_children_child_not_reassigned`: A child assigned to one family is not assigned to another.
-  - `assign_children_plausibility_warning_for_out_of_range`: Children outside the strict age range get a warning.
-  - `assign_children_child_parent_family_list_updated`: Each child's `parent_family_list` includes the family handle.
-
-#### Step 7 — Event generation
-
-- In `crates/typed-graph/src/generate/random.rs`, implement event generation:
+- In `random.rs`, integrate adversarial config into `generate_random()`:
 
   ```rust
-  /// Generate event nodes (birth, death, marriage) for persons and families.
-  ///
-  /// For each person:
-  /// - A Birth event node is created with the person's birth date.
-  /// - If the person has a death date, a Death event node is created.
-  ///
-  /// For each family:
-  /// - A Marriage event node is created with a date between the parents'
-  ///   birth dates and the first child's birth date.
-  fn generate_events(
-      graph: &mut Graph,
-      config: &RandomConfig,
-      rng: &mut impl Rng,
-  ) -> Result<(), GenerationError> { ... }
-  ```
-
-  **Algorithm**:
-  - Iterate over all Person nodes in the graph.
-  - For each person with a birth date, create a Birth event node and link via `PersonEventRef` with `role: Primary`.
-  - For each person with a death date, create a Death event node and link via `PersonEventRef` with `role: Primary`.
-  - Iterate over all Family nodes in the graph.
-  - For each family with both parents, create a Marriage event:
-    - Date: between the later parent's birth + 16 and the earliest child's birth (or a default range if no children).
-    - Link via `FamilyEventRef` with `role: Family`.
-  - If `config.with_places`, assign a randomly generated place to each event (reusing places within the same geographic region).
-  - If `config.with_citations`, create a Source node and Citation edges for a configurable fraction of events.
-
-- **Tests**:
-  - `generate_events_birth_events`: All persons have Birth event nodes.
-  - `generate_events_death_events`: Persons with death dates have Death event nodes.
-  - `generate_events_marriage_events`: Families with parents have Marriage event nodes.
-  - `generate_events_event_links_correct`: Events are linked via `PersonEventRef`/`FamilyEventRef` edges.
-  - `generate_events_birth_date_matches`: Birth event date matches the person's birth date.
-  - `generate_events_marriage_date_after_birth`: Marriage date is after both parents' birth dates.
-  - `generate_events_death_event_type`: Death event has `EventType::Death`.
-  - `generate_events_with_places`: When `with_places` is true, Place nodes are created and linked.
-  - `generate_events_with_citations`: When `with_citations` is true, Source and Citation nodes are created.
-  - `generate_events_empty_graph`: No events created for empty graph.
-
-#### Step 8 — `generate_random` entry point with seeded RNG
-
-- In `crates/typed-graph/src/generate/random.rs`, implement the public entry point:
-
-  ```rust
-  /// Generate a random family tree graph with the given configuration.
-  ///
-  /// The RNG is seeded from `config.seed` if provided, otherwise a random
-  /// seed is generated from OS entropy. The seed is recorded in the returned
-  /// `GenerationResult` for reproducibility.
-  ///
-  /// The generated graph is NOT automatically validated — callers should
-  /// run `graph.validate(&schema)` before serialization, following the
-  /// five-stage pipeline (Generate → Validate → ...).
-  ///
-  /// # Errors
-  ///
-  /// Returns [`GenerationError::InvalidConfig`] if the configuration is
-  /// invalid (e.g., `person_count == 0`). Returns
-  /// [`GenerationError::ConstraintExhausted`] if generation cannot proceed
-  /// due to exhausted constraints (e.g., no eligible parents found).
+  /// Modified signature or new entry point:
   pub fn generate_random(
       config: &RandomConfig,
+      adversarial_config: &AdversarialConfig,
       schema: &Schema,
   ) -> Result<GenerationResult, GenerationError> { ... }
-
-  /// The result of a random generation run.
-  #[derive(Clone, Debug, PartialEq)]
-  pub struct GenerationResult {
-      /// The generated graph.
-      pub graph: Graph,
-      /// The seed used for this generation (for reproducibility).
-      pub seed: u64,
-      /// Plausibility warnings emitted during generation.
-      pub warnings: Vec<String>,
-      /// Generation statistics.
-      pub stats: GenerationStats,
-  }
-
-  /// Statistics about a generation run.
-  #[derive(Clone, Debug, PartialEq, Default)]
-  pub struct GenerationStats {
-      pub person_count: usize,
-      pub family_count: usize,
-      pub event_count: usize,
-      pub place_count: usize,
-      pub source_count: usize,
-      pub citation_count: usize,
-      pub note_count: usize,
-      pub edge_count: usize,
-  }
   ```
 
-  **Algorithm**:
-  - Validate config: `person_count > 0`, `generations >= 1`, `start_year <= end_year`, `children_per_family.start <= children_per_family.end`.
-  - Create a seeded RNG: `SeedableRng::seed_from_u64(config.seed.unwrap_or_else(|| OsRng.gen()))`.
-  - Create an empty `Graph`.
-  - Track `used_names: HashSet<String>` and `used_place_names: HashSet<String>`.
-  - Track `warnings: Vec<String>` for plausibility warnings.
-  - **Stage 1**: Create Person nodes (Step 4) — generate `config.person_count` persons distributed across `config.generations` layers.
-  - **Stage 2**: Parent selection and Family creation (Step 5).
-  - **Stage 3**: Child assignment (Step 6).
-  - **Stage 4**: Event generation (Step 7) — birth, death, marriage events.
-  - **Stage 5** (optional): If `config.with_places`, generate Place nodes and link them.
-  - **Stage 6** (optional): If `config.with_citations`, generate Source and Citation nodes.
-  - Collect statistics into `GenerationStats`.
-  - Return `GenerationResult { graph, seed, warnings, stats }`.
+  - At the start of generation, check `adversarial_config.enabled` and apply Category A strategy effects to the generation algorithm (modify parent selection, event generation, etc.).
+  - After the graph is generated and before the first validation gate, apply Category B strategies via `apply_adversarial_strategies()`.
+  - Return the graph and a list of adversarial errors alongside the normal result.
+
+- Update `lib.rs` re-exports.
 
 - **Tests**:
-  - `generate_random_basic`: Default config produces a graph with persons and families.
-  - `generate_random_person_count`: Graph has `config.person_count` persons.
-  - `generate_random_family_count_nonzero`: Graph has at least one family.
-  - `generate_random_events_present`: Graph has event nodes.
-  - `generate_random_validates_ok`: The generated graph passes `graph.validate(&schema)`.
-  - `generate_random_invalid_config_zero_persons`: `person_count: 0` returns `Err(InvalidConfig)`.
-  - `generate_random_invalid_config_bad_range`: `start_year > end_year` returns `Err(InvalidConfig)`.
-  - `generate_random_seed_reproducibility`: Same seed produces identical graph structure and all string values match.
-  - `generate_random_different_seeds_differ`: Different seeds produce different graphs.
-  - `generate_random_seed_recorded`: The seed in `GenerationResult` matches the input seed.
-  - `generate_random_stats_match`: Stats counts match actual graph contents.
-  - `generate_random_with_places`: When `with_places: true`, Place nodes are present.
-  - `generate_random_with_places_places_linked`: Events have place references.
-  - `generate_random_with_citations`: When `with_citations: true`, Source and Citation nodes are present.
-  - `generate_random_large_count`: 1000 persons generates without panic.
+  - `apply_adversarial_strategies_disabled`: When `config.enabled == false`, graph is returned unchanged with no errors.
+  - `apply_adversarial_strategies_empty_list`: Empty strategies list returns graph unchanged.
+  - `apply_adversarial_strategies_disconnected_alone`: Running disconnected-subgraphs strategy alone works.
+  - `apply_adversarial_strategies_multiple_transforms`: Multiple strategies applied in sequence all take effect.
+  - `apply_adversarial_strategies_skip_on_error`: A failing strategy (e.g., deep nesting on a graph with no places) is skipped and others continue.
+  - `apply_adversarial_strategies_category_a_ignored`: Category A strategies in the list are silently ignored by `apply_adversarial_strategies`.
+  - `generate_random_with_adversarial_enabled_no_strategies`: Adversarial enabled but empty strategies list produces normal graph.
+  - `generate_random_with_adversarial_disabled`: Default behavior is unchanged when adversarial is disabled.
+  - Integration: `generate_random + adversarial -> validate -> serialize` pipeline works end-to-end.
 
-#### Step 9 — Property-based tests for random generation invariants
+#### Step 11 — CLI `--adversarial` flag and config support
 
-- Add property-based tests in `crates/typed-graph/src/generate/random.rs` (inside `#[cfg(test)] mod tests`):
+> **Note**: This step depends on the CLI crate structure. If the CLI crate is not yet created or uses a different structure than described below, adjust paths accordingly.
 
-  **Invariant 1: Generate → validate always passes**
+- In the CLI crate (e.g., `crates/cli/src/main.rs` or equivalent), add the `--adversarial` flag:
 
-  ```rust
-  #[test]
-  fn property_generate_validate_always_passes() {
-      // For any valid RandomConfig, the generated graph passes structural
-      // and referential validation.
-      let schema = Schema::new();
-      for seed in 0..100 {
-          let config = RandomConfig {
-              person_count: 10 + (seed % 20) as usize,
-              generations: 2 + (seed % 4) as usize,
-              seed: Some(seed as u64),
-              ..RandomConfig::default()
-          };
-          let result = generate_random(&config, &schema).unwrap();
-          let mut graph = result.graph;
-          let errors = graph.validate(&schema);
-          assert!(
-              errors.is_empty(),
-              "Seed {}: validation failed with {} errors: {:?}",
-              seed, errors.len(), errors
-          );
-      }
-  }
+  ```
+  --adversarial <LIST>     Comma-separated adversarial strategies, or "all"
   ```
 
-  **Invariant 2: Same seed → same graph (determinism)**
+  - Parse strategies from comma-separated list: `disconnected,one-parent,deep-nesting`.
+  - The `all` keyword enables every available strategy.
+  - Map CLI strategy names to `AdversarialStrategy` variants:
 
-  ```rust
-  #[test]
-  fn property_same_seed_same_graph() {
-      // For any seed, generate_random(config, seed) == generate_random(config, seed)
-      let schema = Schema::new();
-      for seed in 0..50 {
-          let config = RandomConfig {
-              person_count: 15,
-              generations: 3,
-              seed: Some(seed),
-              ..RandomConfig::default()
-          };
-          let r1 = generate_random(&config, &schema).unwrap();
-          let r2 = generate_random(&config, &schema).unwrap();
-          assert_eq!(
-              r1.graph, r2.graph,
-              "Seed {}: graphs differ between runs", seed
-          );
-          assert_eq!(
-              r1.stats, r2.stats,
-              "Seed {}: stats differ between runs", seed
-          );
-      }
-  }
+    | CLI name | Variant |
+    |---|---|
+    | `one-parent` | `OneParentFamilies(0.5)` |
+    | `missing-events` | `MissingEvents(0.5)` |
+    | `solo-persons` | `SoloPersons(0.3)` |
+    | `many-names` | `ManyAlternateNames(0.3)` |
+    | `disconnected` | `DisconnectedSubgraphs` |
+    | `deep-nesting` | `DeepNesting` |
+    | `max-ref-chains` | `MaxRefChains` |
+    | `orphaned-refs` | `OrphanedReferences` |
+
+  - Construct `AdversarialConfig { enabled: true, strategies }`.
+  - Pass it to `generate_random()`.
+
+- If a YAML scenario file is being used, add adversarial config support:
+
+  ```yaml
+  adversarial:
+    enabled: true
+    strategies:
+      - disconnected
+      - one_parent
   ```
 
-  **Invariant 3: No dangling references**
+- **Tests**:
+  - `cli_adversarial_flag_parses_single`: `--adversarial disconnected` parses correctly.
+  - `cli_adversarial_flag_parses_multiple`: `--adversarial disconnected,one-parent` parses both strategies.
+  - `cli_adversarial_all_keyword`: `--adversarial all` enables all strategies.
+  - `cli_adversarial_unknown_strategy_rejected`: Unknown strategy name returns an error.
+  - `cli_adversarial_default_disabled`: Without the flag, adversarial is disabled.
+  - Smoke test: `gramps-gen generate --count 10 --adversarial disconnected` runs without crashing.
+
+#### Step 12 — Property-based tests for adversarial invariants
+
+- Add property-based tests for adversarial invariants. These can live in `crates/typed-graph/src/generate/adversarial.rs` under `#[cfg(test)] mod tests`, or in `tests/property/adversarial.rs` for cross-crate tests.
+
+  **Invariant 1: Validity-preserving strategies produce valid graphs**
 
   ```rust
   #[test]
-  fn property_no_dangling_references() {
-      // For any valid config, the generated graph has no dangling references
-      // (all edge source/target handles exist in the graph).
+  fn property_validity_preserving_strategies_produce_valid_graphs() {
+      // For any valid RandomConfig and any validity-preserving adversarial
+      // strategy, the resulting graph passes structural + referential validation.
       let schema = Schema::new();
-      for seed in 0..50 {
+      let validity_preserving = vec![
+          AdversarialStrategy::DisconnectedSubgraphs,
+          AdversarialStrategy::DeepNesting,
+          AdversarialStrategy::MaxRefChains,
+      ];
+      for seed in 0..30 {
           let config = RandomConfig {
               person_count: 10 + (seed % 10) as usize,
-              generations: 2 + (seed % 3) as usize,
-              seed: Some(seed),
-              ..RandomConfig::default()
-          };
-          let result = generate_random(&config, &schema).unwrap();
-          // add_edge already prevents dangling references by construction,
-          // but this tests that the generation algorithm doesn't introduce them.
-          assert_eq!(result.graph.node_count(), result.stats.person_count);
-      }
-  }
-  ```
-
-  **Invariant 4: All persons have unique handles**
-
-  ```rust
-  #[test]
-  fn property_all_persons_have_unique_handles() {
-      // For any config, no two person nodes share a handle.
-      let schema = Schema::new();
-      for seed in 0..30 {
-          let config = RandomConfig {
-              person_count: 20,
-              seed: Some(seed),
-              ..RandomConfig::default()
-          };
-          let result = generate_random(&config, &schema).unwrap();
-          let handles: Vec<_> = result.graph.nodes_by_kind(NodeKind::Person);
-          let unique_handles: std::collections::HashSet<_> = handles.iter().cloned().collect();
-          assert_eq!(handles.len(), unique_handles.len(), "Seed {}: duplicate handles found", seed);
-      }
-  }
-  ```
-
-  **Invariant 5: All families have at least one parent**
-
-  ```rust
-  #[test]
-  fn property_families_have_at_least_one_parent() {
-      let schema = Schema::new();
-      for seed in 0..50 {
-          let config = RandomConfig {
-              person_count: 15,
-              seed: Some(seed),
-              ..RandomConfig::default()
-          };
-          let result = generate_random(&config, &schema).unwrap();
-          for family_handle in result.graph.nodes_by_kind(NodeKind::Family) {
-              let father_edges = result.graph.edges_from(family_handle);
-              let has_parent = father_edges.iter().any(|e| {
-                  matches!(e, Edge::FamilyFather { .. } | Edge::FamilyMother { .. })
-              });
-              // At least one parent is expected, but single-parent families are valid
-              // (they may emit a plausibility warning but are structurally valid).
-              // This test just checks that the generation doesn't crash.
-          }
-      }
-  }
-  ```
-
-  **Invariant 6: Event dates are consistent with person dates**
-
-  ```rust
-  #[test]
-  fn property_event_dates_consistent() {
-      // For any config, birth event dates match person birth dates,
-      // death event dates match person death dates.
-      let schema = Schema::new();
-      for seed in 0..30 {
-          let config = RandomConfig {
-              person_count: 15,
-              seed: Some(seed),
-              ..RandomConfig::default()
-          };
-          let result = generate_random(&config, &schema).unwrap();
-          for (handle, node) in result.graph.iter_nodes() {
-              if let Node::Person(person) = node {
-                  // Check that birth event exists and date matches
-                  let edges = result.graph.edges_from(handle);
-                  for edge in edges {
-                      if let Edge::PersonEventRef { source: _, target, metadata: _ } = edge {
-                          if let Some(Node::Event(event)) = result.graph.get_node(target) {
-                              if event.event_type == EventType::Birth {
-                                  // Birth event date should match person's birth date context
-                                  // (we store the date in the event, not the person)
-                              }
-                          }
-                      }
-                  }
-              }
-          }
-      }
-  }
-  ```
-
-  **Invariant 7: With optional features, nodes are present**
-
-  ```rust
-  #[test]
-  fn property_optional_features_produce_nodes() {
-      let schema = Schema::new();
-      for seed in 0..20 {
-          let config = RandomConfig {
-              person_count: 15,
               with_places: true,
               with_citations: true,
               with_notes: true,
               seed: Some(seed),
               ..RandomConfig::default()
           };
-          let result = generate_random(&config, &schema).unwrap();
+          for strategy in &validity_preserving {
+              let adversarial_config = AdversarialConfig {
+                  enabled: true,
+                  strategies: vec![strategy.clone()],
+              };
+              let result = generate_random(&config, &adversarial_config, &schema);
+              if let Ok(result) = result {
+                  let mut graph = result.graph;
+                  let errors = graph.validate(&schema);
+                  assert!(
+                      errors.is_empty(),
+                      "Seed {}, strategy {:?}: validation failed with {} errors",
+                      seed, strategy, errors.len()
+                  );
+              }
+          }
+      }
+  }
+  ```
+
+  **Invariant 2: Validity-breaking strategies produce expected errors**
+
+  ```rust
+  #[test]
+  fn property_validity_breaking_strategies_produce_expected_errors() {
+      // For the OrphanedReferences strategy, the graph fails Gate 2
+      // validation with DanglingReference errors.
+      let schema = Schema::new();
+      for seed in 0..30 {
+          let config = RandomConfig {
+              person_count: 15,
+              with_citations: true,
+              with_notes: true,
+              seed: Some(seed),
+              ..RandomConfig::default()
+          };
+          let adversarial_config = AdversarialConfig {
+              enabled: true,
+              strategies: vec![AdversarialStrategy::OrphanedReferences(1.0)],
+          };
+          let result = generate_random(&config, &adversarial_config, &schema);
+          if let Ok(result) = result {
+              let mut graph = result.graph;
+              let errors = graph.validate(&schema);
+              assert!(
+                  !errors.is_empty(),
+                  "Seed {}: OrphanedReferences should produce validation errors",
+                  seed
+              );
+              for error in &errors {
+                  assert!(
+                      matches!(error, ValidationError::DanglingReference { .. }),
+                      "Seed {}: expected DanglingReference, got {:?}",
+                      seed, error
+                  );
+              }
+          }
+      }
+  }
+  ```
+
+  **Invariant 3: Adversarial-disabled produces normal output**
+
+  ```rust
+  #[test]
+  fn property_adversarial_disabled_produces_normal_output() {
+      // When adversarial is disabled, the generated graph is the same as
+      // the non-adversarial generation (same graph structure, same stats).
+      let schema = Schema::new();
+      for seed in 0..30 {
+          let config = RandomConfig {
+              person_count: 15,
+              seed: Some(seed),
+              ..RandomConfig::default()
+          };
+          let adversarial_disabled = AdversarialConfig {
+              enabled: false,
+              strategies: vec![],
+          };
+          let normal = generate_random(&config, &AdversarialConfig::default(), &schema);
+          let disabled = generate_random(&config, &adversarial_disabled, &schema);
+          // Both should succeed and produce identical graphs
+          if let (Ok(normal), Ok(disabled)) = (normal, disabled) {
+              assert_eq!(
+                  normal.graph, disabled.graph,
+                  "Seed {}: disabled should match normal", seed
+              );
+          }
+      }
+  }
+  ```
+
+  **Invariant 4: Strategy composition — multiple strategies can be combined**
+
+  ```rust
+  #[test]
+  fn property_multiple_validity_preserving_strategies_compose() {
+      // Applying multiple validity-preserving strategies together should still
+      // produce a valid graph (assuming they don't conflict).
+      let schema = Schema::new();
+      let combined_strategies = vec![
+          AdversarialStrategy::DisconnectedSubgraphs,
+          AdversarialStrategy::DeepNesting,
+      ];
+      for seed in 0..20 {
+          let config = RandomConfig {
+              person_count: 20,
+              with_places: true,
+              with_citations: true,
+              seed: Some(seed),
+              ..RandomConfig::default()
+          };
+          let adversarial_config = AdversarialConfig {
+              enabled: true,
+              strategies: combined_strategies.clone(),
+          };
+          let result = generate_random(&config, &adversarial_config, &schema);
+          if let Ok(result) = result {
+              let mut graph = result.graph;
+              let errors = graph.validate(&schema);
+              assert!(
+                  errors.is_empty(),
+                  "Seed {}: combined strategies failed validation: {:?}",
+                  seed, errors
+              );
+          }
+      }
+  }
+  ```
+
+  **Invariant 5: Category A and Category B strategies compose**
+
+  ```rust
+  #[test]
+  fn property_category_a_and_b_compose() {
+      // Combining a Category A (generation-time) strategy with a Category B
+      // (post-generation) strategy should work without errors.
+      let schema = Schema::new();
+      for seed in 0..20 {
+          let config = RandomConfig {
+              person_count: 15,
+              seed: Some(seed),
+              ..RandomConfig::default()
+          };
+          let adversarial_config = AdversarialConfig {
+              enabled: true,
+              strategies: vec![
+                  AdversarialStrategy::OneParentFamilies(0.5),
+                  AdversarialStrategy::DisconnectedSubgraphs,
+              ],
+          };
+          let result = generate_random(&config, &adversarial_config, &schema);
           assert!(
-              !result.graph.nodes_by_kind(NodeKind::Place).is_empty(),
-              "Seed {}: with_places=true but no Place nodes", seed
-          );
-          assert!(
-              !result.graph.nodes_by_kind(NodeKind::Source).is_empty(),
-              "Seed {}: with_citations=true but no Source nodes", seed
+              result.is_ok(),
+              "Seed {}: combined Category A + B strategies failed: {:?}",
+              seed, result
           );
       }
   }
@@ -657,14 +665,12 @@ All new code lives in `crates/typed-graph/src/generate/random.rs` (and its sub-m
 
 ### Key design references
 
-- **Procedural name generation**: design §7.1 — Markov-chain syllable generation producing plausible-but-fictional names, 1–40 characters, UTF-8, Latin script. Name styles: "modern", "victorian", "nordic". Names must differ within the same graph.
-- **Procedural place generation**: design §7.1 — Hierarchical template system: `"{prefix}{suffix}, {county} County, {state}"`. Depth configurable via `place_depth` (default 3). Top-level places reused within a graph.
-- **Date generation**: design §7.1 — `DateValue` structs (already implemented in `date.rs`). Birth years 1–9999, genealogical constraints (age 16–45 for mothers, 16–70 for fathers). Dates drawn from configurable ranges.
-- **Random generation algorithm**: design §7.2 — Create N persons, pair parents, create families, assign children, create events. Parent selection uses birth year sorting and generation layers.
-- **Genealogical plausibility constraints**: design §7.2 — birth before death, mother's age at childbirth 16–45, father's age at childbirth 16–70, marriage after age 16, parent selection by generation layer.
-- **Configuration schema**: design §7.5 — `person_count`, `family_count`, `generations`, `children_per_family`, `date_range`, `era`, `with_*` flags, `seed`.
-- **Seed-based reproducibility**: design §7.2, §10 Phase 5 — All RNG operations take an explicit `&mut Rng` parameter. The seed is user-configurable via `config.seed`. Same seed → same graph.
-- **Validation pipeline**: design §11 — Generation produces a Graph; validation runs after generation (Gate 1). Phase 5 produces the graph; validation is in the existing `validate` module.
-- **Data contracts for procedural generators**: design §7.1 — Names 1–40 chars, UTF-8, non-empty, unique within graph. Dates year in [1, 9999]. Places depth in [1, `place_depth`]. Generators must not panic on valid input.
-- **Error handling**: design §12 — Generation errors include the seed for reproducibility. Invalid config returns `GenerationError::InvalidConfig`. Constraint exhaustion returns `GenerationError::ConstraintExhausted`.
-- **Module map**: design §3 — `crates/typed-graph/src/generate/random.rs` for random generation.
+- **Adversarial strategy catalog**: design §7.4 — Two categories (A: generation-time, B: post-generation), each with 4 strategies. Category B split into validity-preserving and validity-breaking sub-categories.
+- **Pipeline model**: design §11 — Generate → Validate (Gate 1) → Adversarial Transform → Validate (Gate 2) → Serialize. Category A strategies affect the generation stage. Category B strategies are the adversarial transform stage.
+- **Strategy categories**: design §7.4 — Category A affects how generation works (one-parent families, missing events, solo persons, many alternate names). Category B are pure function transforms (disconnected subgraphs, deep nesting, max ref chains, orphaned references).
+- **Validity contract**: design §7.4 — Validity-preserving strategies produce graphs that pass Gate 2. Validity-breaking strategies produce graphs expected to fail Gate 2 with known error types.
+- **Configuration schema**: design §7.5 — `adversarial.enabled` flag, `adversarial.strategies` list.
+- **CLI interface**: design §9 — `--adversarial <LIST>` flag, comma-separated strategy names, `"all"` keyword.
+- **Data contracts**: design §7.1 — All generated strings are UTF-8, Latin script, non-empty. Generators must not panic on valid input. Adversarial errors are collected and reported, not panicked.
+- **Error handling**: design §12 — Collected errors (not fail-fast), reported with context. Adversarial errors include the strategy name and affected handles.
+- **Module map**: design §3 — All adversarial code lives in `crates/typed-graph/src/generate/adversarial.rs`.
