@@ -1,0 +1,8 @@
+[package]
+name = "output"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+typed-graph = { path = "../typed-graph" }
+quick-xml = "0.36"
