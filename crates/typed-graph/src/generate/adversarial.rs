@@ -182,7 +182,7 @@ impl std::error::Error for AdversarialError {}
 /// Each transform is a pure function that takes a `Graph` and returns
 /// a modified `Graph`. This composable design allows strategies to be
 /// applied in sequence and tested independently.
-pub type GraphTransform = Box<dyn FnOnce(Graph) -> Graph>;
+pub type GraphTransform = Box<dyn FnOnce(Graph) -> Result<Graph, AdversarialError>>;
 
 // ---------------------------------------------------------------------------
 // Category B: Post-generation transforms
@@ -214,7 +214,7 @@ pub fn disconnected_subgraphs(k: usize) -> GraphTransform {
 
         if person_handles.len() < effective_k {
             // Not enough persons to partition; graph stays as-is
-            return graph;
+            return Ok(graph);
         }
 
         // Assign each person to a cluster (round-robin by handle order)
@@ -284,7 +284,103 @@ pub fn disconnected_subgraphs(k: usize) -> GraphTransform {
             _ => false,
         });
 
-        graph
+        Ok(graph)
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Deep nesting transform
+// ---------------------------------------------------------------------------
+
+/// Replace place hierarchies with deep nesting chains.
+///
+/// Creates chains of Place → Place parent references (PlacePlaceRef edges)
+/// with configurable depth (5–10 levels) to test downstream tools with
+/// deeply nested place hierarchies.
+///
+/// If the graph has no Place nodes, returns
+/// `Err(AdversarialError::TransformNotApplicable)`.
+///
+/// The transform is validity-preserving: all place references remain valid.
+pub fn deep_nesting(depth: usize) -> GraphTransform {
+    Box::new(move |mut graph: Graph| -> Result<Graph, AdversarialError> {
+        let place_handles: Vec<crate::Handle> = graph
+            .nodes_by_kind(crate::NodeKind::Place)
+            .into_iter()
+            .cloned()
+            .collect();
+
+        if place_handles.is_empty() {
+            return Err(AdversarialError::TransformNotApplicable(
+                "no place nodes in graph".to_string(),
+            ));
+        }
+
+        // Prefixes for generating parent place names
+        let prefixes = [
+            "Greater", "Upper", "Superior", "North", "South", "East", "West",
+        ];
+
+        for place_handle in &place_handles {
+            let mut current_parent = place_handle.clone();
+
+            for level in 0..depth {
+                let parent_handle = uuid::Uuid::new_v4().to_string();
+
+                // Get the name of the current place to derive a parent name
+                let parent_name =
+                    if let Some(crate::Node::Place(place)) = graph.get_node(&current_parent) {
+                        let prefix = prefixes[level % prefixes.len()];
+                        let loc = &place.name;
+                        let base = loc
+                            .city
+                            .as_deref()
+                            .or(loc.county.as_deref())
+                            .or(loc.state.as_deref())
+                            .or(loc.country.as_deref())
+                            .unwrap_or("Place");
+                        format!("{} {}", prefix, base)
+                    } else {
+                        format!("Level {} Place", level + 1)
+                    };
+
+                // Create the parent place node
+                let parent_place = crate::PlaceData {
+                    handle: parent_handle.clone(),
+                    name: crate::Location {
+                        city: Some(parent_name),
+                        ..crate::Location::default()
+                    },
+                    ..crate::PlaceData::default()
+                };
+
+                graph
+                    .add_node(parent_handle.clone(), crate::Node::Place(parent_place))
+                    .map_err(|_| {
+                        AdversarialError::TransformNotApplicable(format!(
+                            "duplicate handle for parent place: {}",
+                            parent_handle
+                        ))
+                    })?;
+
+                // Add PlacePlaceRef edge from child to parent
+                graph
+                    .add_edge(crate::Edge::PlacePlaceRef {
+                        source: current_parent.clone(),
+                        target: parent_handle.clone(),
+                    })
+                    .map_err(|_| {
+                        AdversarialError::TransformNotApplicable(format!(
+                            "failed to add PlacePlaceRef edge: {} -> {}",
+                            current_parent, parent_handle
+                        ))
+                    })?;
+
+                current_parent = parent_handle;
+            }
+        }
+
+        Ok(graph)
     })
 }
 
@@ -464,20 +560,20 @@ mod tests {
     fn adversarial_transform_signature() {
         // Verify that a function matching the GraphTransform signature can be
         // assigned to the type alias.
-        fn identity_transform(g: Graph) -> Graph {
-            g
+        fn identity_transform(g: Graph) -> Result<Graph, AdversarialError> {
+            Ok(g)
         }
 
         let _t: GraphTransform = Box::new(identity_transform);
 
         // Verify it works with a closure-like function
-        fn noop(g: Graph) -> Graph {
-            g
+        fn noop(g: Graph) -> Result<Graph, AdversarialError> {
+            Ok(g)
         }
 
         let transform: GraphTransform = Box::new(noop);
         let graph = Graph::new();
-        let result = transform(graph);
+        let result = transform(graph).unwrap();
         assert_eq!(result.node_count(), 0);
         assert_eq!(result.edge_count(), 0);
     }
@@ -652,7 +748,7 @@ mod tests {
     fn disconnected_subgraphs_k_2_produces_two_clusters() {
         let graph = build_two_family_graph();
         let transform = disconnected_subgraphs(2);
-        let result = transform(graph);
+        let result = transform(graph).unwrap();
 
         // Both families still exist
         assert!(result.contains_node(&"f1".to_string()));
@@ -679,7 +775,7 @@ mod tests {
         let node_count_before = graph.node_count();
 
         let transform = disconnected_subgraphs(2);
-        let result = transform(graph);
+        let result = transform(graph).unwrap();
 
         assert_eq!(
             result.node_count(),
@@ -692,7 +788,7 @@ mod tests {
     fn disconnected_subgraphs_empty_graph() {
         let graph = Graph::new();
         let transform = disconnected_subgraphs(2);
-        let result = transform(graph);
+        let result = transform(graph).unwrap();
         assert_eq!(result.node_count(), 0);
         assert_eq!(result.edge_count(), 0);
     }
@@ -702,7 +798,7 @@ mod tests {
         let graph = build_two_family_graph();
         // k=1 should be treated as k=2
         let transform = disconnected_subgraphs(1);
-        let result = transform(graph);
+        let result = transform(graph).unwrap();
         // Graph should still be valid (no crash)
         assert_eq!(result.node_count(), 9);
     }
@@ -726,7 +822,7 @@ mod tests {
             .unwrap();
 
         let transform = disconnected_subgraphs(2);
-        let result = transform(graph);
+        let result = transform(graph).unwrap();
         assert_eq!(result.node_count(), 1);
         assert!(result.contains_node(&"p1".to_string()));
     }
@@ -737,7 +833,7 @@ mod tests {
         let _edge_count_before = graph.edge_count();
 
         let transform = disconnected_subgraphs(2);
-        let result = transform(graph);
+        let result = transform(graph).unwrap();
 
         // Event edges should still be present
         let evt_edges: Vec<_> = result
@@ -777,7 +873,7 @@ mod tests {
 
         // Apply disconnected subgraphs
         let transform = disconnected_subgraphs(3);
-        let mut graph = transform(graph);
+        let mut graph = transform(graph).unwrap();
 
         // Should still pass validation (validity-preserving)
         let errors = graph.validate(&schema);
@@ -810,9 +906,195 @@ mod tests {
         let node_count_before = graph.node_count();
 
         let transform = disconnected_subgraphs(3);
-        let result = transform(graph);
+        let result = transform(graph).unwrap();
 
         // No nodes removed
         assert_eq!(result.node_count(), node_count_before);
+    }
+
+    // =======================================================================
+    // Deep nesting transform tests
+    // =======================================================================
+
+    /// Build a graph with a single Place node.
+    fn build_graph_with_place() -> Graph {
+        let mut graph = Graph::new();
+        graph
+            .add_node(
+                "pl1".to_string(),
+                crate::Node::Place(crate::PlaceData {
+                    handle: "pl1".to_string(),
+                    name: crate::Location {
+                        city: Some("Springfield".to_string()),
+                        county: Some("Springfield County".to_string()),
+                        state: Some("Northumbria".to_string()),
+                        country: Some("Albion".to_string()),
+                        ..crate::Location::default()
+                    },
+                    ..crate::PlaceData::default()
+                }),
+            )
+            .unwrap();
+        graph
+    }
+
+    #[test]
+    fn deep_nesting_depth_5() {
+        let graph = build_graph_with_place();
+        let transform = deep_nesting(5);
+        let result = transform(graph).unwrap();
+
+        // Original place + 5 parent places = 6 places
+        let places: Vec<_> = result
+            .iter_nodes()
+            .filter(|(_, n)| matches!(n, crate::Node::Place(_)))
+            .collect();
+        assert_eq!(places.len(), 6, "Should have 6 places with depth 5");
+
+        // Should have 5 PlacePlaceRef edges
+        let ref_edges: Vec<_> = result
+            .iter_edges()
+            .filter(|e| matches!(e, crate::Edge::PlacePlaceRef { .. }))
+            .collect();
+        assert_eq!(ref_edges.len(), 5, "Should have 5 PlacePlaceRef edges");
+    }
+
+    #[test]
+    fn deep_nesting_depth_10() {
+        let graph = build_graph_with_place();
+        let transform = deep_nesting(10);
+        let result = transform(graph).unwrap();
+
+        let places: Vec<_> = result
+            .iter_nodes()
+            .filter(|(_, n)| matches!(n, crate::Node::Place(_)))
+            .collect();
+        assert_eq!(places.len(), 11, "Should have 11 places with depth 10");
+
+        let ref_edges: Vec<_> = result
+            .iter_edges()
+            .filter(|e| matches!(e, crate::Edge::PlacePlaceRef { .. }))
+            .collect();
+        assert_eq!(ref_edges.len(), 10, "Should have 10 PlacePlaceRef edges");
+    }
+
+    #[test]
+    fn deep_nesting_new_places_have_unique_handles() {
+        let graph = build_graph_with_place();
+        let transform = deep_nesting(5);
+        let result = transform(graph).unwrap();
+
+        let place_handles: std::collections::HashSet<_> = result
+            .iter_nodes()
+            .filter(|(_, n)| matches!(n, crate::Node::Place(_)))
+            .map(|(h, _)| h.clone())
+            .collect();
+        assert_eq!(
+            place_handles.len(),
+            6,
+            "All 6 places should have unique handles"
+        );
+    }
+
+    #[test]
+    fn deep_nesting_empty_graph() {
+        let graph = Graph::new();
+        let transform = deep_nesting(5);
+        let result = transform(graph);
+        assert!(
+            matches!(result, Err(AdversarialError::TransformNotApplicable(_))),
+            "Empty graph should return TransformNotApplicable"
+        );
+    }
+
+    #[test]
+    fn deep_nesting_no_places_noop() {
+        let mut graph = Graph::new();
+        graph
+            .add_node(
+                "p1".to_string(),
+                crate::Node::Person(crate::PersonData::default()),
+            )
+            .unwrap();
+        let transform = deep_nesting(5);
+        let result = transform(graph);
+        assert!(
+            matches!(result, Err(AdversarialError::TransformNotApplicable(_))),
+            "Graph with no places should return TransformNotApplicable"
+        );
+    }
+
+    #[test]
+    fn deep_nesting_node_count_increases() {
+        let graph = build_graph_with_place();
+        let node_count_before = graph.node_count();
+
+        let transform = deep_nesting(5);
+        let result = transform(graph).unwrap();
+
+        assert_eq!(
+            result.node_count(),
+            node_count_before + 5,
+            "Node count should increase by 5"
+        );
+    }
+
+    #[test]
+    fn deep_nesting_preserves_existing_edges() {
+        let mut graph = build_graph_with_place();
+
+        // Add an existing PlacePlaceRef edge
+        let existing_parent = "existing_parent".to_string();
+        graph
+            .add_node(
+                existing_parent.clone(),
+                crate::Node::Place(crate::PlaceData {
+                    handle: existing_parent.clone(),
+                    name: crate::Location {
+                        city: Some("Existing".to_string()),
+                        ..crate::Location::default()
+                    },
+                    ..crate::PlaceData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(crate::Edge::PlacePlaceRef {
+                source: "pl1".to_string(),
+                target: existing_parent,
+            })
+            .unwrap();
+
+        let transform = deep_nesting(3);
+        let result = transform(graph).unwrap();
+
+        // The existing PlacePlaceRef edge should still be present
+        let existing_refs: Vec<_> = result
+            .iter_edges()
+            .filter(|e| matches!(e, crate::Edge::PlacePlaceRef { source, target } if source == "pl1" && target == "existing_parent"))
+            .collect();
+        assert_eq!(
+            existing_refs.len(),
+            1,
+            "Existing PlacePlaceRef edge should be preserved"
+        );
+    }
+
+    #[test]
+    fn deep_nesting_validates_ok() {
+        let schema = crate::Schema::new();
+
+        // Create a graph with a place and rebuild validation
+        let graph = build_graph_with_place();
+
+        let transform = deep_nesting(5);
+        let mut graph = transform(graph).unwrap();
+
+        let errors = graph.validate(&schema);
+        assert!(
+            errors.is_empty(),
+            "Deep nesting should be validity-preserving: {:?}",
+            errors
+        );
     }
 }
