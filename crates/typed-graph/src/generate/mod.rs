@@ -4,4 +4,6 @@
 //! The primary entry point is the [`GraphBuilder`] fluent API.
 
 pub mod builder;
+pub mod random;
 pub use builder::*;
+pub use random::*;
