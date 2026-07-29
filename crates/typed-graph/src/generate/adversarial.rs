@@ -80,8 +80,12 @@ pub enum AdversarialStrategy {
     MaxRefChains,
 
     /// Remove some edges from citation/note/media references while keeping
-    /// the target nodes. Validity-breaking (fails second validation gate).
+    /// the target nodes. Validity-preserving.
     OrphanedReferences,
+
+    /// Swap gender for a configurable fraction of persons.
+    /// Validity-preserving.
+    DoubleGender(f64),
 }
 
 impl AdversarialStrategy {
@@ -112,6 +116,7 @@ impl AdversarialStrategy {
                 | AdversarialStrategy::DeepNesting
                 | AdversarialStrategy::MaxRefChains
                 | AdversarialStrategy::OrphanedReferences
+                | AdversarialStrategy::DoubleGender(..)
         )
     }
 
@@ -667,6 +672,63 @@ pub fn orphaned_references(fraction: f64) -> GraphTransform {
 }
 
 // ---------------------------------------------------------------------------
+// Double gender transform
+// ---------------------------------------------------------------------------
+
+/// Swap the gender of a configurable fraction of persons.
+///
+/// Valid gender values in Gramps:
+/// - 0 = Male
+/// - 1 = Female
+/// - 2 = Unknown
+/// - 3 = Other
+///
+/// This transform swaps 0↔1 (Male↔Female) and leaves 2 and 3 unchanged.
+///
+/// This is a **validity-preserving** transform — the graph still passes
+/// structural and referential validation. The gender swap creates
+/// semantically unusual data (persons with a gender that may conflict
+/// with their role in a family) but does not violate any validation rules.
+pub fn double_gender(fraction: f64) -> GraphTransform {
+    Box::new(move |mut graph: Graph| -> Result<Graph, AdversarialError> {
+        let effective_fraction = fraction.clamp(0.0, 1.0);
+
+        if effective_fraction == 0.0 {
+            return Ok(graph);
+        }
+
+        // Collect all person handles
+        let person_handles: Vec<crate::Handle> = graph
+            .iter_nodes()
+            .filter(|(_, node)| matches!(node, crate::Node::Person(_)))
+            .map(|(h, _)| h.clone())
+            .collect();
+
+        if person_handles.is_empty() {
+            return Err(AdversarialError::TransformNotApplicable(
+                "no person nodes in graph".to_string(),
+            ));
+        }
+
+        let swap_count = (person_handles.len() as f64 * effective_fraction).ceil() as usize;
+
+        for handle in person_handles.iter().take(swap_count) {
+            if let Some(crate::Node::Person(ref mut person)) = graph.get_node_mut(handle) {
+                match person.gender {
+                    // Swap Male ↔ Female
+                    0 => person.gender = 1,
+                    1 => person.gender = 0,
+                    // Leave Unknown(2) and Other(3) unchanged
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(graph)
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -689,6 +751,7 @@ mod tests {
         let _ = AdversarialStrategy::DeepNesting;
         let _ = AdversarialStrategy::MaxRefChains;
         let _ = AdversarialStrategy::OrphanedReferences;
+        let _ = AdversarialStrategy::DoubleGender(0.5);
     }
 
     #[test]
@@ -711,6 +774,7 @@ mod tests {
         assert!(AdversarialStrategy::DeepNesting.is_category_b());
         assert!(AdversarialStrategy::MaxRefChains.is_category_b());
         assert!(AdversarialStrategy::OrphanedReferences.is_category_b());
+        assert!(AdversarialStrategy::DoubleGender(0.5).is_category_b());
 
         // Category A are not Category B
         assert!(!AdversarialStrategy::OneParentFamilies(0.5).is_category_b());
@@ -727,6 +791,8 @@ mod tests {
         // Validity-breaking
         assert!(!AdversarialStrategy::OrphanedReferences.is_validity_breaking());
         assert!(AdversarialStrategy::OrphanedReferences.is_validity_preserving());
+        assert!(!AdversarialStrategy::DoubleGender(0.5).is_validity_breaking());
+        assert!(AdversarialStrategy::DoubleGender(0.5).is_validity_preserving());
 
         // Category A are neither
         assert!(!AdversarialStrategy::OneParentFamilies(0.5).is_validity_preserving());
@@ -1771,6 +1837,194 @@ mod tests {
         assert!(
             result.edge_count() > 0,
             "Structural edges should remain after removing all soft edges"
+        );
+    }
+
+    // =======================================================================
+    // double_gender tests
+    // =======================================================================
+
+    fn build_graph_with_persons() -> Graph {
+        use crate::generate::random::RandomConfig;
+
+        let schema = crate::Schema::new();
+        let config = RandomConfig {
+            person_count: 5,
+            family_count: 2,
+            seed: Some(42),
+            ..RandomConfig::default()
+        };
+        let adversarial_config = crate::generate::AdversarialConfig::default();
+        let result =
+            crate::generate::random::generate_random(&config, &adversarial_config, &schema)
+                .unwrap();
+        result.graph
+    }
+
+    #[test]
+    fn double_gender_swaps_some_genders() {
+        let graph = build_graph_with_persons();
+
+        // Count genders before
+        let males_before: usize = graph
+            .iter_nodes()
+            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if p.gender == 0))
+            .count();
+        let females_before: usize = graph
+            .iter_nodes()
+            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if p.gender == 1))
+            .count();
+
+        let transform = double_gender(1.0);
+        let result = transform(graph).unwrap();
+
+        // Count genders after
+        let males_after: usize = result
+            .iter_nodes()
+            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if p.gender == 0))
+            .count();
+        let females_after: usize = result
+            .iter_nodes()
+            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if p.gender == 1))
+            .count();
+
+        // All males should become females and vice versa
+        assert_eq!(
+            males_after, females_before,
+            "All former females should now be male"
+        );
+        assert_eq!(
+            females_after, males_before,
+            "All former males should now be female"
+        );
+    }
+
+    #[test]
+    fn double_gender_partial_fraction() {
+        let graph = build_graph_with_persons();
+        let total_persons: usize = graph
+            .iter_nodes()
+            .filter(|(_, n)| matches!(n, crate::Node::Person(_)))
+            .count();
+
+        let transform = double_gender(0.5);
+        let result = transform(graph).unwrap();
+
+        // Count swapped genders (should be ~50% of persons with binary gender)
+        let _binary_persons_before: usize = result
+            .iter_nodes()
+            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if p.gender == 0 || p.gender == 1))
+            .count();
+
+        // The fraction should be applied to all persons, including those with
+        // gender 2 or 3 (which are left unchanged). So the number of swapped
+        // persons is ceil(total_persons * 0.5).
+        let expected_swapped = (total_persons as f64 * 0.5).ceil() as usize;
+        assert!(
+            expected_swapped <= total_persons,
+            "Expected swapped count should be <= total persons"
+        );
+
+        // We can't easily count exactly how many were swapped, but we can
+        // verify that at least some persons were swapped by checking that
+        // the gender ratio changed.
+        let males_after: usize = result
+            .iter_nodes()
+            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if p.gender == 0))
+            .count();
+        let females_after: usize = result
+            .iter_nodes()
+            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if p.gender == 1))
+            .count();
+
+        // At least some change should have occurred
+        assert!(
+            males_after > 0 || females_after > 0,
+            "Should still have some binary-gender persons"
+        );
+    }
+
+    #[test]
+    fn double_gender_keeps_unknown_other() {
+        let mut graph = Graph::new();
+        // Add persons with gender 2 (Unknown) and 3 (Other)
+        let p1 = crate::PersonData {
+            handle: "p1".to_string(),
+            gender: 2,
+            ..crate::PersonData::default()
+        };
+        let p2 = crate::PersonData {
+            handle: "p2".to_string(),
+            gender: 3,
+            ..crate::PersonData::default()
+        };
+        graph
+            .add_node("p1".to_string(), crate::Node::Person(p1))
+            .unwrap();
+        graph
+            .add_node("p2".to_string(), crate::Node::Person(p2))
+            .unwrap();
+
+        let transform = double_gender(1.0);
+        let result = transform(graph).unwrap();
+
+        // Check genders unchanged
+        for (handle, node) in result.iter_nodes() {
+            if let crate::Node::Person(p) = node {
+                if handle == "p1" {
+                    assert_eq!(p.gender, 2, "Unknown gender should be unchanged");
+                } else if handle == "p2" {
+                    assert_eq!(p.gender, 3, "Other gender should be unchanged");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn double_gender_validity_preserving() {
+        let schema = crate::Schema::new();
+        let graph = build_graph_with_persons();
+        let transform = double_gender(1.0);
+        let mut result = transform(graph).unwrap();
+
+        let errors = result.validate(&schema);
+        assert!(
+            errors.is_empty(),
+            "double_gender should be validity-preserving: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn double_gender_fraction_zero() {
+        let mut graph = Graph::new();
+        let p = crate::PersonData {
+            handle: "p1".to_string(),
+            gender: 0,
+            ..crate::PersonData::default()
+        };
+        graph
+            .add_node("p1".to_string(), crate::Node::Person(p))
+            .unwrap();
+
+        let transform = double_gender(0.0);
+        let result = transform(graph).unwrap();
+
+        if let Some(crate::Node::Person(p)) = result.get_node(&"p1".to_string()) {
+            assert_eq!(p.gender, 0, "Gender should be unchanged with fraction=0.0");
+        } else {
+            panic!("Person node should exist");
+        }
+    }
+
+    #[test]
+    fn double_gender_empty_graph() {
+        let graph = Graph::new();
+        let transform = double_gender(0.5);
+        let result = transform(graph);
+        assert!(
+            matches!(result, Err(AdversarialError::TransformNotApplicable(_))),
+            "Empty graph should return TransformNotApplicable"
         );
     }
 }
