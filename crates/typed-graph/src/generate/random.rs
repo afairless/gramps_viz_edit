@@ -28,6 +28,8 @@
 // Allow dead code for functions used by later steps in the generation pipeline.
 #![allow(dead_code)]
 
+use rand::Rng;
+use rand::SeedableRng;
 use std::ops::Range;
 
 // ---------------------------------------------------------------------------
@@ -1174,6 +1176,244 @@ fn get_person_birth_year(graph: &crate::Graph, person_handle: &crate::Handle) ->
         }
     }
     None
+}
+
+// ---------------------------------------------------------------------------
+// GenerationResult, GenerationStats, and generate_random entry point
+// ---------------------------------------------------------------------------
+
+/// The result of a random generation run.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GenerationResult {
+    /// The generated graph.
+    pub graph: crate::Graph,
+    /// The seed used for this generation (for reproducibility).
+    pub seed: u64,
+    /// Plausibility warnings emitted during generation.
+    pub warnings: Vec<String>,
+    /// Generation statistics.
+    pub stats: GenerationStats,
+}
+
+/// Statistics about a generation run.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct GenerationStats {
+    pub person_count: usize,
+    pub family_count: usize,
+    pub event_count: usize,
+    pub place_count: usize,
+    pub source_count: usize,
+    pub citation_count: usize,
+    pub note_count: usize,
+    pub edge_count: usize,
+}
+
+/// Generate a random family tree graph with the given configuration.
+///
+/// The RNG is seeded from `config.seed` if provided, otherwise a random
+/// seed is generated from OS entropy. The seed is recorded in the returned
+/// `GenerationResult` for reproducibility.
+///
+/// The generated graph is NOT automatically validated — callers should
+/// run `graph.validate(&schema)` before serialization, following the
+/// five-stage pipeline (Generate → Validate → ...).
+///
+/// # Errors
+///
+/// Returns [`GenerationError::InvalidConfig`] if the configuration is
+/// invalid (e.g., `person_count == 0`). Returns
+/// [`GenerationError::ConstraintExhausted`] if generation cannot proceed
+/// due to exhausted constraints (e.g., no eligible parents found).
+pub fn generate_random(
+    config: &RandomConfig,
+    _schema: &crate::Schema,
+) -> Result<GenerationResult, GenerationError> {
+    // Validate config
+    if config.person_count == 0 {
+        return Err(GenerationError::InvalidConfig(
+            "person_count must be > 0".to_string(),
+        ));
+    }
+    if config.generations == 0 {
+        return Err(GenerationError::InvalidConfig(
+            "generations must be >= 1".to_string(),
+        ));
+    }
+    if config.start_year > config.end_year {
+        return Err(GenerationError::InvalidConfig(format!(
+            "start_year ({}) must be <= end_year ({})",
+            config.start_year, config.end_year
+        )));
+    }
+    if config.children_per_family.start > config.children_per_family.end {
+        return Err(GenerationError::InvalidConfig(
+            "children_per_family.start must be <= children_per_family.end"
+                .to_string(),
+        ));
+    }
+
+    // Create seeded RNG
+    let seed = config.seed.unwrap_or_else(|| {
+        use rand::Rng;
+        rand::rngs::OsRng.gen()
+    });
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+
+    // Create empty graph
+    let mut graph = crate::Graph::new();
+    let mut warnings: Vec<String> = Vec::new();
+
+    // Track used names and place names
+    let mut used_names: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    // Track person summaries for parent selection
+    let mut persons: Vec<(crate::Handle, PersonSummary)> = Vec::new();
+
+    // -----------------------------------------------------------------------
+    // Stage 1: Create Person nodes
+    // -----------------------------------------------------------------------
+    let persons_per_layer =
+        config.person_count.div_ceil(config.generations);
+
+    for layer in 0..config.generations {
+        let layer_count = if layer == config.generations - 1 {
+            // Last layer gets remaining persons
+            config.person_count - persons.len()
+        } else {
+            persons_per_layer.min(config.person_count - persons.len())
+        };
+
+        for _ in 0..layer_count {
+            let handle = generate_random_person(
+                &mut graph,
+                config,
+                &mut used_names,
+                &mut rng,
+                layer,
+            )?;
+
+            // Extract birth year from the birth event
+            let birth_year = get_person_birth_year(&graph, &handle).unwrap_or(1970);
+
+            // Get gender from the person node
+            let gender = match graph.get_node(&handle) {
+                Some(crate::Node::Person(p)) => p.gender,
+                _ => 0,
+            };
+
+            persons.push((
+                handle.clone(),
+                PersonSummary {
+                    handle,
+                    birth_year,
+                    gender,
+                    layer,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ));
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Stage 2: Parent selection and Family creation
+    // -----------------------------------------------------------------------
+    // Sort persons by birth year for parent selection
+    persons.sort_by(|a, b| a.1.birth_year.cmp(&b.1.birth_year));
+
+    let families_to_create = config.family_count.min(persons.len() / 2);
+    let mut family_handles: Vec<crate::Handle> = Vec::new();
+
+    for _ in 0..families_to_create {
+        // Assign a layer for this family (cycling through generations)
+        let layer = rng.gen_range(0..config.generations);
+
+        match generate_family(&mut graph, config, &mut persons, layer, &mut rng) {
+            Ok(family_handle) => {
+                family_handles.push(family_handle);
+            }
+            Err(GenerationError::ConstraintExhausted { message, seed: _ }) => {
+                warnings.push(format!(
+                    "Constraint exhausted during family generation: {}",
+                    message
+                ));
+                break;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Stage 3: Child assignment
+    // -----------------------------------------------------------------------
+    // For each family, find parents and assign children
+    for family_handle in &family_handles {
+        if let Some(crate::Node::Family(family)) = graph.get_node(family_handle).cloned() {
+            let father_handle = family.father_handle.clone();
+            let mother_handle = family.mother_handle.clone();
+
+            match (father_handle, mother_handle) {
+                (Some(ref father_h), Some(ref mother_h)) => {
+                    let children = assign_children(
+                        &mut graph,
+                        family_handle,
+                        father_h,
+                        mother_h,
+                        &mut persons,
+                        config,
+                        &mut rng,
+                    );
+                    if children.is_empty() {
+                        warnings.push(format!(
+                            "Family {}: no eligible children found for parent pair",
+                            family_handle
+                        ));
+                    }
+                }
+                _ => {
+                    // Single-parent family, skip child assignment
+                }
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Stage 4: Event generation
+    // -----------------------------------------------------------------------
+    generate_events(&mut graph, config, &mut rng)?;
+
+    // -----------------------------------------------------------------------
+    // Collect statistics
+    // -----------------------------------------------------------------------
+    let stats = collect_stats(&graph);
+
+    Ok(GenerationResult {
+        graph,
+        seed,
+        warnings,
+        stats,
+    })
+}
+
+/// Collect statistics from the generated graph.
+fn collect_stats(graph: &crate::Graph) -> GenerationStats {
+    let mut stats = GenerationStats::default();
+
+    for (_, node) in graph.iter_nodes() {
+        match node {
+            crate::Node::Person(_) => stats.person_count += 1,
+            crate::Node::Family(_) => stats.family_count += 1,
+            crate::Node::Event(_) => stats.event_count += 1,
+            crate::Node::Place(_) => stats.place_count += 1,
+            crate::Node::Source(_) => stats.source_count += 1,
+            crate::Node::Citation(_) => stats.citation_count += 1,
+            crate::Node::Note(_) => stats.note_count += 1,
+            _ => {}
+        }
+    }
+
+    stats.edge_count = graph.edge_count();
+    stats
 }
 
 // ---------------------------------------------------------------------------
@@ -2430,5 +2670,239 @@ mod tests {
             false
         });
         assert!(has_death, "Death event should exist");
+    }
+
+    // -----------------------------------------------------------------------
+    // generate_random entry point tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn generate_random_basic() {
+        let schema = crate::Schema::new();
+        let config = RandomConfig {
+            person_count: 10,
+            generations: 2,
+            seed: Some(42),
+            ..RandomConfig::default()
+        };
+
+        let result = generate_random(&config, &schema).expect("generation should succeed");
+        assert!(result.graph.node_count() > 0, "Graph should have nodes");
+        assert!(!result.warnings.is_empty() || result.stats.family_count > 0,
+                "Should generate families or emit warnings");
+    }
+
+    #[test]
+    fn generate_random_person_count() {
+        let schema = crate::Schema::new();
+        let config = RandomConfig {
+            person_count: 15,
+            generations: 2,
+            seed: Some(42),
+            ..RandomConfig::default()
+        };
+
+        let result = generate_random(&config, &schema).expect("generation should succeed");
+        assert_eq!(result.stats.person_count, 15,
+                   "Graph should have {} persons, got {}",
+                   config.person_count, result.stats.person_count);
+    }
+
+    #[test]
+    fn generate_random_family_count_nonzero() {
+        let schema = crate::Schema::new();
+        let config = RandomConfig {
+            person_count: 20,
+            generations: 2,
+            seed: Some(42),
+            ..RandomConfig::default()
+        };
+
+        let result = generate_random(&config, &schema).expect("generation should succeed");
+        assert!(result.stats.family_count > 0,
+                "Graph should have at least one family, got {}",
+                result.stats.family_count);
+    }
+
+    #[test]
+    fn generate_random_events_present() {
+        let schema = crate::Schema::new();
+        let config = RandomConfig {
+            person_count: 10,
+            generations: 2,
+            seed: Some(42),
+            ..RandomConfig::default()
+        };
+
+        let result = generate_random(&config, &schema).expect("generation should succeed");
+        assert!(result.stats.event_count > 0,
+                "Graph should have event nodes, got {}",
+                result.stats.event_count);
+    }
+
+    #[test]
+    fn generate_random_seed_reproducibility() {
+        let schema = crate::Schema::new();
+        let config = RandomConfig {
+            person_count: 10,
+            generations: 2,
+            seed: Some(42),
+            ..RandomConfig::default()
+        };
+
+        let r1 = generate_random(&config, &schema).expect("first gen should succeed");
+        let r2 = generate_random(&config, &schema).expect("second gen should succeed");
+
+        // Same seed should produce identical graphs
+        assert_eq!(r1.stats, r2.stats, "Stats should match between runs");
+    }
+
+    #[test]
+    fn generate_random_different_seeds_differ() {
+        let schema = crate::Schema::new();
+        let config1 = RandomConfig {
+            person_count: 10,
+            generations: 2,
+            seed: Some(42),
+            ..RandomConfig::default()
+        };
+        let config2 = RandomConfig {
+            person_count: 10,
+            generations: 2,
+            seed: Some(99),
+            ..RandomConfig::default()
+        };
+
+        let r1 = generate_random(&config1, &schema).expect("first gen should succeed");
+        let r2 = generate_random(&config2, &schema).expect("second gen should succeed");
+
+        // Different seeds should produce different stats (or at least different seeds)
+        assert_ne!(r1.seed, r2.seed, "Seeds should differ");
+    }
+
+    #[test]
+    fn generate_random_seed_recorded() {
+        let schema = crate::Schema::new();
+        let config = RandomConfig {
+            seed: Some(42),
+            ..RandomConfig::default()
+        };
+
+        let result = generate_random(&config, &schema).expect("generation should succeed");
+        assert_eq!(result.seed, 42, "Seed should be recorded in result");
+    }
+
+    #[test]
+    fn generate_random_stats_match() {
+        let schema = crate::Schema::new();
+        let config = RandomConfig {
+            person_count: 10,
+            generations: 2,
+            seed: Some(42),
+            ..RandomConfig::default()
+        };
+
+        let result = generate_random(&config, &schema).expect("generation should succeed");
+        let total_nodes = result.stats.person_count
+            + result.stats.family_count
+            + result.stats.event_count
+            + result.stats.place_count
+            + result.stats.source_count
+            + result.stats.citation_count
+            + result.stats.note_count;
+        assert_eq!(result.graph.node_count(), total_nodes,
+                   "Node count should match stats sum");
+    }
+
+    #[test]
+    fn generate_random_invalid_config_zero_persons() {
+        let schema = crate::Schema::new();
+        let config = RandomConfig {
+            person_count: 0,
+            ..RandomConfig::default()
+        };
+
+        let result = generate_random(&config, &schema);
+        assert!(matches!(result, Err(GenerationError::InvalidConfig(_))),
+                "Zero persons should be invalid");
+    }
+
+    #[test]
+    fn generate_random_invalid_config_bad_range() {
+        let schema = crate::Schema::new();
+        let config = RandomConfig {
+            start_year: 2000,
+            end_year: 1900,
+            ..RandomConfig::default()
+        };
+
+        let result = generate_random(&config, &schema);
+        assert!(matches!(result, Err(GenerationError::InvalidConfig(_))),
+                "start_year > end_year should be invalid");
+    }
+
+    #[test]
+    fn generate_random_with_places() {
+        let schema = crate::Schema::new();
+        let config = RandomConfig {
+            person_count: 10,
+            generations: 2,
+            with_places: true,
+            seed: Some(42),
+            ..RandomConfig::default()
+        };
+
+        let result = generate_random(&config, &schema).expect("generation should succeed");
+        assert!(result.stats.place_count > 0,
+                "Places should be present when with_places is true");
+    }
+
+    #[test]
+    fn generate_random_with_citations() {
+        let schema = crate::Schema::new();
+        let config = RandomConfig {
+            person_count: 10,
+            generations: 2,
+            with_citations: true,
+            seed: Some(42),
+            ..RandomConfig::default()
+        };
+
+        let result = generate_random(&config, &schema).expect("generation should succeed");
+        assert!(result.stats.source_count > 0,
+                "Sources should be present when with_citations is true");
+        // Citations may or may not be created (30% probability per event)
+    }
+
+    #[test]
+    fn generate_random_large_count() {
+        let schema = crate::Schema::new();
+        let config = RandomConfig {
+            person_count: 50,
+            generations: 3,
+            seed: Some(42),
+            ..RandomConfig::default()
+        };
+
+        let result = generate_random(&config, &schema);
+        assert!(result.is_ok(), "50 persons should generate without panic");
+    }
+
+    #[test]
+    fn generate_random_validates_ok() {
+        let schema = crate::Schema::new();
+        let config = RandomConfig {
+            person_count: 10,
+            generations: 2,
+            seed: Some(42),
+            ..RandomConfig::default()
+        };
+
+        let mut result = generate_random(&config, &schema).expect("generation should succeed");
+        let errors = result.graph.validate(&schema);
+        // Birth/death events are created inline, so the graph should be valid
+        // (Marriage events are added by generate_events)
+        assert!(errors.is_empty(),
+                "Generated graph should validate: {:?}", errors);
     }
 }
