@@ -301,6 +301,128 @@ fn build_name(table: &SyllableTable, target_len: usize, rng: &mut impl rand::Rng
 }
 
 // ---------------------------------------------------------------------------
+// Place generator — hierarchical template system
+// ---------------------------------------------------------------------------
+
+/// A generated place with hierarchical components.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GeneratedPlace {
+    pub city: String,
+    pub county: String,
+    pub state: String,
+    pub country: String,
+}
+
+/// City prefixes drawn from a static set.
+const CITY_PREFIXES: &[&str] = &[
+    "Ash", "Oak", "River", "Mill", "Spring", "Fair", "Meadow", "Cedar",
+    "Pine", "Willow", "Maple", "Birch", "Elm", "Hazel", "Holly", "Ivy",
+    "Stone", "Brook", "Lake", "Hill", "Field", "Dale", "Glen", "Heath",
+    "Fern", "Rose", "Lily", "Vale", "Crest", "Peak",
+];
+
+/// City suffixes for building city names.
+const CITY_SUFFIXES: &[&str] = &[
+    "ton", "ville", "burg", "field", "bridge", "haven", "brook",
+    "ham", "ley", "more", "side", "stead", "ford", "gate",
+    "bury", "dale", "wick", "port", "worth", "view",
+];
+
+/// Procedurally named states.
+const STATE_NAMES: &[&str] = &[
+    "Northumbria", "Westland", "Southmere", "Eastshire", "Arcadia",
+    "Avalon", "Caledonia", "Delphia", "Eldoria", "Fenwick",
+    "Grenville", "Havenwood", "Iverness", "Kingsland", "Lorien",
+];
+
+/// Procedurally named countries.
+const COUNTRY_NAMES: &[&str] = &[
+    "Albion", "Valdoria", "Mercia", "Thalassia", "Eryndor",
+    "Celestria", "Durnhold", "Aeridor",
+];
+
+/// Generate a procedural place name using the hierarchical template system.
+///
+/// Template: "{prefix}{suffix}, {county} County, {state}"
+/// Where {prefix} and {suffix} are drawn from procedurally generated tables.
+///
+/// Depth controls how many levels are filled:
+/// - depth=1 → country only
+/// - depth=2 → state + country
+/// - depth=3 (default) → city + county + state + country
+pub fn generate_place(
+    depth: usize,
+    used_place_names: &std::collections::HashSet<String>,
+    rng: &mut impl rand::Rng,
+) -> GeneratedPlace {
+    let effective_depth = if depth == 0 { 1 } else { depth };
+
+    // Select country (reused within a graph via the seed)
+    let country_idx = rng.gen_range(0..COUNTRY_NAMES.len());
+    let country = COUNTRY_NAMES[country_idx].to_string();
+
+    if effective_depth == 1 {
+        return GeneratedPlace {
+            city: String::new(),
+            county: String::new(),
+            state: String::new(),
+            country,
+        };
+    }
+
+    // Select state
+    let state_idx = rng.gen_range(0..STATE_NAMES.len());
+    let state = STATE_NAMES[state_idx].to_string();
+
+    if effective_depth == 2 {
+        return GeneratedPlace {
+            city: String::new(),
+            county: String::new(),
+            state,
+            country,
+        };
+    }
+
+    // Generate city name (depth 3+)
+    let city = generate_city_name(used_place_names, rng);
+    let county = format!("{} County", city);
+
+    GeneratedPlace {
+        city,
+        county,
+        state,
+        country,
+    }
+}
+
+/// Generate a single city name from prefix + suffix combination.
+fn generate_city_name(
+    used_place_names: &std::collections::HashSet<String>,
+    rng: &mut impl rand::Rng,
+) -> String {
+    // Try up to 20 times to generate a unique city name
+    for _ in 0..20 {
+        let prefix_idx = rng.gen_range(0..CITY_PREFIXES.len());
+        let suffix_idx = rng.gen_range(0..CITY_SUFFIXES.len());
+        let name = format!("{}{}", CITY_PREFIXES[prefix_idx], CITY_SUFFIXES[suffix_idx]);
+        if !used_place_names.contains(&name) {
+            return name;
+        }
+    }
+    // Fallback with a unique suffix
+    let prefix_idx = rng.gen_range(0..CITY_PREFIXES.len());
+    let suffix_idx = rng.gen_range(0..CITY_SUFFIXES.len());
+    let base = format!("{}{}", CITY_PREFIXES[prefix_idx], CITY_SUFFIXES[suffix_idx]);
+    for suffix in 1u32..1000 {
+        let candidate = format!("{}{}", base, suffix);
+        if !used_place_names.contains(&candidate) {
+            return candidate;
+        }
+    }
+    "City".to_string()
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -504,5 +626,94 @@ mod tests {
         let name = generate_given_name("modern", &used, &mut rng);
         assert!(!name.is_empty());
         assert!(!used.contains(&name));
+    }
+
+    // -----------------------------------------------------------------------
+    // Place generator tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn generate_place_depth_1() {
+        let used = std::collections::HashSet::new();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let place = generate_place(1, &used, &mut rng);
+        assert!(place.city.is_empty());
+        assert!(place.county.is_empty());
+        assert!(place.state.is_empty());
+        assert!(!place.country.is_empty(), "Country should be non-empty at depth 1");
+    }
+
+    #[test]
+    fn generate_place_depth_3() {
+        let used = std::collections::HashSet::new();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let place = generate_place(3, &used, &mut rng);
+        assert!(!place.city.is_empty(), "City should be non-empty at depth 3");
+        assert!(!place.county.is_empty(), "County should be non-empty at depth 3");
+        assert!(!place.state.is_empty(), "State should be non-empty at depth 3");
+        assert!(!place.country.is_empty(), "Country should be non-empty at depth 3");
+    }
+
+    #[test]
+    fn generate_place_city_unique() {
+        let mut used = std::collections::HashSet::new();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let place1 = generate_place(3, &used, &mut rng);
+        used.insert(place1.city.clone());
+        let place2 = generate_place(3, &used, &mut rng);
+        // The city should differ because the first one is in used_place_names
+        // (there's a small chance of collision with prefix+suffix combinations)
+        assert_ne!(place1.city, place2.city);
+    }
+
+    #[test]
+    fn generate_place_city_not_empty() {
+        let used = std::collections::HashSet::new();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        for _ in 0..10 {
+            let place = generate_place(3, &used, &mut rng);
+            assert!(!place.city.is_empty(), "City name should be non-empty");
+        }
+    }
+
+    #[test]
+    fn generate_place_all_utf8() {
+        let used = std::collections::HashSet::new();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let place = generate_place(3, &used, &mut rng);
+        assert!(std::str::from_utf8(place.city.as_bytes()).is_ok());
+        assert!(std::str::from_utf8(place.county.as_bytes()).is_ok());
+        assert!(std::str::from_utf8(place.state.as_bytes()).is_ok());
+        assert!(std::str::from_utf8(place.country.as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn generate_place_depth_0_defaults_to_1() {
+        let used = std::collections::HashSet::new();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let place = generate_place(0, &used, &mut rng);
+        assert!(!place.country.is_empty(), "Depth 0 should default to depth 1");
+        assert!(place.city.is_empty());
+    }
+
+    #[test]
+    fn generate_place_country_reused() {
+        let used = std::collections::HashSet::new();
+        let mut rng1 = rand::rngs::StdRng::seed_from_u64(42);
+        let mut rng2 = rand::rngs::StdRng::seed_from_u64(42);
+        let place1 = generate_place(3, &used, &mut rng1);
+        let place2 = generate_place(3, &used, &mut rng2);
+        assert_eq!(place1.country, place2.country, "Same seed should produce same country");
+    }
+
+    #[test]
+    fn generate_place_depth_2() {
+        let used = std::collections::HashSet::new();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let place = generate_place(2, &used, &mut rng);
+        assert!(place.city.is_empty(), "City should be empty at depth 2");
+        assert!(place.county.is_empty(), "County should be empty at depth 2");
+        assert!(!place.state.is_empty(), "State should be non-empty at depth 2");
+        assert!(!place.country.is_empty(), "Country should be non-empty at depth 2");
     }
 }
