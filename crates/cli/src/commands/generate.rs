@@ -82,6 +82,12 @@ pub fn run(args: GenerateArgs) -> Result<(), crate::error::CliError> {
         None => "random".to_string(),
     };
     eprintln!("Generation seed: {}", seed_msg);
+
+    // Create progress reporter
+    let progress = crate::progress::ProgressReporter::new(
+        args.progress_interval,
+        config.person_count,
+    );
     eprintln!(
         "Generating {} persons across {} generations...",
         config.person_count, config.generations
@@ -90,6 +96,7 @@ pub fn run(args: GenerateArgs) -> Result<(), crate::error::CliError> {
     // Stage 1: Generate
     let schema = Schema::new();
     let mut result = generate_random(&config, &adversarial_config, &schema)?;
+    progress.finish();
     eprintln!("Generated {} persons, {} families, {} events",
         result.stats.person_count, result.stats.family_count, result.stats.event_count);
 
