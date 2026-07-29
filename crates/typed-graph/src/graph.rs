@@ -254,6 +254,32 @@ impl Graph {
     pub fn set_validation_state(&mut self, state: ValidationState) {
         self.validation_state = state;
     }
+
+    /// Remove all edges matching the given predicate.
+    ///
+    /// Returns the number of removed edges. Rebuilds the forward and reverse
+    /// edge indexes after removal. Resets `validation_state` to `Unvalidated`.
+    pub fn remove_edges(&mut self, predicate: impl Fn(&Edge) -> bool) -> usize {
+        let before = self.edges.len();
+        self.edges.retain(|e| !predicate(e));
+        let removed = before - self.edges.len();
+        if removed > 0 {
+            self.rebuild_edge_index();
+            self.validation_state = ValidationState::Unvalidated;
+        }
+        removed
+    }
+
+    /// Internal: rebuild the forward and reverse edge indexes from scratch.
+    fn rebuild_edge_index(&mut self) {
+        self.forward_edges.clear();
+        self.reverse_edges.clear();
+        for (i, edge) in self.edges.iter().enumerate() {
+            let (source, target) = edge_source_target(edge);
+            self.forward_edges.entry(source).or_default().push(i);
+            self.reverse_edges.entry(target).or_default().push(i);
+        }
+    }
 }
 
 /// Return the [`NodeKind`] for a given [`Node`].

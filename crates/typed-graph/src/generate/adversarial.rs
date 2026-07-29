@@ -182,7 +182,111 @@ impl std::error::Error for AdversarialError {}
 /// Each transform is a pure function that takes a `Graph` and returns
 /// a modified `Graph`. This composable design allows strategies to be
 /// applied in sequence and tested independently.
-pub type GraphTransform = fn(Graph) -> Graph;
+pub type GraphTransform = Box<dyn FnOnce(Graph) -> Graph>;
+
+// ---------------------------------------------------------------------------
+// Category B: Post-generation transforms
+// ---------------------------------------------------------------------------
+
+/// Split the graph into `k` unrelated clusters by deleting cross-cluster
+/// family edges.
+///
+/// The graph is partitioned into `k` clusters by dividing the persons
+/// into groups. Family edges that cross cluster boundaries are removed.
+/// All other edges (events, citations, notes, etc.) are preserved.
+///
+/// This produces `k` disconnected genealogical trees within a single graph.
+/// The transform is validity-preserving: the resulting graph still passes
+/// structural and referential validation.
+///
+/// # Parameters
+///
+/// * `k` — number of clusters to create (default: 3, min: 2).
+pub fn disconnected_subgraphs(k: usize) -> GraphTransform {
+    let effective_k = if k < 2 { 2 } else { k };
+
+    Box::new(move |mut graph: Graph| {
+        let person_handles: Vec<crate::Handle> = graph
+            .nodes_by_kind(crate::NodeKind::Person)
+            .into_iter()
+            .cloned()
+            .collect();
+
+        if person_handles.len() < effective_k {
+            // Not enough persons to partition; graph stays as-is
+            return graph;
+        }
+
+        // Assign each person to a cluster (round-robin by handle order)
+        let cluster_of: std::collections::HashMap<crate::Handle, usize> = person_handles
+            .iter()
+            .enumerate()
+            .map(|(i, h)| (h.clone(), i % effective_k))
+            .collect();
+
+        // Helper: get the cluster for a person handle (None if not a person)
+        let get_cluster = |h: &crate::Handle| -> Option<usize> { cluster_of.get(h).copied() };
+
+        // Determine which families are cross-cluster
+        let family_handles: Vec<crate::Handle> = graph
+            .nodes_by_kind(crate::NodeKind::Family)
+            .into_iter()
+            .cloned()
+            .collect();
+
+        let cross_cluster_families: std::collections::HashSet<crate::Handle> = family_handles
+            .iter()
+            .filter(|fh| {
+                if let Some(crate::Node::Family(family)) = graph.get_node(fh) {
+                    // Get clusters of father, mother, and all children
+                    let mut clusters: Vec<usize> = Vec::new();
+
+                    if let Some(ref father) = family.father_handle {
+                        if let Some(c) = get_cluster(father) {
+                            clusters.push(c);
+                        }
+                    }
+                    if let Some(ref mother) = family.mother_handle {
+                        if let Some(c) = get_cluster(mother) {
+                            clusters.push(c);
+                        }
+                    }
+                    for child_ref in &family.child_ref_list {
+                        if let Some(c) = get_cluster(&child_ref.ref_field) {
+                            clusters.push(c);
+                        }
+                    }
+
+                    // If more than one distinct cluster among family members,
+                    // this family is cross-cluster
+                    if clusters.is_empty() {
+                        false
+                    } else {
+                        let first = clusters[0];
+                        clusters.iter().any(|&c| c != first)
+                    }
+                } else {
+                    false
+                }
+            })
+            .cloned()
+            .collect();
+
+        // Remove all family-related edges for cross-cluster families
+        graph.remove_edges(|edge| match edge {
+            crate::Edge::FamilyFather { source, .. }
+            | crate::Edge::FamilyMother { source, .. }
+            | crate::Edge::FamilyChildRef { source, .. } => cross_cluster_families.contains(source),
+            crate::Edge::PersonFamily { target, .. }
+            | crate::Edge::PersonParentFamily { target, .. } => {
+                cross_cluster_families.contains(target)
+            }
+            _ => false,
+        });
+
+        graph
+    })
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -364,17 +468,351 @@ mod tests {
             g
         }
 
-        let _t: GraphTransform = identity_transform;
+        let _t: GraphTransform = Box::new(identity_transform);
 
         // Verify it works with a closure-like function
         fn noop(g: Graph) -> Graph {
             g
         }
 
-        let transform: GraphTransform = noop;
+        let transform: GraphTransform = Box::new(noop);
         let graph = Graph::new();
         let result = transform(graph);
         assert_eq!(result.node_count(), 0);
         assert_eq!(result.edge_count(), 0);
+    }
+
+    // =======================================================================
+    // Disconnected subgraphs transform tests
+    // =======================================================================
+
+    /// Build a small graph with two families (6 persons, 2 families).
+    /// Family 1: p1 (father, M), p2 (mother, F), p3 (child, M)
+    /// Family 2: p4 (father, M), p5 (mother, F), p6 (child, F)
+    fn build_two_family_graph() -> Graph {
+        let mut graph = Graph::new();
+
+        let p1 = "p1".to_string();
+        let p2 = "p2".to_string();
+        let p3 = "p3".to_string();
+        let p4 = "p4".to_string();
+        let p5 = "p5".to_string();
+        let p6 = "p6".to_string();
+
+        // Add persons
+        for (h, g) in &[(&p1, 0), (&p2, 1), (&p3, 0), (&p4, 0), (&p5, 1), (&p6, 1)] {
+            graph
+                .add_node(
+                    (*h).clone(),
+                    crate::Node::Person(crate::PersonData {
+                        handle: (*h).clone(),
+                        gender: *g,
+                        primary_name: crate::Name {
+                            first_name: Some("Test".to_string()),
+                            ..crate::Name::default()
+                        },
+                        ..crate::PersonData::default()
+                    }),
+                )
+                .unwrap();
+        }
+
+        // Family 1: p1 (father) + p2 (mother) + p3 (child)
+        let f1 = "f1".to_string();
+        graph
+            .add_node(
+                f1.clone(),
+                crate::Node::Family(crate::FamilyData {
+                    handle: f1.clone(),
+                    father_handle: Some(p1.clone()),
+                    mother_handle: Some(p2.clone()),
+                    child_ref_list: vec![crate::ChildRef {
+                        ref_field: p3.clone(),
+                        ..crate::ChildRef::default()
+                    }],
+                    ..crate::FamilyData::default()
+                }),
+            )
+            .unwrap();
+
+        // Family 2: p4 (father) + p5 (mother) + p6 (child)
+        let f2 = "f2".to_string();
+        graph
+            .add_node(
+                f2.clone(),
+                crate::Node::Family(crate::FamilyData {
+                    handle: f2.clone(),
+                    father_handle: Some(p4.clone()),
+                    mother_handle: Some(p5.clone()),
+                    child_ref_list: vec![crate::ChildRef {
+                        ref_field: p6.clone(),
+                        ..crate::ChildRef::default()
+                    }],
+                    ..crate::FamilyData::default()
+                }),
+            )
+            .unwrap();
+
+        // Add family-person edges
+        graph
+            .add_edge(crate::Edge::FamilyFather {
+                source: f1.clone(),
+                target: p1.clone(),
+            })
+            .unwrap();
+        graph
+            .add_edge(crate::Edge::FamilyMother {
+                source: f1.clone(),
+                target: p2.clone(),
+            })
+            .unwrap();
+        graph
+            .add_edge(crate::Edge::FamilyChildRef {
+                source: f1.clone(),
+                target: p3.clone(),
+                metadata: Box::new(crate::ChildRef {
+                    ref_field: p3.clone(),
+                    ..crate::ChildRef::default()
+                }),
+            })
+            .unwrap();
+        graph
+            .add_edge(crate::Edge::FamilyFather {
+                source: f2.clone(),
+                target: p4.clone(),
+            })
+            .unwrap();
+        graph
+            .add_edge(crate::Edge::FamilyMother {
+                source: f2.clone(),
+                target: p5.clone(),
+            })
+            .unwrap();
+        graph
+            .add_edge(crate::Edge::FamilyChildRef {
+                source: f2.clone(),
+                target: p6.clone(),
+                metadata: Box::new(crate::ChildRef {
+                    ref_field: p6.clone(),
+                    ..crate::ChildRef::default()
+                }),
+            })
+            .unwrap();
+
+        // Add PersonFamily and PersonParentFamily reverse edges
+        graph
+            .add_edge(crate::Edge::PersonFamily {
+                source: p1.clone(),
+                target: f1.clone(),
+            })
+            .unwrap();
+        graph
+            .add_edge(crate::Edge::PersonFamily {
+                source: p2.clone(),
+                target: f1.clone(),
+            })
+            .unwrap();
+        graph
+            .add_edge(crate::Edge::PersonFamily {
+                source: p4.clone(),
+                target: f2.clone(),
+            })
+            .unwrap();
+        graph
+            .add_edge(crate::Edge::PersonFamily {
+                source: p5.clone(),
+                target: f2.clone(),
+            })
+            .unwrap();
+
+        // Add some event/citation edges to verify they're preserved
+        let evt1 = "evt1".to_string();
+        graph
+            .add_node(
+                evt1.clone(),
+                crate::Node::Event(crate::EventData {
+                    handle: evt1.clone(),
+                    event_type: crate::EventType::Birth,
+                    ..crate::EventData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(crate::Edge::PersonEventRef {
+                source: p1,
+                target: evt1,
+                metadata: Box::new(crate::EventRef::default()),
+            })
+            .unwrap();
+
+        graph
+    }
+
+    #[test]
+    fn disconnected_subgraphs_k_2_produces_two_clusters() {
+        let graph = build_two_family_graph();
+        let transform = disconnected_subgraphs(2);
+        let result = transform(graph);
+
+        // Both families still exist
+        assert!(result.contains_node(&"f1".to_string()));
+        assert!(result.contains_node(&"f2".to_string()));
+
+        // All persons still exist
+        assert!(result.contains_node(&"p1".to_string()));
+        assert!(result.contains_node(&"p2".to_string()));
+        assert!(result.contains_node(&"p3".to_string()));
+        assert!(result.contains_node(&"p4".to_string()));
+        assert!(result.contains_node(&"p5".to_string()));
+        assert!(result.contains_node(&"p6".to_string()));
+
+        // Event edges should be preserved
+        assert!(result.contains_node(&"evt1".to_string()));
+
+        // No nodes removed
+        assert_eq!(result.node_count(), 9); // 6 persons + 2 families + 1 event
+    }
+
+    #[test]
+    fn disconnected_subgraphs_no_nodes_removed() {
+        let graph = build_two_family_graph();
+        let node_count_before = graph.node_count();
+
+        let transform = disconnected_subgraphs(2);
+        let result = transform(graph);
+
+        assert_eq!(
+            result.node_count(),
+            node_count_before,
+            "No nodes should be removed"
+        );
+    }
+
+    #[test]
+    fn disconnected_subgraphs_empty_graph() {
+        let graph = Graph::new();
+        let transform = disconnected_subgraphs(2);
+        let result = transform(graph);
+        assert_eq!(result.node_count(), 0);
+        assert_eq!(result.edge_count(), 0);
+    }
+
+    #[test]
+    fn disconnected_subgraphs_k_1_clamps_to_min() {
+        let graph = build_two_family_graph();
+        // k=1 should be treated as k=2
+        let transform = disconnected_subgraphs(1);
+        let result = transform(graph);
+        // Graph should still be valid (no crash)
+        assert_eq!(result.node_count(), 9);
+    }
+
+    #[test]
+    fn disconnected_subgraphs_single_person() {
+        let mut graph = Graph::new();
+        graph
+            .add_node(
+                "p1".to_string(),
+                crate::Node::Person(crate::PersonData {
+                    handle: "p1".to_string(),
+                    gender: 0,
+                    primary_name: crate::Name {
+                        first_name: Some("Test".to_string()),
+                        ..crate::Name::default()
+                    },
+                    ..crate::PersonData::default()
+                }),
+            )
+            .unwrap();
+
+        let transform = disconnected_subgraphs(2);
+        let result = transform(graph);
+        assert_eq!(result.node_count(), 1);
+        assert!(result.contains_node(&"p1".to_string()));
+    }
+
+    #[test]
+    fn disconnected_subgraphs_all_event_edges_preserved() {
+        let graph = build_two_family_graph();
+        let _edge_count_before = graph.edge_count();
+
+        let transform = disconnected_subgraphs(2);
+        let result = transform(graph);
+
+        // Event edges should still be present
+        let evt_edges: Vec<_> = result
+            .iter_edges()
+            .filter(|e| matches!(e, crate::Edge::PersonEventRef { .. }))
+            .collect();
+        assert_eq!(evt_edges.len(), 1, "Event edges should be preserved");
+    }
+
+    #[test]
+    fn disconnected_subgraphs_validates_ok() {
+        // Use the random generation engine to create a valid graph,
+        // then apply disconnected_subgraphs and verify it still validates.
+        let schema = crate::Schema::new();
+        let config = crate::generate::RandomConfig {
+            person_count: 20,
+            family_count: 6,
+            generations: 2,
+            seed: Some(42),
+            ..crate::generate::RandomConfig::default()
+        };
+        let result = crate::generate::generate_random(
+            &config,
+            &crate::generate::AdversarialConfig::default(),
+            &schema,
+        )
+        .expect("generation should succeed");
+
+        let mut graph = result.graph;
+        // Validate first (Gate 1)
+        let errors = graph.validate(&schema);
+        assert!(
+            errors.is_empty(),
+            "Gate 1 validation should pass: {:?}",
+            errors
+        );
+
+        // Apply disconnected subgraphs
+        let transform = disconnected_subgraphs(3);
+        let mut graph = transform(graph);
+
+        // Should still pass validation (validity-preserving)
+        let errors = graph.validate(&schema);
+        assert!(
+            errors.is_empty(),
+            "Disconnected subgraphs should preserve validity: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn disconnected_subgraphs_k_3_produces_three_clusters() {
+        let schema = crate::Schema::new();
+        let config = crate::generate::RandomConfig {
+            person_count: 30,
+            family_count: 10,
+            generations: 3,
+            seed: Some(123),
+            ..crate::generate::RandomConfig::default()
+        };
+        let result = crate::generate::generate_random(
+            &config,
+            &crate::generate::AdversarialConfig::default(),
+            &schema,
+        )
+        .expect("generation should succeed");
+
+        let mut graph = result.graph;
+        let _ = graph.validate(&schema);
+        let node_count_before = graph.node_count();
+
+        let transform = disconnected_subgraphs(3);
+        let result = transform(graph);
+
+        // No nodes removed
+        assert_eq!(result.node_count(), node_count_before);
     }
 }
