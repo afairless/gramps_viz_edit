@@ -1,0 +1,17 @@
+[package]
+name = "cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "gramps-gen"
+path = "src/main.rs"
+
+[dependencies]
+typed-graph = { path = "../typed-graph" }
+output = { path = "../output" }
+clap = { version = "4", features = ["derive"] }
+serde = { workspace = true }
+serde_yaml = "0.9"
+log = "0.4"
+env_logger = "0.11"
