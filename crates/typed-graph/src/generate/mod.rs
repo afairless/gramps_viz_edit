@@ -3,7 +3,9 @@
 //! This module provides the generation engines for constructing Gramps graphs.
 //! The primary entry point is the [`GraphBuilder`] fluent API.
 
+pub mod adversarial;
 pub mod builder;
 pub mod random;
+pub use adversarial::*;
 pub use builder::*;
 pub use random::*;
