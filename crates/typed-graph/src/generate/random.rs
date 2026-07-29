@@ -32,6 +32,9 @@ use rand::Rng;
 use rand::SeedableRng;
 use std::ops::Range;
 
+use crate::generate::adversarial::AdversarialConfig;
+use crate::generate::adversarial::AdversarialStrategy;
+
 // ---------------------------------------------------------------------------
 // RandomConfig
 // ---------------------------------------------------------------------------
@@ -145,8 +148,8 @@ struct SyllableTable {
 /// Syllable table for given names in "modern" style.
 const MODERN_GIVEN: SyllableTable = SyllableTable {
     starts: &[
-        "Ale", "Ben", "Chlo", "Dani", "Emi", "Hann", "Jake", "Jord", "Kait", "Log",
-        "Madd", "Matt", "Noah", "Oliv", "Rile", "Sam", "Soph", "Tayl", "Tyl", "Zach",
+        "Ale", "Ben", "Chlo", "Dani", "Emi", "Hann", "Jake", "Jord", "Kait", "Log", "Madd", "Matt",
+        "Noah", "Oliv", "Rile", "Sam", "Soph", "Tayl", "Tyl", "Zach",
     ],
     middles: &[
         "ex", "iss", "son", "ton", "sha", "lyn", "iel", "ica", "ber", "mac",
@@ -159,49 +162,35 @@ const MODERN_GIVEN: SyllableTable = SyllableTable {
 /// Syllable table for given names in "victorian" style.
 const VICTORIAN_GIVEN: SyllableTable = SyllableTable {
     starts: &[
-        "Agnes", "Char", "Edw", "Eliz", "Flor", "Fran", "Geor", "Henr", "Isab",
-        "Jame", "Lyd", "Marg", "Mary", "Matt", "Oli", "Rach", "Samu", "Thom",
-        "Vict", "Will",
+        "Agnes", "Char", "Edw", "Eliz", "Flor", "Fran", "Geor", "Henr", "Isab", "Jame", "Lyd",
+        "Marg", "Mary", "Matt", "Oli", "Rach", "Samu", "Thom", "Vict", "Will",
     ],
-    middles: &[
-        "ar", "el", "in", "on", "et", "eb", "an", "or", "ia", "ie",
-    ],
-    ends: &[
-        "ard", "ette", "ine", "ia", "y", "a", "ah", "on", "el", "en",
-    ],
+    middles: &["ar", "el", "in", "on", "et", "eb", "an", "or", "ia", "ie"],
+    ends: &["ard", "ette", "ine", "ia", "y", "a", "ah", "on", "el", "en"],
 };
 
 /// Syllable table for given names in "nordic" style.
 const NORDIC_GIVEN: SyllableTable = SyllableTable {
     starts: &[
-        "Agn", "Bjor", "Carl", "Els", "Frid", "Gus", "Hans", "Ingr",
-        "Karl", "Lars", "Lenn", "Mats", "Nils", "Ola", "Per", "Ragn",
-        "Sigr", "Sven", "Tor", "Ulr",
+        "Agn", "Bjor", "Carl", "Els", "Frid", "Gus", "Hans", "Ingr", "Karl", "Lars", "Lenn",
+        "Mats", "Nils", "Ola", "Per", "Ragn", "Sigr", "Sven", "Tor", "Ulr",
     ],
-    middles: &[
-        "ar", "bj", "er", "ik", "il", "jo", "kn", "or", "ri", "un",
-    ],
-    ends: &[
-        "a", "e", "en", "er", "i", "id", "ik", "o", "or", "us",
-    ],
+    middles: &["ar", "bj", "er", "ik", "il", "jo", "kn", "or", "ri", "un"],
+    ends: &["a", "e", "en", "er", "i", "id", "ik", "o", "or", "us"],
 };
 
 /// Syllable table for surnames (shared across all styles).
 const SURNAME_TABLE: SyllableTable = SyllableTable {
     starts: &[
-        "Ash", "Black", "Brook", "Clay", "Copper", "Dark", "Fair", "Fox",
-        "Gold", "Gray", "Green", "Hawk", "Iron", "Lock", "Moor", "Night",
-        "Oak", "Raven", "Red", "Silver", "Snow", "Stone", "Storm", "Swift",
-        "Thorn", "Under", "Water", "White", "Wind", "Winter", "Wood",
+        "Ash", "Black", "Brook", "Clay", "Copper", "Dark", "Fair", "Fox", "Gold", "Gray", "Green",
+        "Hawk", "Iron", "Lock", "Moor", "Night", "Oak", "Raven", "Red", "Silver", "Snow", "Stone",
+        "Storm", "Swift", "Thorn", "Under", "Water", "White", "Wind", "Winter", "Wood",
     ],
-    middles: &[
-        "er", "in", "on", "en", "ar", "or", "le", "el", "an", "un",
-    ],
+    middles: &["er", "in", "on", "en", "ar", "or", "le", "el", "an", "un"],
     ends: &[
-        "born", "bridge", "brook", "burn", "bury", "dale", "field", "ford",
-        "gate", "ham", "land", "ley", "lock", "mere", "mill", "moor",
-        "more", "shaw", "side", "stead", "stone", "town", "wald", "well",
-        "wick", "wood", "worth",
+        "born", "bridge", "brook", "burn", "bury", "dale", "field", "ford", "gate", "ham", "land",
+        "ley", "lock", "mere", "mill", "moor", "more", "shaw", "side", "stead", "stone", "town",
+        "wald", "well", "wick", "wood", "worth",
     ],
 };
 
@@ -320,30 +309,46 @@ pub struct GeneratedPlace {
 
 /// City prefixes drawn from a static set.
 const CITY_PREFIXES: &[&str] = &[
-    "Ash", "Oak", "River", "Mill", "Spring", "Fair", "Meadow", "Cedar",
-    "Pine", "Willow", "Maple", "Birch", "Elm", "Hazel", "Holly", "Ivy",
-    "Stone", "Brook", "Lake", "Hill", "Field", "Dale", "Glen", "Heath",
-    "Fern", "Rose", "Lily", "Vale", "Crest", "Peak",
+    "Ash", "Oak", "River", "Mill", "Spring", "Fair", "Meadow", "Cedar", "Pine", "Willow", "Maple",
+    "Birch", "Elm", "Hazel", "Holly", "Ivy", "Stone", "Brook", "Lake", "Hill", "Field", "Dale",
+    "Glen", "Heath", "Fern", "Rose", "Lily", "Vale", "Crest", "Peak",
 ];
 
 /// City suffixes for building city names.
 const CITY_SUFFIXES: &[&str] = &[
-    "ton", "ville", "burg", "field", "bridge", "haven", "brook",
-    "ham", "ley", "more", "side", "stead", "ford", "gate",
-    "bury", "dale", "wick", "port", "worth", "view",
+    "ton", "ville", "burg", "field", "bridge", "haven", "brook", "ham", "ley", "more", "side",
+    "stead", "ford", "gate", "bury", "dale", "wick", "port", "worth", "view",
 ];
 
 /// Procedurally named states.
 const STATE_NAMES: &[&str] = &[
-    "Northumbria", "Westland", "Southmere", "Eastshire", "Arcadia",
-    "Avalon", "Caledonia", "Delphia", "Eldoria", "Fenwick",
-    "Grenville", "Havenwood", "Iverness", "Kingsland", "Lorien",
+    "Northumbria",
+    "Westland",
+    "Southmere",
+    "Eastshire",
+    "Arcadia",
+    "Avalon",
+    "Caledonia",
+    "Delphia",
+    "Eldoria",
+    "Fenwick",
+    "Grenville",
+    "Havenwood",
+    "Iverness",
+    "Kingsland",
+    "Lorien",
 ];
 
 /// Procedurally named countries.
 const COUNTRY_NAMES: &[&str] = &[
-    "Albion", "Valdoria", "Mercia", "Thalassia", "Eryndor",
-    "Celestria", "Durnhold", "Aeridor",
+    "Albion",
+    "Valdoria",
+    "Mercia",
+    "Thalassia",
+    "Eryndor",
+    "Celestria",
+    "Durnhold",
+    "Aeridor",
 ];
 
 /// Generate a procedural place name using the hierarchical template system.
@@ -504,10 +509,9 @@ pub(crate) fn generate_random_person(
     };
 
     // Add the person node to the graph
-    graph.add_node(handle.clone(), crate::Node::Person(person))
-        .map_err(|_| GenerationError::InvalidConfig(
-            format!("duplicate handle: {}", handle)
-        ))?;
+    graph
+        .add_node(handle.clone(), crate::Node::Person(person))
+        .map_err(|_| GenerationError::InvalidConfig(format!("duplicate handle: {}", handle)))?;
 
     // Create birth event
     let event_handle = uuid::Uuid::new_v4().to_string();
@@ -517,20 +521,23 @@ pub(crate) fn generate_random_person(
         date: Some(birth_date),
         ..crate::EventData::default()
     };
-    graph.add_node(event_handle.clone(), crate::Node::Event(birth_event))
-        .map_err(|_| GenerationError::InvalidConfig(
-            format!("duplicate event handle: {}", event_handle)
-        ))?;
+    graph
+        .add_node(event_handle.clone(), crate::Node::Event(birth_event))
+        .map_err(|_| {
+            GenerationError::InvalidConfig(format!("duplicate event handle: {}", event_handle))
+        })?;
 
     // Link birth event to person
-    graph.add_edge(crate::Edge::PersonEventRef {
-        source: handle.clone(),
-        target: event_handle,
-        metadata: Box::new(crate::EventRef {
-            ref_field: handle.clone(),
-            role: Some(crate::EventRoleType::Primary),
-        }),
-    }).expect("birth event target exists (just added)");
+    graph
+        .add_edge(crate::Edge::PersonEventRef {
+            source: handle.clone(),
+            target: event_handle,
+            metadata: Box::new(crate::EventRef {
+                ref_field: handle.clone(),
+                role: Some(crate::EventRoleType::Primary),
+            }),
+        })
+        .expect("birth event target exists (just added)");
 
     // Create death event if death date is set
     if let Some(death_date) = death_date {
@@ -541,19 +548,25 @@ pub(crate) fn generate_random_person(
             date: Some(death_date),
             ..crate::EventData::default()
         };
-        graph.add_node(death_event_handle.clone(), crate::Node::Event(death_event))
-            .map_err(|_| GenerationError::InvalidConfig(
-                format!("duplicate event handle: {}", death_event_handle)
-            ))?;
+        graph
+            .add_node(death_event_handle.clone(), crate::Node::Event(death_event))
+            .map_err(|_| {
+                GenerationError::InvalidConfig(format!(
+                    "duplicate event handle: {}",
+                    death_event_handle
+                ))
+            })?;
 
-        graph.add_edge(crate::Edge::PersonEventRef {
-            source: handle.clone(),
-            target: death_event_handle,
-            metadata: Box::new(crate::EventRef {
-                ref_field: handle.clone(),
-                role: Some(crate::EventRoleType::Primary),
-            }),
-        }).expect("death event target exists (just added)");
+        graph
+            .add_edge(crate::Edge::PersonEventRef {
+                source: handle.clone(),
+                target: death_event_handle,
+                metadata: Box::new(crate::EventRef {
+                    ref_field: handle.clone(),
+                    role: Some(crate::EventRoleType::Primary),
+                }),
+            })
+            .expect("death event target exists (just added)");
     }
 
     Ok(handle)
@@ -630,7 +643,11 @@ fn generate_death_date(
     let death_month = rng.gen_range(1..=12);
     let death_day = rng.gen_range(1..=28);
 
-    Some(crate::DateValue::new_ymd(death_year, death_month, death_day))
+    Some(crate::DateValue::new_ymd(
+        death_year,
+        death_month,
+        death_day,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -685,14 +702,8 @@ fn find_compatible_pair(
     rng: &mut impl rand::Rng,
 ) -> Option<(crate::Handle, crate::Handle)> {
     // Separate by gender
-    let males: Vec<_> = candidates
-        .iter()
-        .filter(|(_, s)| s.gender == 0)
-        .collect();
-    let females: Vec<_> = candidates
-        .iter()
-        .filter(|(_, s)| s.gender == 1)
-        .collect();
+    let males: Vec<_> = candidates.iter().filter(|(_, s)| s.gender == 0).collect();
+    let females: Vec<_> = candidates.iter().filter(|(_, s)| s.gender == 1).collect();
 
     if males.is_empty() || females.is_empty() {
         return None;
@@ -740,13 +751,21 @@ fn find_compatible_pair(
 }
 
 /// Create a Family node with the given parents.
+///
+/// When `one_parent_fraction > 0.0`, a fraction of families will have only
+/// one parent assigned (randomly skipping either father or mother).
+/// This is used by the [`AdversarialStrategy::OneParentFamilies`] strategy.
+///
+/// Returns a tuple of `(family_handle, warning)` where `warning` is `Some`
+/// if a one-parent family was created.
 pub(crate) fn generate_family(
     graph: &mut crate::Graph,
     _config: &RandomConfig,
     persons: &mut [(crate::Handle, PersonSummary)],
     layer: usize,
     rng: &mut impl rand::Rng,
-) -> Result<crate::Handle, GenerationError> {
+    one_parent_fraction: f64,
+) -> Result<(crate::Handle, Option<String>), GenerationError> {
     // Select parents
     let parent_pair = select_parents(persons, _config, layer, rng);
 
@@ -754,10 +773,107 @@ pub(crate) fn generate_family(
         Some(pair) => pair,
         None => {
             // Create a single-parent family
-            return create_single_parent_family(graph, persons, layer, rng);
+            let handle = create_single_parent_family(graph, persons, layer, rng)?;
+            return Ok((handle, None));
         }
     };
 
+    // Check if this should become a one-parent family (Category A: OneParentFamilies)
+
+    if one_parent_fraction > 0.0 && rng.gen_bool(one_parent_fraction.clamp(0.0, 1.0)) {
+        // Randomly decide which parent to skip (coin flip)
+        let skip_father = rng.gen_bool(0.5);
+
+        if skip_father {
+            for (handle, summary) in persons.iter_mut() {
+                if *handle == mother_handle {
+                    summary.is_parent = true;
+                }
+            }
+
+            let family_handle = uuid::Uuid::new_v4().to_string();
+            let family = crate::FamilyData {
+                handle: family_handle.clone(),
+                father_handle: None,
+                mother_handle: Some(mother_handle.clone()),
+                ..crate::FamilyData::default()
+            };
+
+            graph
+                .add_node(family_handle.clone(), crate::Node::Family(family))
+                .map_err(|_| {
+                    GenerationError::InvalidConfig(format!(
+                        "duplicate family handle: {}",
+                        family_handle
+                    ))
+                })?;
+
+            // Add FamilyMother edge only
+            graph
+                .add_edge(crate::Edge::FamilyMother {
+                    source: family_handle.clone(),
+                    target: mother_handle.clone(),
+                })
+                .expect("mother node exists (was just checked)");
+
+            // Update mother's family list
+            if let Some(crate::Node::Person(ref mut person)) = graph.get_node_mut(&mother_handle) {
+                person.family_list.push(family_handle.clone());
+            }
+
+            let msg = format!(
+                "Family {}: one-parent family — father skipped (strategy: one-parent, fraction: {})",
+                family_handle, one_parent_fraction
+            );
+            return Ok((family_handle, Some(msg)));
+        } else {
+            // Skip mother: create family with father only
+            // Mark only father as parent
+            for (handle, summary) in persons.iter_mut() {
+                if *handle == father_handle {
+                    summary.is_parent = true;
+                }
+            }
+
+            let family_handle = uuid::Uuid::new_v4().to_string();
+            let family = crate::FamilyData {
+                handle: family_handle.clone(),
+                father_handle: Some(father_handle.clone()),
+                mother_handle: None,
+                ..crate::FamilyData::default()
+            };
+
+            graph
+                .add_node(family_handle.clone(), crate::Node::Family(family))
+                .map_err(|_| {
+                    GenerationError::InvalidConfig(format!(
+                        "duplicate family handle: {}",
+                        family_handle
+                    ))
+                })?;
+
+            // Add FamilyFather edge only
+            graph
+                .add_edge(crate::Edge::FamilyFather {
+                    source: family_handle.clone(),
+                    target: father_handle.clone(),
+                })
+                .expect("father node exists (was just checked)");
+
+            // Update father's family list
+            if let Some(crate::Node::Person(ref mut person)) = graph.get_node_mut(&father_handle) {
+                person.family_list.push(family_handle.clone());
+            }
+
+            let msg = format!(
+                "Family {}: one-parent family — mother skipped (strategy: one-parent, fraction: {})",
+                family_handle, one_parent_fraction
+            );
+            return Ok((family_handle, Some(msg)));
+        }
+    }
+
+    // Normal two-parent family
     // Mark as parents
     for (handle, summary) in persons.iter_mut() {
         if *handle == father_handle || *handle == mother_handle {
@@ -777,10 +893,7 @@ pub(crate) fn generate_family(
     graph
         .add_node(family_handle.clone(), crate::Node::Family(family))
         .map_err(|_| {
-            GenerationError::InvalidConfig(format!(
-                "duplicate family handle: {}",
-                family_handle
-            ))
+            GenerationError::InvalidConfig(format!("duplicate family handle: {}", family_handle))
         })?;
 
     // Add FamilyFather edge
@@ -807,7 +920,7 @@ pub(crate) fn generate_family(
         person.family_list.push(family_handle.clone());
     }
 
-    Ok(family_handle)
+    Ok((family_handle, None))
 }
 
 /// Create a single-parent family when no eligible parent pair is found.
@@ -851,10 +964,7 @@ fn create_single_parent_family(
     graph
         .add_node(family_handle.clone(), crate::Node::Family(family))
         .map_err(|_| {
-            GenerationError::InvalidConfig(format!(
-                "duplicate family handle: {}",
-                family_handle
-            ))
+            GenerationError::InvalidConfig(format!("duplicate family handle: {}", family_handle))
         })?;
 
     // Update person family list
@@ -912,9 +1022,7 @@ pub(crate) fn assign_children(
         .iter()
         .enumerate()
         .filter(|(_, (_, s))| {
-            !s.is_child
-                && s.birth_year > min_child_year
-                && s.birth_year < max_child_year
+            !s.is_child && s.birth_year > min_child_year && s.birth_year < max_child_year
         })
         .map(|(i, _)| i)
         .collect();
@@ -1007,11 +1115,8 @@ pub(crate) fn generate_events(
                         let marriage_month = rng.gen_range(1..=12);
                         let marriage_day = rng.gen_range(1..=28);
 
-                        let marriage_date = crate::DateValue::new_ymd(
-                            marriage_year,
-                            marriage_month,
-                            marriage_day,
-                        );
+                        let marriage_date =
+                            crate::DateValue::new_ymd(marriage_year, marriage_month, marriage_day);
 
                         // Create marriage event
                         let event_handle = uuid::Uuid::new_v4().to_string();
@@ -1136,10 +1241,7 @@ pub(crate) fn generate_events(
                 };
 
                 graph
-                    .add_node(
-                        citation_handle.clone(),
-                        crate::Node::Citation(citation),
-                    )
+                    .add_node(citation_handle.clone(), crate::Node::Citation(citation))
                     .map_err(|_| {
                         GenerationError::InvalidConfig(format!(
                             "duplicate citation handle: {}",
@@ -1226,6 +1328,7 @@ pub struct GenerationStats {
 /// due to exhausted constraints (e.g., no eligible parents found).
 pub fn generate_random(
     config: &RandomConfig,
+    adversarial_config: &AdversarialConfig,
     _schema: &crate::Schema,
 ) -> Result<GenerationResult, GenerationError> {
     // Validate config
@@ -1247,10 +1350,27 @@ pub fn generate_random(
     }
     if config.children_per_family.start > config.children_per_family.end {
         return Err(GenerationError::InvalidConfig(
-            "children_per_family.start must be <= children_per_family.end"
-                .to_string(),
+            "children_per_family.start must be <= children_per_family.end".to_string(),
         ));
     }
+
+    // Extract Category A strategy parameters from adversarial config
+    let one_parent_fraction: f64 = if adversarial_config.enabled {
+        adversarial_config
+            .strategies
+            .iter()
+            .filter_map(|s| {
+                if let AdversarialStrategy::OneParentFamilies(f) = s {
+                    Some(*f)
+                } else {
+                    None
+                }
+            })
+            .next()
+            .unwrap_or(0.0)
+    } else {
+        0.0
+    };
 
     // Create seeded RNG
     let seed = config.seed.unwrap_or_else(|| rand::rngs::OsRng.gen());
@@ -1261,16 +1381,14 @@ pub fn generate_random(
     let mut warnings: Vec<String> = Vec::new();
 
     // Track used names and place names
-    let mut used_names: std::collections::HashSet<String> =
-        std::collections::HashSet::new();
+    let mut used_names: std::collections::HashSet<String> = std::collections::HashSet::new();
     // Track person summaries for parent selection
     let mut persons: Vec<(crate::Handle, PersonSummary)> = Vec::new();
 
     // -----------------------------------------------------------------------
     // Stage 1: Create Person nodes
     // -----------------------------------------------------------------------
-    let persons_per_layer =
-        config.person_count.div_ceil(config.generations);
+    let persons_per_layer = config.person_count.div_ceil(config.generations);
 
     for layer in 0..config.generations {
         let layer_count = if layer == config.generations - 1 {
@@ -1281,13 +1399,8 @@ pub fn generate_random(
         };
 
         for _ in 0..layer_count {
-            let handle = generate_random_person(
-                &mut graph,
-                config,
-                &mut used_names,
-                &mut rng,
-                layer,
-            )?;
+            let handle =
+                generate_random_person(&mut graph, config, &mut used_names, &mut rng, layer)?;
 
             // Extract birth year from the birth event
             let birth_year = get_person_birth_year(&graph, &handle).unwrap_or(1970);
@@ -1325,8 +1438,18 @@ pub fn generate_random(
         // Assign a layer for this family (cycling through generations)
         let layer = rng.gen_range(0..config.generations);
 
-        match generate_family(&mut graph, config, &mut persons, layer, &mut rng) {
-            Ok(family_handle) => {
+        match generate_family(
+            &mut graph,
+            config,
+            &mut persons,
+            layer,
+            &mut rng,
+            one_parent_fraction,
+        ) {
+            Ok((family_handle, warning)) => {
+                if let Some(w) = warning {
+                    warnings.push(w);
+                }
                 family_handles.push(family_handle);
             }
             Err(GenerationError::ConstraintExhausted { message, seed: _ }) => {
@@ -1631,7 +1754,10 @@ mod tests {
         assert!(place.city.is_empty());
         assert!(place.county.is_empty());
         assert!(place.state.is_empty());
-        assert!(!place.country.is_empty(), "Country should be non-empty at depth 1");
+        assert!(
+            !place.country.is_empty(),
+            "Country should be non-empty at depth 1"
+        );
     }
 
     #[test]
@@ -1639,10 +1765,22 @@ mod tests {
         let used = std::collections::HashSet::new();
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let place = generate_place(3, &used, &mut rng);
-        assert!(!place.city.is_empty(), "City should be non-empty at depth 3");
-        assert!(!place.county.is_empty(), "County should be non-empty at depth 3");
-        assert!(!place.state.is_empty(), "State should be non-empty at depth 3");
-        assert!(!place.country.is_empty(), "Country should be non-empty at depth 3");
+        assert!(
+            !place.city.is_empty(),
+            "City should be non-empty at depth 3"
+        );
+        assert!(
+            !place.county.is_empty(),
+            "County should be non-empty at depth 3"
+        );
+        assert!(
+            !place.state.is_empty(),
+            "State should be non-empty at depth 3"
+        );
+        assert!(
+            !place.country.is_empty(),
+            "Country should be non-empty at depth 3"
+        );
     }
 
     #[test]
@@ -1683,7 +1821,10 @@ mod tests {
         let used = std::collections::HashSet::new();
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let place = generate_place(0, &used, &mut rng);
-        assert!(!place.country.is_empty(), "Depth 0 should default to depth 1");
+        assert!(
+            !place.country.is_empty(),
+            "Depth 0 should default to depth 1"
+        );
         assert!(place.city.is_empty());
     }
 
@@ -1694,7 +1835,10 @@ mod tests {
         let mut rng2 = rand::rngs::StdRng::seed_from_u64(42);
         let place1 = generate_place(3, &used, &mut rng1);
         let place2 = generate_place(3, &used, &mut rng2);
-        assert_eq!(place1.country, place2.country, "Same seed should produce same country");
+        assert_eq!(
+            place1.country, place2.country,
+            "Same seed should produce same country"
+        );
     }
 
     #[test]
@@ -1704,8 +1848,14 @@ mod tests {
         let place = generate_place(2, &used, &mut rng);
         assert!(place.city.is_empty(), "City should be empty at depth 2");
         assert!(place.county.is_empty(), "County should be empty at depth 2");
-        assert!(!place.state.is_empty(), "State should be non-empty at depth 2");
-        assert!(!place.country.is_empty(), "Country should be non-empty at depth 2");
+        assert!(
+            !place.state.is_empty(),
+            "State should be non-empty at depth 2"
+        );
+        assert!(
+            !place.country.is_empty(),
+            "Country should be non-empty at depth 2"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1787,9 +1937,7 @@ mod tests {
                 if event.event_type == crate::EventType::Birth {
                     if let Some(ref date) = event.date {
                         // Broad range check: birth year should be plausible
-                        assert!(
-                            date.year >= 1900 && date.year <= 2000,
-                        );
+                        assert!(date.year >= 1900 && date.year <= 2000,);
                     }
                 }
             }
@@ -1840,7 +1988,8 @@ mod tests {
             assert!(
                 dy > birth_year,
                 "Death year {} must be after birth year {}",
-                dy, birth_year
+                dy,
+                birth_year
             );
         }
     }
@@ -1861,10 +2010,9 @@ mod tests {
             .expect("person gen should succeed");
 
         // Same seed should produce the same person data (excluding UUID handle)
-        if let (crate::Node::Person(p1), crate::Node::Person(p2)) = (
-            graph1.get_node(&h1).unwrap(),
-            graph2.get_node(&h2).unwrap(),
-        ) {
+        if let (crate::Node::Person(p1), crate::Node::Person(p2)) =
+            (graph1.get_node(&h1).unwrap(), graph2.get_node(&h2).unwrap())
+        {
             assert_eq!(p1.primary_name, p2.primary_name, "Names should match");
             assert_eq!(p1.gender, p2.gender, "Genders should match");
         } else {
@@ -1883,7 +2031,11 @@ mod tests {
         for _ in 0..10 {
             let year = birth_year_for_layer(0, &config, &mut rng);
             // Layer 0: end_year-55 to end_year-25 = 1970 to 2000
-            assert!(year >= 1970, "Layer 0 birth year {} should be >= 1970", year);
+            assert!(
+                year >= 1970,
+                "Layer 0 birth year {} should be >= 1970",
+                year
+            );
             assert!(year < 2000, "Layer 0 birth year {} should be < 2000", year);
         }
     }
@@ -1900,8 +2052,16 @@ mod tests {
             let year = birth_year_for_layer(3, &config, &mut rng);
             // Layer 3: end_year-55-90 to end_year-25-90 = 1880 to 1910
             // More precisely: end_year-55-90 = 1880, end_year-25-90 = 1910
-            assert!(year >= 1880, "Layer 3 birth year {} should be >= 1880", year);
-            assert!(year <= 1925, "Layer 3 birth year {} should be <= 1925", year);
+            assert!(
+                year >= 1880,
+                "Layer 3 birth year {} should be >= 1880",
+                year
+            );
+            assert!(
+                year <= 1925,
+                "Layer 3 birth year {} should be <= 1925",
+                year
+            );
         }
     }
 
@@ -1914,8 +2074,28 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let config = RandomConfig::default();
         let persons = vec![
-            ("p1".to_string(), PersonSummary { handle: "p1".to_string(), birth_year: 1970, gender: 0, layer: 0, is_parent: false, is_child: false }),
-            ("p2".to_string(), PersonSummary { handle: "p2".to_string(), birth_year: 1975, gender: 1, layer: 0, is_parent: false, is_child: false }),
+            (
+                "p1".to_string(),
+                PersonSummary {
+                    handle: "p1".to_string(),
+                    birth_year: 1970,
+                    gender: 0,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
+            (
+                "p2".to_string(),
+                PersonSummary {
+                    handle: "p2".to_string(),
+                    birth_year: 1975,
+                    gender: 1,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
         ];
 
         let result = select_parents(&persons, &config, 0, &mut rng);
@@ -1930,10 +2110,50 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let config = RandomConfig::default();
         let persons = vec![
-            ("p1".to_string(), PersonSummary { handle: "p1".to_string(), birth_year: 1970, gender: 0, layer: 0, is_parent: false, is_child: false }),
-            ("p2".to_string(), PersonSummary { handle: "p2".to_string(), birth_year: 1975, gender: 1, layer: 0, is_parent: false, is_child: false }),
-            ("p3".to_string(), PersonSummary { handle: "p3".to_string(), birth_year: 1950, gender: 0, layer: 0, is_parent: false, is_child: false }),
-            ("p4".to_string(), PersonSummary { handle: "p4".to_string(), birth_year: 1990, gender: 1, layer: 0, is_parent: false, is_child: false }),
+            (
+                "p1".to_string(),
+                PersonSummary {
+                    handle: "p1".to_string(),
+                    birth_year: 1970,
+                    gender: 0,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
+            (
+                "p2".to_string(),
+                PersonSummary {
+                    handle: "p2".to_string(),
+                    birth_year: 1975,
+                    gender: 1,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
+            (
+                "p3".to_string(),
+                PersonSummary {
+                    handle: "p3".to_string(),
+                    birth_year: 1950,
+                    gender: 0,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
+            (
+                "p4".to_string(),
+                PersonSummary {
+                    handle: "p4".to_string(),
+                    birth_year: 1990,
+                    gender: 1,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
         ];
 
         // p3 (b.1950) and p4 (b.1990) have a 40 year age gap, too large
@@ -1957,10 +2177,50 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let config = RandomConfig::default();
         let persons = vec![
-            ("p1".to_string(), PersonSummary { handle: "p1".to_string(), birth_year: 1970, gender: 0, layer: 0, is_parent: false, is_child: false }),
-            ("p2".to_string(), PersonSummary { handle: "p2".to_string(), birth_year: 1975, gender: 1, layer: 0, is_parent: false, is_child: false }),
-            ("p3".to_string(), PersonSummary { handle: "p3".to_string(), birth_year: 1940, gender: 0, layer: 1, is_parent: false, is_child: false }),
-            ("p4".to_string(), PersonSummary { handle: "p4".to_string(), birth_year: 1945, gender: 1, layer: 1, is_parent: false, is_child: false }),
+            (
+                "p1".to_string(),
+                PersonSummary {
+                    handle: "p1".to_string(),
+                    birth_year: 1970,
+                    gender: 0,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
+            (
+                "p2".to_string(),
+                PersonSummary {
+                    handle: "p2".to_string(),
+                    birth_year: 1975,
+                    gender: 1,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
+            (
+                "p3".to_string(),
+                PersonSummary {
+                    handle: "p3".to_string(),
+                    birth_year: 1940,
+                    gender: 0,
+                    layer: 1,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
+            (
+                "p4".to_string(),
+                PersonSummary {
+                    handle: "p4".to_string(),
+                    birth_year: 1945,
+                    gender: 1,
+                    layer: 1,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
         ];
 
         // Layer 0 has p1 and p2 which are compatible
@@ -1980,10 +2240,40 @@ mod tests {
         let config = RandomConfig::default();
         let persons = vec![
             // Only one person in layer 0
-            ("p1".to_string(), PersonSummary { handle: "p1".to_string(), birth_year: 1970, gender: 0, layer: 0, is_parent: false, is_child: false }),
+            (
+                "p1".to_string(),
+                PersonSummary {
+                    handle: "p1".to_string(),
+                    birth_year: 1970,
+                    gender: 0,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
             // Two in layer 1
-            ("p2".to_string(), PersonSummary { handle: "p2".to_string(), birth_year: 1940, gender: 0, layer: 1, is_parent: false, is_child: false }),
-            ("p3".to_string(), PersonSummary { handle: "p3".to_string(), birth_year: 1945, gender: 1, layer: 1, is_parent: false, is_child: false }),
+            (
+                "p2".to_string(),
+                PersonSummary {
+                    handle: "p2".to_string(),
+                    birth_year: 1940,
+                    gender: 0,
+                    layer: 1,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
+            (
+                "p3".to_string(),
+                PersonSummary {
+                    handle: "p3".to_string(),
+                    birth_year: 1945,
+                    gender: 1,
+                    layer: 1,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
         ];
 
         // Layer 0 only has one person, should expand to layer 1
@@ -2000,32 +2290,63 @@ mod tests {
         // Add person nodes
         let p1 = "p1".to_string();
         let p2 = "p2".to_string();
-        graph.add_node(p1.clone(), crate::Node::Person(crate::PersonData {
-            handle: p1.clone(),
-            gender: 0,
-            primary_name: crate::Name {
-                first_name: Some("John".to_string()),
-                ..crate::Name::default()
-            },
-            ..crate::PersonData::default()
-        })).unwrap();
-        graph.add_node(p2.clone(), crate::Node::Person(crate::PersonData {
-            handle: p2.clone(),
-            gender: 1,
-            primary_name: crate::Name {
-                first_name: Some("Jane".to_string()),
-                ..crate::Name::default()
-            },
-            ..crate::PersonData::default()
-        })).unwrap();
+        graph
+            .add_node(
+                p1.clone(),
+                crate::Node::Person(crate::PersonData {
+                    handle: p1.clone(),
+                    gender: 0,
+                    primary_name: crate::Name {
+                        first_name: Some("John".to_string()),
+                        ..crate::Name::default()
+                    },
+                    ..crate::PersonData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                p2.clone(),
+                crate::Node::Person(crate::PersonData {
+                    handle: p2.clone(),
+                    gender: 1,
+                    primary_name: crate::Name {
+                        first_name: Some("Jane".to_string()),
+                        ..crate::Name::default()
+                    },
+                    ..crate::PersonData::default()
+                }),
+            )
+            .unwrap();
 
         let mut persons = vec![
-            (p1.clone(), PersonSummary { handle: p1, birth_year: 1970, gender: 0, layer: 0, is_parent: false, is_child: false }),
-            (p2.clone(), PersonSummary { handle: p2, birth_year: 1975, gender: 1, layer: 0, is_parent: false, is_child: false }),
+            (
+                p1.clone(),
+                PersonSummary {
+                    handle: p1,
+                    birth_year: 1970,
+                    gender: 0,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
+            (
+                p2.clone(),
+                PersonSummary {
+                    handle: p2,
+                    birth_year: 1975,
+                    gender: 1,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
         ];
 
-        let family_handle = generate_family(&mut graph, &config, &mut persons, 0, &mut rng)
-            .expect("family generation should succeed");
+        let (family_handle, _warning) =
+            generate_family(&mut graph, &config, &mut persons, 0, &mut rng, 0.0)
+                .expect("family generation should succeed");
 
         assert!(graph.contains_node(&family_handle));
         // Check it's a Family node
@@ -2043,36 +2364,71 @@ mod tests {
 
         let p1 = "p1".to_string();
         let p2 = "p2".to_string();
-        graph.add_node(p1.clone(), crate::Node::Person(crate::PersonData {
-            handle: p1.clone(),
-            gender: 0,
-            primary_name: crate::Name {
-                first_name: Some("John".to_string()),
-                ..crate::Name::default()
-            },
-            ..crate::PersonData::default()
-        })).unwrap();
-        graph.add_node(p2.clone(), crate::Node::Person(crate::PersonData {
-            handle: p2.clone(),
-            gender: 1,
-            primary_name: crate::Name {
-                first_name: Some("Jane".to_string()),
-                ..crate::Name::default()
-            },
-            ..crate::PersonData::default()
-        })).unwrap();
+        graph
+            .add_node(
+                p1.clone(),
+                crate::Node::Person(crate::PersonData {
+                    handle: p1.clone(),
+                    gender: 0,
+                    primary_name: crate::Name {
+                        first_name: Some("John".to_string()),
+                        ..crate::Name::default()
+                    },
+                    ..crate::PersonData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                p2.clone(),
+                crate::Node::Person(crate::PersonData {
+                    handle: p2.clone(),
+                    gender: 1,
+                    primary_name: crate::Name {
+                        first_name: Some("Jane".to_string()),
+                        ..crate::Name::default()
+                    },
+                    ..crate::PersonData::default()
+                }),
+            )
+            .unwrap();
 
         let mut persons = vec![
-            (p1.clone(), PersonSummary { handle: p1, birth_year: 1970, gender: 0, layer: 0, is_parent: false, is_child: false }),
-            (p2.clone(), PersonSummary { handle: p2, birth_year: 1975, gender: 1, layer: 0, is_parent: false, is_child: false }),
+            (
+                p1.clone(),
+                PersonSummary {
+                    handle: p1,
+                    birth_year: 1970,
+                    gender: 0,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
+            (
+                p2.clone(),
+                PersonSummary {
+                    handle: p2,
+                    birth_year: 1975,
+                    gender: 1,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
         ];
 
-        let family_handle = generate_family(&mut graph, &config, &mut persons, 0, &mut rng)
-            .expect("family generation should succeed");
+        let (family_handle, _warning) =
+            generate_family(&mut graph, &config, &mut persons, 0, &mut rng, 0.0)
+                .expect("family generation should succeed");
 
         let edges = graph.edges_from(&family_handle);
-        let has_father = edges.iter().any(|e| matches!(e, crate::Edge::FamilyFather { .. }));
-        let has_mother = edges.iter().any(|e| matches!(e, crate::Edge::FamilyMother { .. }));
+        let has_father = edges
+            .iter()
+            .any(|e| matches!(e, crate::Edge::FamilyFather { .. }));
+        let has_mother = edges
+            .iter()
+            .any(|e| matches!(e, crate::Edge::FamilyMother { .. }));
         assert!(has_father, "Family should have FamilyFather edge");
         assert!(has_mother, "Family should have FamilyMother edge");
     }
@@ -2085,21 +2441,34 @@ mod tests {
 
         // Only one person (male) - no eligible female
         let p1 = "p1".to_string();
-        graph.add_node(p1.clone(), crate::Node::Person(crate::PersonData {
-            handle: p1.clone(),
-            gender: 0,
-            primary_name: crate::Name {
-                first_name: Some("John".to_string()),
-                ..crate::Name::default()
+        graph
+            .add_node(
+                p1.clone(),
+                crate::Node::Person(crate::PersonData {
+                    handle: p1.clone(),
+                    gender: 0,
+                    primary_name: crate::Name {
+                        first_name: Some("John".to_string()),
+                        ..crate::Name::default()
+                    },
+                    ..crate::PersonData::default()
+                }),
+            )
+            .unwrap();
+
+        let mut persons = vec![(
+            p1.clone(),
+            PersonSummary {
+                handle: p1,
+                birth_year: 1970,
+                gender: 0,
+                layer: 0,
+                is_parent: false,
+                is_child: false,
             },
-            ..crate::PersonData::default()
-        })).unwrap();
+        )];
 
-        let mut persons = vec![
-            (p1.clone(), PersonSummary { handle: p1, birth_year: 1970, gender: 0, layer: 0, is_parent: false, is_child: false }),
-        ];
-
-        let result = generate_family(&mut graph, &config, &mut persons, 0, &mut rng);
+        let result = generate_family(&mut graph, &config, &mut persons, 0, &mut rng, 0.0);
         // Should succeed with single parent
         assert!(result.is_ok(), "Should create single-parent family");
     }
@@ -2112,27 +2481,248 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
         let p1 = "p1".to_string();
-        graph.add_node(p1.clone(), crate::Node::Person(crate::PersonData {
-            handle: p1.clone(),
-            gender: 0,
-            primary_name: crate::Name {
-                first_name: Some("John".to_string()),
-                ..crate::Name::default()
-            },
-            ..crate::PersonData::default()
-        })).unwrap();
+        graph
+            .add_node(
+                p1.clone(),
+                crate::Node::Person(crate::PersonData {
+                    handle: p1.clone(),
+                    gender: 0,
+                    primary_name: crate::Name {
+                        first_name: Some("John".to_string()),
+                        ..crate::Name::default()
+                    },
+                    ..crate::PersonData::default()
+                }),
+            )
+            .unwrap();
 
-        let mut persons = vec![
-            (p1.clone(), PersonSummary { handle: p1, birth_year: 1970, gender: 0, layer: 0, is_parent: false, is_child: false }),
-        ];
+        let mut persons = vec![(
+            p1.clone(),
+            PersonSummary {
+                handle: p1,
+                birth_year: 1970,
+                gender: 0,
+                layer: 0,
+                is_parent: false,
+                is_child: false,
+            },
+        )];
 
         // Only one person, so single-parent family is created
-        let result = generate_family(&mut graph, &config, &mut persons, 0, &mut rng);
+        let result = generate_family(&mut graph, &config, &mut persons, 0, &mut rng, 0.0);
         assert!(result.is_ok(), "Single-parent family should be created");
     }
 
     // -----------------------------------------------------------------------
     // Child assignment tests
+    // -----------------------------------------------------------------------
+
+    // =======================================================================
+    // Step 2: One-parent families adversarial strategy tests
+    // =======================================================================
+
+    #[test]
+    fn one_parent_families_strategy_zero_fraction() {
+        let config = RandomConfig {
+            person_count: 20,
+            family_count: 8,
+            generations: 2,
+            seed: Some(42),
+            ..RandomConfig::default()
+        };
+        let adversarial = AdversarialConfig {
+            enabled: true,
+            strategies: vec![AdversarialStrategy::OneParentFamilies(0.0)],
+        };
+        let schema = crate::Schema::new();
+        let result =
+            generate_random(&config, &adversarial, &schema).expect("generation should succeed");
+
+        // With fraction 0.0, no one-parent families should be created
+        // (all families should have both parents if the pair was found)
+        let mut _one_parent_count = 0;
+        for (_, node) in result.graph.iter_nodes() {
+            if let crate::Node::Family(f) = node {
+                let parent_count = f.father_handle.iter().count() + f.mother_handle.iter().count();
+                if parent_count == 1 {
+                    _one_parent_count += 1;
+                }
+            }
+        }
+        // With fraction 0.0, any one-parent families are from normal
+        // constraint exhaustion, not from the adversarial strategy.
+        // No warning about one-parent strategy should appear.
+        let strategy_warnings: Vec<_> = result
+            .warnings
+            .iter()
+            .filter(|w| w.contains("one-parent"))
+            .collect();
+        assert!(
+            strategy_warnings.is_empty(),
+            "Zero fraction should produce no one-parent strategy warnings, got: {:?}",
+            strategy_warnings
+        );
+    }
+
+    #[test]
+    fn one_parent_families_strategy_all_single() {
+        let config = RandomConfig {
+            person_count: 20,
+            family_count: 6,
+            generations: 2,
+            seed: Some(123),
+            ..RandomConfig::default()
+        };
+        let adversarial = AdversarialConfig {
+            enabled: true,
+            strategies: vec![AdversarialStrategy::OneParentFamilies(1.0)],
+        };
+        let schema = crate::Schema::new();
+        let result =
+            generate_random(&config, &adversarial, &schema).expect("generation should succeed");
+
+        // With fraction 1.0, all families should be one-parent
+        let mut families = 0;
+        let mut one_parent = 0;
+        for (_, node) in result.graph.iter_nodes() {
+            if let crate::Node::Family(f) = node {
+                families += 1;
+                let parent_count = f.father_handle.iter().count() + f.mother_handle.iter().count();
+                if parent_count == 1 {
+                    one_parent += 1;
+                }
+            }
+        }
+        assert!(families > 0, "Should have created families");
+        assert_eq!(
+            one_parent, families,
+            "All families should be one-parent with fraction=1.0"
+        );
+    }
+
+    #[test]
+    fn one_parent_families_validates_ok() {
+        let config = RandomConfig {
+            person_count: 20,
+            family_count: 6,
+            generations: 2,
+            seed: Some(456),
+            ..RandomConfig::default()
+        };
+        let adversarial = AdversarialConfig {
+            enabled: true,
+            strategies: vec![AdversarialStrategy::OneParentFamilies(0.5)],
+        };
+        let schema = crate::Schema::new();
+        let mut result =
+            generate_random(&config, &adversarial, &schema).expect("generation should succeed");
+
+        // One-parent families are structurally valid
+        let errors = result.graph.validate(&schema);
+        assert!(
+            errors.is_empty(),
+            "One-parent families should pass validation, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn one_parent_families_single_produces_warning() {
+        let config = RandomConfig {
+            person_count: 20,
+            family_count: 6,
+            generations: 2,
+            seed: Some(789),
+            ..RandomConfig::default()
+        };
+        let adversarial = AdversarialConfig {
+            enabled: true,
+            strategies: vec![AdversarialStrategy::OneParentFamilies(1.0)],
+        };
+        let schema = crate::Schema::new();
+        let result =
+            generate_random(&config, &adversarial, &schema).expect("generation should succeed");
+
+        // With fraction 1.0, every family should produce a one-parent warning
+        let one_parent_warnings: Vec<_> = result
+            .warnings
+            .iter()
+            .filter(|w| w.contains("one-parent family"))
+            .collect();
+        assert!(
+            !one_parent_warnings.is_empty(),
+            "Should have one-parent warnings"
+        );
+    }
+
+    #[test]
+    fn one_parent_families_edge_case_one_person_pool() {
+        // When only one person total, family creation would fail anyway
+        // (not enough persons for select_parents). Verify graceful handling.
+        let config = RandomConfig {
+            person_count: 1,
+            family_count: 0, // no families can be created
+            generations: 1,
+            seed: Some(101),
+            ..RandomConfig::default()
+        };
+        let adversarial = AdversarialConfig {
+            enabled: true,
+            strategies: vec![AdversarialStrategy::OneParentFamilies(1.0)],
+        };
+        let schema = crate::Schema::new();
+        let result = generate_random(&config, &adversarial, &schema)
+            .expect("single person generation should succeed");
+        assert_eq!(result.stats.person_count, 1);
+        assert_eq!(result.stats.family_count, 0);
+    }
+
+    #[test]
+    fn one_parent_families_regression_alternating_parents() {
+        // Verify that skipped parent alternates between father and mother
+        use std::collections::HashSet;
+
+        let mut father_skipped = HashSet::new();
+        let mut mother_skipped = HashSet::new();
+
+        for seed in 0..20 {
+            let config = RandomConfig {
+                person_count: 30,
+                family_count: 10,
+                generations: 2,
+                seed: Some(seed * 100),
+                ..RandomConfig::default()
+            };
+            let adversarial = AdversarialConfig {
+                enabled: true,
+                strategies: vec![AdversarialStrategy::OneParentFamilies(0.8)],
+            };
+            let schema = crate::Schema::new();
+            if let Ok(result) = generate_random(&config, &adversarial, &schema) {
+                for w in &result.warnings {
+                    if w.contains("father skipped") {
+                        father_skipped.insert(seed);
+                    } else if w.contains("mother skipped") {
+                        mother_skipped.insert(seed);
+                    }
+                }
+            }
+        }
+
+        // With fraction 0.8 and 20 seeds, we should see both father and mother
+        // being skipped across different runs
+        assert!(
+            !father_skipped.is_empty(),
+            "Should have seeds where father was skipped"
+        );
+        assert!(
+            !mother_skipped.is_empty(),
+            "Should have seeds where mother was skipped"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // (original child assignment tests follow)
     // -----------------------------------------------------------------------
 
     #[test]
@@ -2143,51 +2733,105 @@ mod tests {
 
         // Create family node
         let family_handle = "f1".to_string();
-        graph.add_node(family_handle.clone(), crate::Node::Family(crate::FamilyData::default())).unwrap();
+        graph
+            .add_node(
+                family_handle.clone(),
+                crate::Node::Family(crate::FamilyData::default()),
+            )
+            .unwrap();
 
         // Create person nodes
         let father_handle = "father".to_string();
         let mother_handle = "mother".to_string();
-        graph.add_node(father_handle.clone(), crate::Node::Person(crate::PersonData {
-            handle: father_handle.clone(),
-            gender: 0,
-            ..crate::PersonData::default()
-        })).unwrap();
-        graph.add_node(mother_handle.clone(), crate::Node::Person(crate::PersonData {
-            handle: mother_handle.clone(),
-            gender: 1,
-            ..crate::PersonData::default()
-        })).unwrap();
+        graph
+            .add_node(
+                father_handle.clone(),
+                crate::Node::Person(crate::PersonData {
+                    handle: father_handle.clone(),
+                    gender: 0,
+                    ..crate::PersonData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                mother_handle.clone(),
+                crate::Node::Person(crate::PersonData {
+                    handle: mother_handle.clone(),
+                    gender: 1,
+                    ..crate::PersonData::default()
+                }),
+            )
+            .unwrap();
 
         // Create child-age persons
         let mut persons = vec![
-            (father_handle.clone(), PersonSummary { handle: father_handle.clone(), birth_year: 1970, gender: 0, layer: 0, is_parent: false, is_child: false }),
-            (mother_handle.clone(), PersonSummary { handle: mother_handle.clone(), birth_year: 1975, gender: 1, layer: 0, is_parent: false, is_child: false }),
+            (
+                father_handle.clone(),
+                PersonSummary {
+                    handle: father_handle.clone(),
+                    birth_year: 1970,
+                    gender: 0,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
+            (
+                mother_handle.clone(),
+                PersonSummary {
+                    handle: mother_handle.clone(),
+                    birth_year: 1975,
+                    gender: 1,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
         ];
 
         // Add children in the next generation
         for i in 0..5 {
             let child_handle = format!("child{}", i);
-            graph.add_node(child_handle.clone(), crate::Node::Person(crate::PersonData {
-                handle: child_handle.clone(),
-                ..crate::PersonData::default()
-            })).unwrap();
-            persons.push((child_handle.clone(), PersonSummary {
-                handle: child_handle,
-                birth_year: 2000 + i,
-                gender: 0,
-                layer: 1,
-                is_parent: false,
-                is_child: false,
-            }));
+            graph
+                .add_node(
+                    child_handle.clone(),
+                    crate::Node::Person(crate::PersonData {
+                        handle: child_handle.clone(),
+                        ..crate::PersonData::default()
+                    }),
+                )
+                .unwrap();
+            persons.push((
+                child_handle.clone(),
+                PersonSummary {
+                    handle: child_handle,
+                    birth_year: 2000 + i,
+                    gender: 0,
+                    layer: 1,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ));
         }
 
-        let children = assign_children(&mut graph, &family_handle, &father_handle, &mother_handle, &mut persons, &config, &mut rng);
+        let children = assign_children(
+            &mut graph,
+            &family_handle,
+            &father_handle,
+            &mother_handle,
+            &mut persons,
+            &config,
+            &mut rng,
+        );
         assert!(!children.is_empty(), "Should assign at least one child");
 
         // Check child edges
         let edges = graph.edges_from(&family_handle);
-        let child_edges: Vec<_> = edges.iter().filter(|e| matches!(e, crate::Edge::FamilyChildRef { .. })).collect();
+        let child_edges: Vec<_> = edges
+            .iter()
+            .filter(|e| matches!(e, crate::Edge::FamilyChildRef { .. }))
+            .collect();
         assert_eq!(child_edges.len(), children.len());
     }
 
@@ -2198,24 +2842,59 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
         let family_handle = "f1".to_string();
-        graph.add_node(family_handle.clone(), crate::Node::Family(crate::FamilyData::default())).unwrap();
+        graph
+            .add_node(
+                family_handle.clone(),
+                crate::Node::Family(crate::FamilyData::default()),
+            )
+            .unwrap();
 
         let father_handle = "father".to_string();
         let mother_handle = "mother".to_string();
-        graph.add_node(father_handle.clone(), crate::Node::Person(crate::PersonData {
-            handle: father_handle.clone(),
-            gender: 0,
-            ..crate::PersonData::default()
-        })).unwrap();
-        graph.add_node(mother_handle.clone(), crate::Node::Person(crate::PersonData {
-            handle: mother_handle.clone(),
-            gender: 1,
-            ..crate::PersonData::default()
-        })).unwrap();
+        graph
+            .add_node(
+                father_handle.clone(),
+                crate::Node::Person(crate::PersonData {
+                    handle: father_handle.clone(),
+                    gender: 0,
+                    ..crate::PersonData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                mother_handle.clone(),
+                crate::Node::Person(crate::PersonData {
+                    handle: mother_handle.clone(),
+                    gender: 1,
+                    ..crate::PersonData::default()
+                }),
+            )
+            .unwrap();
 
         let mut persons = vec![
-            (father_handle.clone(), PersonSummary { handle: father_handle.clone(), birth_year: 1970, gender: 0, layer: 0, is_parent: false, is_child: false }),
-            (mother_handle.clone(), PersonSummary { handle: mother_handle.clone(), birth_year: 1975, gender: 1, layer: 0, is_parent: false, is_child: false }),
+            (
+                father_handle.clone(),
+                PersonSummary {
+                    handle: father_handle.clone(),
+                    birth_year: 1970,
+                    gender: 0,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
+            (
+                mother_handle.clone(),
+                PersonSummary {
+                    handle: mother_handle.clone(),
+                    birth_year: 1975,
+                    gender: 1,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
         ];
 
         // Father born 1970, mother born 1975
@@ -2225,35 +2904,59 @@ mod tests {
 
         // Child born 1990 (too young - before 1991)
         let child_too_young = "child_too_young".to_string();
-        graph.add_node(child_too_young.clone(), crate::Node::Person(crate::PersonData {
-            handle: child_too_young.clone(),
-            ..crate::PersonData::default()
-        })).unwrap();
-        persons.push((child_too_young.clone(), PersonSummary {
-            handle: child_too_young,
-            birth_year: 1990,
-            gender: 0,
-            layer: 1,
-            is_parent: false,
-            is_child: false,
-        }));
+        graph
+            .add_node(
+                child_too_young.clone(),
+                crate::Node::Person(crate::PersonData {
+                    handle: child_too_young.clone(),
+                    ..crate::PersonData::default()
+                }),
+            )
+            .unwrap();
+        persons.push((
+            child_too_young.clone(),
+            PersonSummary {
+                handle: child_too_young,
+                birth_year: 1990,
+                gender: 0,
+                layer: 1,
+                is_parent: false,
+                is_child: false,
+            },
+        ));
 
         // Child born 2000 (valid)
         let child_valid = "child_valid".to_string();
-        graph.add_node(child_valid.clone(), crate::Node::Person(crate::PersonData {
-            handle: child_valid.clone(),
-            ..crate::PersonData::default()
-        })).unwrap();
-        persons.push((child_valid.clone(), PersonSummary {
-            handle: child_valid,
-            birth_year: 2000,
-            gender: 0,
-            layer: 1,
-            is_parent: false,
-            is_child: false,
-        }));
+        graph
+            .add_node(
+                child_valid.clone(),
+                crate::Node::Person(crate::PersonData {
+                    handle: child_valid.clone(),
+                    ..crate::PersonData::default()
+                }),
+            )
+            .unwrap();
+        persons.push((
+            child_valid.clone(),
+            PersonSummary {
+                handle: child_valid,
+                birth_year: 2000,
+                gender: 0,
+                layer: 1,
+                is_parent: false,
+                is_child: false,
+            },
+        ));
 
-        let children = assign_children(&mut graph, &family_handle, &father_handle, &mother_handle, &mut persons, &config, &mut rng);
+        let children = assign_children(
+            &mut graph,
+            &family_handle,
+            &father_handle,
+            &mother_handle,
+            &mut persons,
+            &config,
+            &mut rng,
+        );
         // The valid child should be selected, not the too-young one
         // (but since we shuffle, the valid child might or might not be chosen)
         // At minimum, the function should not crash
@@ -2270,35 +2973,89 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
         let family_handle = "f1".to_string();
-        graph.add_node(family_handle.clone(), crate::Node::Family(crate::FamilyData::default())).unwrap();
+        graph
+            .add_node(
+                family_handle.clone(),
+                crate::Node::Family(crate::FamilyData::default()),
+            )
+            .unwrap();
 
         let father_handle = "father".to_string();
         let mother_handle = "mother".to_string();
-        graph.add_node(father_handle.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
-        graph.add_node(mother_handle.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
+        graph
+            .add_node(
+                father_handle.clone(),
+                crate::Node::Person(crate::PersonData::default()),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                mother_handle.clone(),
+                crate::Node::Person(crate::PersonData::default()),
+            )
+            .unwrap();
 
         let mut persons = vec![
-            (father_handle.clone(), PersonSummary { handle: father_handle.clone(), birth_year: 1970, gender: 0, layer: 0, is_parent: false, is_child: false }),
-            (mother_handle.clone(), PersonSummary { handle: mother_handle.clone(), birth_year: 1975, gender: 1, layer: 0, is_parent: false, is_child: false }),
+            (
+                father_handle.clone(),
+                PersonSummary {
+                    handle: father_handle.clone(),
+                    birth_year: 1970,
+                    gender: 0,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
+            (
+                mother_handle.clone(),
+                PersonSummary {
+                    handle: mother_handle.clone(),
+                    birth_year: 1975,
+                    gender: 1,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
         ];
 
         // Add many eligible children
         for i in 0..10 {
             let child_handle = format!("c{}", i);
-            graph.add_node(child_handle.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
-            persons.push((child_handle.clone(), PersonSummary {
-                handle: child_handle,
-                birth_year: 2000 + i,
-                gender: 0,
-                layer: 1,
-                is_parent: false,
-                is_child: false,
-            }));
+            graph
+                .add_node(
+                    child_handle.clone(),
+                    crate::Node::Person(crate::PersonData::default()),
+                )
+                .unwrap();
+            persons.push((
+                child_handle.clone(),
+                PersonSummary {
+                    handle: child_handle,
+                    birth_year: 2000 + i,
+                    gender: 0,
+                    layer: 1,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ));
         }
 
-        let children = assign_children(&mut graph, &family_handle, &father_handle, &mother_handle, &mut persons, &config, &mut rng);
+        let children = assign_children(
+            &mut graph,
+            &family_handle,
+            &father_handle,
+            &mother_handle,
+            &mut persons,
+            &config,
+            &mut rng,
+        );
         assert!(!children.is_empty());
-        assert!(children.len() <= 4, "Number of children should be within range");
+        assert!(
+            children.len() <= 4,
+            "Number of children should be within range"
+        );
     }
 
     #[test]
@@ -2308,31 +3065,82 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
         let family_handle = "f1".to_string();
-        graph.add_node(family_handle.clone(), crate::Node::Family(crate::FamilyData::default())).unwrap();
+        graph
+            .add_node(
+                family_handle.clone(),
+                crate::Node::Family(crate::FamilyData::default()),
+            )
+            .unwrap();
 
         let father_handle = "father".to_string();
         let mother_handle = "mother".to_string();
-        graph.add_node(father_handle.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
-        graph.add_node(mother_handle.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
+        graph
+            .add_node(
+                father_handle.clone(),
+                crate::Node::Person(crate::PersonData::default()),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                mother_handle.clone(),
+                crate::Node::Person(crate::PersonData::default()),
+            )
+            .unwrap();
 
         let mut persons = vec![
-            (father_handle.clone(), PersonSummary { handle: father_handle.clone(), birth_year: 1970, gender: 0, layer: 0, is_parent: false, is_child: false }),
-            (mother_handle.clone(), PersonSummary { handle: mother_handle.clone(), birth_year: 1975, gender: 1, layer: 0, is_parent: false, is_child: false }),
+            (
+                father_handle.clone(),
+                PersonSummary {
+                    handle: father_handle.clone(),
+                    birth_year: 1970,
+                    gender: 0,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
+            (
+                mother_handle.clone(),
+                PersonSummary {
+                    handle: mother_handle.clone(),
+                    birth_year: 1975,
+                    gender: 1,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
         ];
 
         // One child, already marked as child
         let child = "child".to_string();
-        graph.add_node(child.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
-        persons.push((child.clone(), PersonSummary {
-            handle: child.clone(),
-            birth_year: 2000,
-            gender: 0,
-            layer: 1,
-            is_parent: false,
-            is_child: true, // Already assigned!
-        }));
+        graph
+            .add_node(
+                child.clone(),
+                crate::Node::Person(crate::PersonData::default()),
+            )
+            .unwrap();
+        persons.push((
+            child.clone(),
+            PersonSummary {
+                handle: child.clone(),
+                birth_year: 2000,
+                gender: 0,
+                layer: 1,
+                is_parent: false,
+                is_child: true, // Already assigned!
+            },
+        ));
 
-        let children = assign_children(&mut graph, &family_handle, &father_handle, &mother_handle, &mut persons, &config, &mut rng);
+        let children = assign_children(
+            &mut graph,
+            &family_handle,
+            &father_handle,
+            &mother_handle,
+            &mut persons,
+            &config,
+            &mut rng,
+        );
         // The child should NOT be reassigned since it's already marked as child
         assert!(children.is_empty() || !children.contains(&child));
     }
@@ -2344,30 +3152,81 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
         let family_handle = "f1".to_string();
-        graph.add_node(family_handle.clone(), crate::Node::Family(crate::FamilyData::default())).unwrap();
+        graph
+            .add_node(
+                family_handle.clone(),
+                crate::Node::Family(crate::FamilyData::default()),
+            )
+            .unwrap();
 
         let father_handle = "father".to_string();
         let mother_handle = "mother".to_string();
-        graph.add_node(father_handle.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
-        graph.add_node(mother_handle.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
+        graph
+            .add_node(
+                father_handle.clone(),
+                crate::Node::Person(crate::PersonData::default()),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                mother_handle.clone(),
+                crate::Node::Person(crate::PersonData::default()),
+            )
+            .unwrap();
 
         let mut persons = vec![
-            (father_handle.clone(), PersonSummary { handle: father_handle.clone(), birth_year: 1970, gender: 0, layer: 0, is_parent: false, is_child: false }),
-            (mother_handle.clone(), PersonSummary { handle: mother_handle.clone(), birth_year: 1975, gender: 1, layer: 0, is_parent: false, is_child: false }),
+            (
+                father_handle.clone(),
+                PersonSummary {
+                    handle: father_handle.clone(),
+                    birth_year: 1970,
+                    gender: 0,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
+            (
+                mother_handle.clone(),
+                PersonSummary {
+                    handle: mother_handle.clone(),
+                    birth_year: 1975,
+                    gender: 1,
+                    layer: 0,
+                    is_parent: false,
+                    is_child: false,
+                },
+            ),
         ];
 
         let child = "child".to_string();
-        graph.add_node(child.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
-        persons.push((child.clone(), PersonSummary {
-            handle: child.clone(),
-            birth_year: 2000,
-            gender: 0,
-            layer: 1,
-            is_parent: false,
-            is_child: false,
-        }));
+        graph
+            .add_node(
+                child.clone(),
+                crate::Node::Person(crate::PersonData::default()),
+            )
+            .unwrap();
+        persons.push((
+            child.clone(),
+            PersonSummary {
+                handle: child.clone(),
+                birth_year: 2000,
+                gender: 0,
+                layer: 1,
+                is_parent: false,
+                is_child: false,
+            },
+        ));
 
-        let children = assign_children(&mut graph, &family_handle, &father_handle, &mother_handle, &mut persons, &config, &mut rng);
+        let children = assign_children(
+            &mut graph,
+            &family_handle,
+            &father_handle,
+            &mother_handle,
+            &mut persons,
+            &config,
+            &mut rng,
+        );
 
         if !children.is_empty() {
             // Check parent_family_list was updated on the child node
@@ -2395,48 +3254,79 @@ mod tests {
         let mother_handle = "mother".to_string();
         let family_handle = "f1".to_string();
 
-        graph.add_node(father_handle.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
-        graph.add_node(mother_handle.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
+        graph
+            .add_node(
+                father_handle.clone(),
+                crate::Node::Person(crate::PersonData::default()),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                mother_handle.clone(),
+                crate::Node::Person(crate::PersonData::default()),
+            )
+            .unwrap();
 
         // Add birth events for parents
         let birth_event_f = uuid::Uuid::new_v4().to_string();
-        graph.add_node(birth_event_f.clone(), crate::Node::Event(crate::EventData {
-            handle: birth_event_f.clone(),
-            event_type: crate::EventType::Birth,
-            date: Some(crate::DateValue::new(1970)),
-            ..crate::EventData::default()
-        })).unwrap();
-        graph.add_edge(crate::Edge::PersonEventRef {
-            source: father_handle.clone(),
-            target: birth_event_f,
-            metadata: Box::new(crate::EventRef::default()),
-        }).unwrap();
+        graph
+            .add_node(
+                birth_event_f.clone(),
+                crate::Node::Event(crate::EventData {
+                    handle: birth_event_f.clone(),
+                    event_type: crate::EventType::Birth,
+                    date: Some(crate::DateValue::new(1970)),
+                    ..crate::EventData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(crate::Edge::PersonEventRef {
+                source: father_handle.clone(),
+                target: birth_event_f,
+                metadata: Box::new(crate::EventRef::default()),
+            })
+            .unwrap();
 
         let birth_event_m = uuid::Uuid::new_v4().to_string();
-        graph.add_node(birth_event_m.clone(), crate::Node::Event(crate::EventData {
-            handle: birth_event_m.clone(),
-            event_type: crate::EventType::Birth,
-            date: Some(crate::DateValue::new(1975)),
-            ..crate::EventData::default()
-        })).unwrap();
-        graph.add_edge(crate::Edge::PersonEventRef {
-            source: mother_handle.clone(),
-            target: birth_event_m,
-            metadata: Box::new(crate::EventRef::default()),
-        }).unwrap();
+        graph
+            .add_node(
+                birth_event_m.clone(),
+                crate::Node::Event(crate::EventData {
+                    handle: birth_event_m.clone(),
+                    event_type: crate::EventType::Birth,
+                    date: Some(crate::DateValue::new(1975)),
+                    ..crate::EventData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(crate::Edge::PersonEventRef {
+                source: mother_handle.clone(),
+                target: birth_event_m,
+                metadata: Box::new(crate::EventRef::default()),
+            })
+            .unwrap();
 
-        graph.add_node(family_handle.clone(), crate::Node::Family(crate::FamilyData {
-            handle: family_handle.clone(),
-            father_handle: Some(father_handle),
-            mother_handle: Some(mother_handle),
-            ..crate::FamilyData::default()
-        })).unwrap();
+        graph
+            .add_node(
+                family_handle.clone(),
+                crate::Node::Family(crate::FamilyData {
+                    handle: family_handle.clone(),
+                    father_handle: Some(father_handle),
+                    mother_handle: Some(mother_handle),
+                    ..crate::FamilyData::default()
+                }),
+            )
+            .unwrap();
 
         generate_events(&mut graph, &config, &mut rng).expect("event generation should succeed");
 
         // Check that a marriage event exists
         let edges = graph.edges_from(&family_handle);
-        let has_marriage = edges.iter().any(|e| matches!(e, crate::Edge::FamilyEventRef { .. }));
+        let has_marriage = edges
+            .iter()
+            .any(|e| matches!(e, crate::Edge::FamilyEventRef { .. }));
         assert!(has_marriage, "Family should have a marriage event");
     }
 
@@ -2450,41 +3340,70 @@ mod tests {
         let mother_handle = "mother".to_string();
         let family_handle = "f1".to_string();
 
-        graph.add_node(father_handle.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
-        graph.add_node(mother_handle.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
+        graph
+            .add_node(
+                father_handle.clone(),
+                crate::Node::Person(crate::PersonData::default()),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                mother_handle.clone(),
+                crate::Node::Person(crate::PersonData::default()),
+            )
+            .unwrap();
 
         let birth_event_f = uuid::Uuid::new_v4().to_string();
-        graph.add_node(birth_event_f.clone(), crate::Node::Event(crate::EventData {
-            handle: birth_event_f.clone(),
-            event_type: crate::EventType::Birth,
-            date: Some(crate::DateValue::new(1970)),
-            ..crate::EventData::default()
-        })).unwrap();
-        graph.add_edge(crate::Edge::PersonEventRef {
-            source: father_handle.clone(),
-            target: birth_event_f,
-            metadata: Box::new(crate::EventRef::default()),
-        }).unwrap();
+        graph
+            .add_node(
+                birth_event_f.clone(),
+                crate::Node::Event(crate::EventData {
+                    handle: birth_event_f.clone(),
+                    event_type: crate::EventType::Birth,
+                    date: Some(crate::DateValue::new(1970)),
+                    ..crate::EventData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(crate::Edge::PersonEventRef {
+                source: father_handle.clone(),
+                target: birth_event_f,
+                metadata: Box::new(crate::EventRef::default()),
+            })
+            .unwrap();
 
         let birth_event_m = uuid::Uuid::new_v4().to_string();
-        graph.add_node(birth_event_m.clone(), crate::Node::Event(crate::EventData {
-            handle: birth_event_m.clone(),
-            event_type: crate::EventType::Birth,
-            date: Some(crate::DateValue::new(1975)),
-            ..crate::EventData::default()
-        })).unwrap();
-        graph.add_edge(crate::Edge::PersonEventRef {
-            source: mother_handle.clone(),
-            target: birth_event_m,
-            metadata: Box::new(crate::EventRef::default()),
-        }).unwrap();
+        graph
+            .add_node(
+                birth_event_m.clone(),
+                crate::Node::Event(crate::EventData {
+                    handle: birth_event_m.clone(),
+                    event_type: crate::EventType::Birth,
+                    date: Some(crate::DateValue::new(1975)),
+                    ..crate::EventData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(crate::Edge::PersonEventRef {
+                source: mother_handle.clone(),
+                target: birth_event_m,
+                metadata: Box::new(crate::EventRef::default()),
+            })
+            .unwrap();
 
-        graph.add_node(family_handle.clone(), crate::Node::Family(crate::FamilyData {
-            handle: family_handle.clone(),
-            father_handle: Some(father_handle),
-            mother_handle: Some(mother_handle),
-            ..crate::FamilyData::default()
-        })).unwrap();
+        graph
+            .add_node(
+                family_handle.clone(),
+                crate::Node::Family(crate::FamilyData {
+                    handle: family_handle.clone(),
+                    father_handle: Some(father_handle),
+                    mother_handle: Some(mother_handle),
+                    ..crate::FamilyData::default()
+                }),
+            )
+            .unwrap();
 
         generate_events(&mut graph, &config, &mut rng).expect("event generation should succeed");
 
@@ -2495,8 +3414,14 @@ mod tests {
                 if let Some(crate::Node::Event(event)) = graph.get_node(target) {
                     if event.event_type == crate::EventType::Marriage {
                         if let Some(ref date) = event.date {
-                            assert!(date.year >= 1970, "Marriage year should be after father's birth");
-                            assert!(date.year >= 1975, "Marriage year should be after mother's birth");
+                            assert!(
+                                date.year >= 1970,
+                                "Marriage year should be after father's birth"
+                            );
+                            assert!(
+                                date.year >= 1975,
+                                "Marriage year should be after mother's birth"
+                            );
                         }
                     }
                 }
@@ -2515,26 +3440,41 @@ mod tests {
 
         // Add a minimal person with birth event
         let p1 = "p1".to_string();
-        graph.add_node(p1.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
+        graph
+            .add_node(
+                p1.clone(),
+                crate::Node::Person(crate::PersonData::default()),
+            )
+            .unwrap();
 
         let birth_event = uuid::Uuid::new_v4().to_string();
-        graph.add_node(birth_event.clone(), crate::Node::Event(crate::EventData {
-            handle: birth_event.clone(),
-            event_type: crate::EventType::Birth,
-            date: Some(crate::DateValue::new(2000)),
-            ..crate::EventData::default()
-        })).unwrap();
-        graph.add_edge(crate::Edge::PersonEventRef {
-            source: p1.clone(),
-            target: birth_event,
-            metadata: Box::new(crate::EventRef::default()),
-        }).unwrap();
+        graph
+            .add_node(
+                birth_event.clone(),
+                crate::Node::Event(crate::EventData {
+                    handle: birth_event.clone(),
+                    event_type: crate::EventType::Birth,
+                    date: Some(crate::DateValue::new(2000)),
+                    ..crate::EventData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(crate::Edge::PersonEventRef {
+                source: p1.clone(),
+                target: birth_event,
+                metadata: Box::new(crate::EventRef::default()),
+            })
+            .unwrap();
 
         generate_events(&mut graph, &config, &mut rng).expect("event generation should succeed");
 
         // Check that Place nodes were created
         let place_count = graph.nodes_by_kind(crate::NodeKind::Place).len();
-        assert!(place_count > 0, "Places should be created when with_places is true");
+        assert!(
+            place_count > 0,
+            "Places should be created when with_places is true"
+        );
     }
 
     #[test]
@@ -2548,26 +3488,41 @@ mod tests {
 
         // Add a minimal person with birth event
         let p1 = "p1".to_string();
-        graph.add_node(p1.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
+        graph
+            .add_node(
+                p1.clone(),
+                crate::Node::Person(crate::PersonData::default()),
+            )
+            .unwrap();
 
         let birth_event = uuid::Uuid::new_v4().to_string();
-        graph.add_node(birth_event.clone(), crate::Node::Event(crate::EventData {
-            handle: birth_event.clone(),
-            event_type: crate::EventType::Birth,
-            date: Some(crate::DateValue::new(2000)),
-            ..crate::EventData::default()
-        })).unwrap();
-        graph.add_edge(crate::Edge::PersonEventRef {
-            source: p1.clone(),
-            target: birth_event,
-            metadata: Box::new(crate::EventRef::default()),
-        }).unwrap();
+        graph
+            .add_node(
+                birth_event.clone(),
+                crate::Node::Event(crate::EventData {
+                    handle: birth_event.clone(),
+                    event_type: crate::EventType::Birth,
+                    date: Some(crate::DateValue::new(2000)),
+                    ..crate::EventData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(crate::Edge::PersonEventRef {
+                source: p1.clone(),
+                target: birth_event,
+                metadata: Box::new(crate::EventRef::default()),
+            })
+            .unwrap();
 
         generate_events(&mut graph, &config, &mut rng).expect("event generation should succeed");
 
         // Check that Source and Citation nodes were created
         let source_count = graph.nodes_by_kind(crate::NodeKind::Source).len();
-        assert!(source_count > 0, "Sources should be created when with_citations is true");
+        assert!(
+            source_count > 0,
+            "Sources should be created when with_citations is true"
+        );
     }
 
     #[test]
@@ -2591,47 +3546,78 @@ mod tests {
         let mother_handle = "mother".to_string();
         let family_handle = "f1".to_string();
 
-        graph.add_node(father_handle.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
-        graph.add_node(mother_handle.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
+        graph
+            .add_node(
+                father_handle.clone(),
+                crate::Node::Person(crate::PersonData::default()),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                mother_handle.clone(),
+                crate::Node::Person(crate::PersonData::default()),
+            )
+            .unwrap();
 
         let birth_event_f = uuid::Uuid::new_v4().to_string();
-        graph.add_node(birth_event_f.clone(), crate::Node::Event(crate::EventData {
-            handle: birth_event_f.clone(),
-            event_type: crate::EventType::Birth,
-            date: Some(crate::DateValue::new(1970)),
-            ..crate::EventData::default()
-        })).unwrap();
-        graph.add_edge(crate::Edge::PersonEventRef {
-            source: father_handle.clone(),
-            target: birth_event_f,
-            metadata: Box::new(crate::EventRef::default()),
-        }).unwrap();
+        graph
+            .add_node(
+                birth_event_f.clone(),
+                crate::Node::Event(crate::EventData {
+                    handle: birth_event_f.clone(),
+                    event_type: crate::EventType::Birth,
+                    date: Some(crate::DateValue::new(1970)),
+                    ..crate::EventData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(crate::Edge::PersonEventRef {
+                source: father_handle.clone(),
+                target: birth_event_f,
+                metadata: Box::new(crate::EventRef::default()),
+            })
+            .unwrap();
 
         let birth_event_m = uuid::Uuid::new_v4().to_string();
-        graph.add_node(birth_event_m.clone(), crate::Node::Event(crate::EventData {
-            handle: birth_event_m.clone(),
-            event_type: crate::EventType::Birth,
-            date: Some(crate::DateValue::new(1975)),
-            ..crate::EventData::default()
-        })).unwrap();
-        graph.add_edge(crate::Edge::PersonEventRef {
-            source: mother_handle.clone(),
-            target: birth_event_m,
-            metadata: Box::new(crate::EventRef::default()),
-        }).unwrap();
+        graph
+            .add_node(
+                birth_event_m.clone(),
+                crate::Node::Event(crate::EventData {
+                    handle: birth_event_m.clone(),
+                    event_type: crate::EventType::Birth,
+                    date: Some(crate::DateValue::new(1975)),
+                    ..crate::EventData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(crate::Edge::PersonEventRef {
+                source: mother_handle.clone(),
+                target: birth_event_m,
+                metadata: Box::new(crate::EventRef::default()),
+            })
+            .unwrap();
 
-        graph.add_node(family_handle.clone(), crate::Node::Family(crate::FamilyData {
-            handle: family_handle.clone(),
-            father_handle: Some(father_handle),
-            mother_handle: Some(mother_handle),
-            ..crate::FamilyData::default()
-        })).unwrap();
+        graph
+            .add_node(
+                family_handle.clone(),
+                crate::Node::Family(crate::FamilyData {
+                    handle: family_handle.clone(),
+                    father_handle: Some(father_handle),
+                    mother_handle: Some(mother_handle),
+                    ..crate::FamilyData::default()
+                }),
+            )
+            .unwrap();
 
         generate_events(&mut graph, &config, &mut rng).expect("event generation should succeed");
 
         // Check that FamilyEventRef edge exists
         let edges = graph.edges_from(&family_handle);
-        let has_event_ref = edges.iter().any(|e| matches!(e, crate::Edge::FamilyEventRef { .. }));
+        let has_event_ref = edges
+            .iter()
+            .any(|e| matches!(e, crate::Edge::FamilyEventRef { .. }));
         assert!(has_event_ref, "Family should have FamilyEventRef edge");
     }
 
@@ -2641,20 +3627,32 @@ mod tests {
 
         // Person with a death event already created
         let p1 = "p1".to_string();
-        graph.add_node(p1.clone(), crate::Node::Person(crate::PersonData::default())).unwrap();
+        graph
+            .add_node(
+                p1.clone(),
+                crate::Node::Person(crate::PersonData::default()),
+            )
+            .unwrap();
 
         let death_event = uuid::Uuid::new_v4().to_string();
-        graph.add_node(death_event.clone(), crate::Node::Event(crate::EventData {
-            handle: death_event.clone(),
-            event_type: crate::EventType::Death,
-            date: Some(crate::DateValue::new(2050)),
-            ..crate::EventData::default()
-        })).unwrap();
-        graph.add_edge(crate::Edge::PersonEventRef {
-            source: p1.clone(),
-            target: death_event,
-            metadata: Box::new(crate::EventRef::default()),
-        }).unwrap();
+        graph
+            .add_node(
+                death_event.clone(),
+                crate::Node::Event(crate::EventData {
+                    handle: death_event.clone(),
+                    event_type: crate::EventType::Death,
+                    date: Some(crate::DateValue::new(2050)),
+                    ..crate::EventData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(crate::Edge::PersonEventRef {
+                source: p1.clone(),
+                target: death_event,
+                metadata: Box::new(crate::EventRef::default()),
+            })
+            .unwrap();
 
         // Verify death event exists
         let edges = graph.edges_from(&p1);
@@ -2683,10 +3681,13 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let result = generate_random(&config, &schema).expect("generation should succeed");
+        let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+            .expect("generation should succeed");
         assert!(result.graph.node_count() > 0, "Graph should have nodes");
-        assert!(!result.warnings.is_empty() || result.stats.family_count > 0,
-                "Should generate families or emit warnings");
+        assert!(
+            !result.warnings.is_empty() || result.stats.family_count > 0,
+            "Should generate families or emit warnings"
+        );
     }
 
     #[test]
@@ -2699,10 +3700,13 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let result = generate_random(&config, &schema).expect("generation should succeed");
-        assert_eq!(result.stats.person_count, 15,
-                   "Graph should have {} persons, got {}",
-                   config.person_count, result.stats.person_count);
+        let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+            .expect("generation should succeed");
+        assert_eq!(
+            result.stats.person_count, 15,
+            "Graph should have {} persons, got {}",
+            config.person_count, result.stats.person_count
+        );
     }
 
     #[test]
@@ -2715,10 +3719,13 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let result = generate_random(&config, &schema).expect("generation should succeed");
-        assert!(result.stats.family_count > 0,
-                "Graph should have at least one family, got {}",
-                result.stats.family_count);
+        let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+            .expect("generation should succeed");
+        assert!(
+            result.stats.family_count > 0,
+            "Graph should have at least one family, got {}",
+            result.stats.family_count
+        );
     }
 
     #[test]
@@ -2731,10 +3738,13 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let result = generate_random(&config, &schema).expect("generation should succeed");
-        assert!(result.stats.event_count > 0,
-                "Graph should have event nodes, got {}",
-                result.stats.event_count);
+        let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+            .expect("generation should succeed");
+        assert!(
+            result.stats.event_count > 0,
+            "Graph should have event nodes, got {}",
+            result.stats.event_count
+        );
     }
 
     #[test]
@@ -2747,8 +3757,10 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let r1 = generate_random(&config, &schema).expect("first gen should succeed");
-        let r2 = generate_random(&config, &schema).expect("second gen should succeed");
+        let r1 = generate_random(&config, &AdversarialConfig::default(), &schema)
+            .expect("first gen should succeed");
+        let r2 = generate_random(&config, &AdversarialConfig::default(), &schema)
+            .expect("second gen should succeed");
 
         // Same seed should produce identical graphs
         assert_eq!(r1.stats, r2.stats, "Stats should match between runs");
@@ -2770,8 +3782,10 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let r1 = generate_random(&config1, &schema).expect("first gen should succeed");
-        let r2 = generate_random(&config2, &schema).expect("second gen should succeed");
+        let r1 = generate_random(&config1, &AdversarialConfig::default(), &schema)
+            .expect("first gen should succeed");
+        let r2 = generate_random(&config2, &AdversarialConfig::default(), &schema)
+            .expect("second gen should succeed");
 
         // Different seeds should produce different stats (or at least different seeds)
         assert_ne!(r1.seed, r2.seed, "Seeds should differ");
@@ -2785,7 +3799,8 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let result = generate_random(&config, &schema).expect("generation should succeed");
+        let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+            .expect("generation should succeed");
         assert_eq!(result.seed, 42, "Seed should be recorded in result");
     }
 
@@ -2799,7 +3814,8 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let result = generate_random(&config, &schema).expect("generation should succeed");
+        let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+            .expect("generation should succeed");
         let total_nodes = result.stats.person_count
             + result.stats.family_count
             + result.stats.event_count
@@ -2807,8 +3823,11 @@ mod tests {
             + result.stats.source_count
             + result.stats.citation_count
             + result.stats.note_count;
-        assert_eq!(result.graph.node_count(), total_nodes,
-                   "Node count should match stats sum");
+        assert_eq!(
+            result.graph.node_count(),
+            total_nodes,
+            "Node count should match stats sum"
+        );
     }
 
     #[test]
@@ -2819,9 +3838,11 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let result = generate_random(&config, &schema);
-        assert!(matches!(result, Err(GenerationError::InvalidConfig(_))),
-                "Zero persons should be invalid");
+        let result = generate_random(&config, &AdversarialConfig::default(), &schema);
+        assert!(
+            matches!(result, Err(GenerationError::InvalidConfig(_))),
+            "Zero persons should be invalid"
+        );
     }
 
     #[test]
@@ -2833,9 +3854,11 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let result = generate_random(&config, &schema);
-        assert!(matches!(result, Err(GenerationError::InvalidConfig(_))),
-                "start_year > end_year should be invalid");
+        let result = generate_random(&config, &AdversarialConfig::default(), &schema);
+        assert!(
+            matches!(result, Err(GenerationError::InvalidConfig(_))),
+            "start_year > end_year should be invalid"
+        );
     }
 
     #[test]
@@ -2849,9 +3872,12 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let result = generate_random(&config, &schema).expect("generation should succeed");
-        assert!(result.stats.place_count > 0,
-                "Places should be present when with_places is true");
+        let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+            .expect("generation should succeed");
+        assert!(
+            result.stats.place_count > 0,
+            "Places should be present when with_places is true"
+        );
     }
 
     #[test]
@@ -2865,9 +3891,12 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let result = generate_random(&config, &schema).expect("generation should succeed");
-        assert!(result.stats.source_count > 0,
-                "Sources should be present when with_citations is true");
+        let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+            .expect("generation should succeed");
+        assert!(
+            result.stats.source_count > 0,
+            "Sources should be present when with_citations is true"
+        );
         // Citations may or may not be created (30% probability per event)
     }
 
@@ -2881,7 +3910,7 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let result = generate_random(&config, &schema);
+        let result = generate_random(&config, &AdversarialConfig::default(), &schema);
         assert!(result.is_ok(), "50 persons should generate without panic");
     }
 
@@ -2895,12 +3924,16 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let mut result = generate_random(&config, &schema).expect("generation should succeed");
+        let mut result = generate_random(&config, &AdversarialConfig::default(), &schema)
+            .expect("generation should succeed");
         let errors = result.graph.validate(&schema);
         // Birth/death events are created inline, so the graph should be valid
         // (Marriage events are added by generate_events)
-        assert!(errors.is_empty(),
-                "Generated graph should validate: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Generated graph should validate: {:?}",
+            errors
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -2919,15 +3952,17 @@ mod tests {
                 seed: Some(seed as u64),
                 ..RandomConfig::default()
             };
-            let result = generate_random(&config, &schema).unwrap_or_else(|e| {
-                panic!("Seed {}: generation failed: {:?}", seed, e);
-            });
+            let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+                .unwrap_or_else(|e| {
+                    panic!("Seed {}: generation failed: {:?}", seed, e);
+                });
             let mut graph = result.graph;
             let errors = graph.validate(&schema);
             assert!(
                 errors.is_empty(),
                 "Seed {}: validation failed with {} errors: {:?}",
-                seed, errors.len(),
+                seed,
+                errors.len(),
                 errors
             );
         }
@@ -2944,15 +3979,18 @@ mod tests {
                 seed: Some(seed),
                 ..RandomConfig::default()
             };
-            let r1 = generate_random(&config, &schema).unwrap_or_else(|e| {
-                panic!("Seed {}: first gen failed: {:?}", seed, e);
-            });
-            let r2 = generate_random(&config, &schema).unwrap_or_else(|e| {
-                panic!("Seed {}: second gen failed: {:?}", seed, e);
-            });
+            let r1 = generate_random(&config, &AdversarialConfig::default(), &schema)
+                .unwrap_or_else(|e| {
+                    panic!("Seed {}: first gen failed: {:?}", seed, e);
+                });
+            let r2 = generate_random(&config, &AdversarialConfig::default(), &schema)
+                .unwrap_or_else(|e| {
+                    panic!("Seed {}: second gen failed: {:?}", seed, e);
+                });
             assert_eq!(
                 r1.stats, r2.stats,
-                "Seed {}: stats differ between runs", seed
+                "Seed {}: stats differ between runs",
+                seed
             );
         }
     }
@@ -2967,12 +4005,12 @@ mod tests {
                 seed: Some(seed),
                 ..RandomConfig::default()
             };
-            let result = generate_random(&config, &schema).unwrap_or_else(|e| {
-                panic!("Seed {}: generation failed: {:?}", seed, e);
-            });
+            let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+                .unwrap_or_else(|e| {
+                    panic!("Seed {}: generation failed: {:?}", seed, e);
+                });
             let handles: Vec<_> = result.graph.nodes_by_kind(crate::NodeKind::Person);
-            let unique_handles: std::collections::HashSet<_> =
-                handles.iter().cloned().collect();
+            let unique_handles: std::collections::HashSet<_> = handles.iter().cloned().collect();
             assert_eq!(
                 handles.len(),
                 unique_handles.len(),
@@ -2993,16 +4031,23 @@ mod tests {
                 seed: Some(seed),
                 ..RandomConfig::default()
             };
-            let result = generate_random(&config, &schema).unwrap_or_else(|e| {
-                panic!("Seed {}: generation failed: {:?}", seed, e);
-            });
+            let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+                .unwrap_or_else(|e| {
+                    panic!("Seed {}: generation failed: {:?}", seed, e);
+                });
             assert!(
-                !result.graph.nodes_by_kind(crate::NodeKind::Place).is_empty(),
+                !result
+                    .graph
+                    .nodes_by_kind(crate::NodeKind::Place)
+                    .is_empty(),
                 "Seed {}: with_places=true but no Place nodes",
                 seed
             );
             assert!(
-                !result.graph.nodes_by_kind(crate::NodeKind::Source).is_empty(),
+                !result
+                    .graph
+                    .nodes_by_kind(crate::NodeKind::Source)
+                    .is_empty(),
                 "Seed {}: with_citations=true but no Source nodes",
                 seed
             );
@@ -3018,20 +4063,17 @@ mod tests {
                 seed: Some(seed),
                 ..RandomConfig::default()
             };
-            let result = generate_random(&config, &schema).unwrap_or_else(|e| {
-                panic!("Seed {}: generation failed: {:?}", seed, e);
-            });
+            let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+                .unwrap_or_else(|e| {
+                    panic!("Seed {}: generation failed: {:?}", seed, e);
+                });
             for family_handle in result.graph.nodes_by_kind(crate::NodeKind::Family) {
-                let has_parent = result
-                    .graph
-                    .edges_from(family_handle)
-                    .iter()
-                    .any(|e| {
-                        matches!(
-                            e,
-                            crate::Edge::FamilyFather { .. } | crate::Edge::FamilyMother { .. }
-                        )
-                    });
+                let has_parent = result.graph.edges_from(family_handle).iter().any(|e| {
+                    matches!(
+                        e,
+                        crate::Edge::FamilyFather { .. } | crate::Edge::FamilyMother { .. }
+                    )
+                });
                 // This test just checks that the generation doesn't crash
                 // (single-parent families are structurally valid)
                 let _ = has_parent;
@@ -3049,17 +4091,16 @@ mod tests {
                 seed: Some(seed),
                 ..RandomConfig::default()
             };
-            let result = generate_random(&config, &schema).unwrap_or_else(|e| {
-                panic!("Seed {}: generation failed: {:?}", seed, e);
-            });
+            let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+                .unwrap_or_else(|e| {
+                    panic!("Seed {}: generation failed: {:?}", seed, e);
+                });
             for (handle, node) in result.graph.iter_nodes() {
                 if let crate::Node::Person(person) = node {
                     let edges = result.graph.edges_from(handle);
                     for edge in edges {
                         if let crate::Edge::PersonEventRef { target, .. } = edge {
-                            if let Some(crate::Node::Event(event)) =
-                                result.graph.get_node(target)
-                            {
+                            if let Some(crate::Node::Event(event)) = result.graph.get_node(target) {
                                 if event.event_type == crate::EventType::Birth {
                                     // Birth event should have a date
                                     assert!(

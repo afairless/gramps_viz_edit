@@ -53,7 +53,6 @@ use crate::Graph;
 #[derive(Clone, Debug, PartialEq)]
 pub enum AdversarialStrategy {
     // ---- Category A: generation-time ----
-
     /// Skip father or mother assignment for a configurable fraction of families.
     OneParentFamilies(f64),
 
@@ -67,7 +66,6 @@ pub enum AdversarialStrategy {
     ManyAlternateNames(f64),
 
     // ---- Category B: post-generation transforms ----
-
     /// Split the graph into multiple unrelated clusters by deleting
     /// cross-cluster family edges. Validity-preserving.
     DisconnectedSubgraphs,
@@ -133,8 +131,7 @@ impl AdversarialStrategy {
 ///
 /// When `enabled` is false (the default), generation proceeds normally
 /// with no adversarial strategies applied.
-#[derive(Clone, Debug, PartialEq)]
-#[derive(Default)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct AdversarialConfig {
     /// Whether adversarial generation is enabled.
     pub enabled: bool,
@@ -146,7 +143,6 @@ pub struct AdversarialConfig {
     /// as post-generation transforms on a known-valid graph.
     pub strategies: Vec<AdversarialStrategy>,
 }
-
 
 // ---------------------------------------------------------------------------
 // AdversarialError
@@ -327,8 +323,7 @@ mod tests {
         assert!(msg.contains("transform not applicable"));
         assert!(msg.contains("no persons"));
 
-        let err2 =
-            AdversarialError::MissingRequiredFeature("no place nodes in graph".to_string());
+        let err2 = AdversarialError::MissingRequiredFeature("no place nodes in graph".to_string());
         let msg2 = format!("{}", err2);
         assert!(msg2.contains("missing required feature"));
         assert!(msg2.contains("no place nodes"));
