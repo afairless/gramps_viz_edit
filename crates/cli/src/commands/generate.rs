@@ -6,6 +6,14 @@
 //! Generate → Validate → [Adversarial Transform] → Validate → Serialize
 
 use clap::Args;
+use output::GraphXmlWriter;
+use output::SerializationMap;
+use typed_graph::generate::AdversarialConfig;
+use typed_graph::generate::AdversarialStrategy;
+use typed_graph::generate::RandomConfig;
+use typed_graph::generate::{apply_adversarial_strategies, generate_random};
+use typed_graph::Schema;
+use typed_graph::ValidationError;
 
 /// Arguments for the `generate` subcommand.
 #[derive(Args, Clone, Debug)]
@@ -63,9 +71,338 @@ pub struct GenerateArgs {
     pub with_tags: bool,
 }
 
-/// Run the generate command (stub — will be wired in Step 6).
+/// Run the generate command with the full five-stage pipeline.
 pub fn run(args: GenerateArgs) -> Result<(), crate::error::CliError> {
-    eprintln!("Generate command stub: count={}, depth={}, output={}",
-        args.count, args.depth, args.output);
+    // Stage 0: Build config
+    let (config, adversarial_config, output_path) = build_config(&args)?;
+
+    // Report seed
+    let seed_msg = match config.seed {
+        Some(s) => format!("{}", s),
+        None => "random".to_string(),
+    };
+    eprintln!("Generation seed: {}", seed_msg);
+    eprintln!(
+        "Generating {} persons across {} generations...",
+        config.person_count, config.generations
+    );
+
+    // Stage 1: Generate
+    let schema = Schema::new();
+    let mut result = generate_random(&config, &adversarial_config, &schema)?;
+    eprintln!("Generated {} persons, {} families, {} events",
+        result.stats.person_count, result.stats.family_count, result.stats.event_count);
+
+    // Stage 2: Validation Gate 1
+    let errors = result.graph.validate(&schema);
+    check_validation_errors(&errors, args.strict)?;
+
+    // Stage 3: Adversarial Transform (Category B only)
+    if adversarial_config.enabled {
+        let adversarial_result = apply_adversarial_strategies(result.graph, &adversarial_config);
+        result.graph = adversarial_result.graph;
+        for err in &adversarial_result.errors {
+            eprintln!("Adversarial transform warning: {}", err);
+        }
+    }
+
+    // Stage 4: Validation Gate 2
+    let errors = result.graph.validate(&schema);
+    check_validation_errors(&errors, args.strict)?;
+
+    // Stage 5: Serialize
+    let map = SerializationMap::new();
+    let writer = GraphXmlWriter::new(map);
+    let file = std::fs::File::create(&output_path).map_err(|e| crate::error::CliError::Io {
+        path: output_path.clone(),
+        source: e,
+    })?;
+    writer.write(&result.graph, &mut std::io::BufWriter::new(file))?;
+
+    // Report summary
+    eprintln!(
+        "Generated {} persons, {} families, {} events ({} edges) → {}",
+        result.stats.person_count,
+        result.stats.family_count,
+        result.stats.event_count,
+        result.stats.edge_count,
+        output_path
+    );
+
+    // Report warnings
+    for warning in &result.warnings {
+        eprintln!("Warning: {}", warning);
+    }
+
     Ok(())
+}
+
+/// Check validation errors and return an error if they are blocking.
+fn check_validation_errors(
+    errors: &[ValidationError],
+    strict: bool,
+) -> Result<(), crate::error::CliError> {
+    if errors.is_empty() {
+        return Ok(());
+    }
+
+    if strict {
+        // In strict mode, ALL errors are blocking
+        for error in errors {
+            eprintln!("{}", error);
+        }
+        return Err(crate::error::CliError::ValidationFailed(errors.to_vec()));
+    }
+
+    // In non-strict mode, only structural/referential errors are blocking
+    let blocking_errors: Vec<ValidationError> = errors
+        .iter()
+        .filter(|e| !matches!(e, ValidationError::PlausibilityWarning { .. }))
+        .cloned()
+        .collect();
+
+    if !blocking_errors.is_empty() {
+        for error in &blocking_errors {
+            eprintln!("{}", error);
+        }
+        return Err(crate::error::CliError::ValidationFailed(blocking_errors));
+    }
+
+    // Plausibility warnings are reported but non-blocking
+    for error in errors {
+        if matches!(error, ValidationError::PlausibilityWarning { .. }) {
+            eprintln!("Warning: {}", error);
+        }
+    }
+
+    Ok(())
+}
+
+/// Build configuration from CLI args or scenario file.
+fn build_config(args: &GenerateArgs) -> Result<(RandomConfig, AdversarialConfig, String), crate::error::CliError> {
+    // If a config file is specified, load from YAML
+    if let Some(ref config_path) = args.config {
+        let scenario = crate::scenario::load_scenario(config_path)?;
+        let output_path = args.output.clone();
+        return Ok((
+            scenario.to_random_config(),
+            scenario.to_adversarial_config(),
+            output_path,
+        ));
+    }
+
+    // Build from CLI args
+    let config = RandomConfig {
+        person_count: args.count,
+        family_count: args.count / 2,
+        generations: args.depth,
+        children_per_family: 1..4,
+        start_year: 1850,
+        end_year: 2025,
+        name_style: "modern".to_string(),
+        with_places: args.with_places,
+        with_citations: args.with_citations,
+        with_notes: args.with_notes,
+        with_media: args.with_media,
+        with_tags: args.with_tags,
+        seed: args.seed,
+        place_depth: 3,
+    };
+
+    // Parse adversarial flag
+    let adversarial_config = parse_adversarial_flag(&args.adversarial)?;
+
+    Ok((config, adversarial_config, args.output.clone()))
+}
+
+/// Parse the `--adversarial` flag value into an `AdversarialConfig`.
+fn parse_adversarial_flag(flag: &Option<String>) -> Result<AdversarialConfig, crate::error::CliError> {
+    let flag = match flag {
+        Some(f) => f,
+        None => {
+            return Ok(AdversarialConfig::default());
+        }
+    };
+
+    if flag == "all" {
+        return Ok(AdversarialConfig {
+            enabled: true,
+            strategies: vec![
+                AdversarialStrategy::OneParentFamilies(0.5),
+                AdversarialStrategy::MissingEvents(0.3),
+                AdversarialStrategy::SoloPersons(0.2),
+                AdversarialStrategy::ManyAlternateNames(0.3),
+                AdversarialStrategy::DisconnectedSubgraphs,
+                AdversarialStrategy::DeepNesting,
+                AdversarialStrategy::MaxRefChains,
+                AdversarialStrategy::OrphanedReferences,
+                AdversarialStrategy::DoubleGender(0.2),
+            ],
+        });
+    }
+
+    let strategies: Result<Vec<AdversarialStrategy>, _> = flag
+        .split(',')
+        .map(|s| {
+            let s = s.trim();
+            strategy_from_name(s).ok_or_else(|| {
+                crate::error::CliError::ConfigError(format!(
+                    "unknown adversarial strategy: '{}'. Valid strategies: one-parent, missing-events, \
+                     solo, many-names, disconnected, deep-nesting, max-ref-chains, orphaned, double-gender",
+                    s
+                ))
+            })
+        })
+        .collect();
+
+    let strategies = strategies?;
+    if strategies.is_empty() {
+        return Err(crate::error::CliError::ConfigError(
+            "adversarial flag is set but no valid strategies were specified".to_string(),
+        ));
+    }
+
+    Ok(AdversarialConfig {
+        enabled: true,
+        strategies,
+    })
+}
+
+/// Convert a strategy name string to an `AdversarialStrategy`.
+fn strategy_from_name(name: &str) -> Option<AdversarialStrategy> {
+    match name {
+        "one_parent" | "one-parent" | "one_parent_families" => {
+            Some(AdversarialStrategy::OneParentFamilies(0.5))
+        }
+        "missing_events" | "missing-events" => {
+            Some(AdversarialStrategy::MissingEvents(0.3))
+        }
+        "solo" | "solo_persons" | "solo-persons" => {
+            Some(AdversarialStrategy::SoloPersons(0.2))
+        }
+        "many_names" | "many-names" | "many_alternate_names" => {
+            Some(AdversarialStrategy::ManyAlternateNames(0.3))
+        }
+        "disconnected" | "disconnected_subgraphs" | "disconnected-subgraphs" => {
+            Some(AdversarialStrategy::DisconnectedSubgraphs)
+        }
+        "deep_nesting" | "deep-nesting" => {
+            Some(AdversarialStrategy::DeepNesting)
+        }
+        "max_ref_chains" | "max-ref-chains" => {
+            Some(AdversarialStrategy::MaxRefChains)
+        }
+        "orphaned" | "orphaned_references" | "orphaned-references" => {
+            Some(AdversarialStrategy::OrphanedReferences)
+        }
+        "double_gender" | "double-gender" => {
+            Some(AdversarialStrategy::DoubleGender(0.2))
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use typed_graph::generate::GenerationError;
+
+    #[test]
+    fn generate_command_build_config_from_args() {
+        let args = GenerateArgs {
+            count: 50,
+            depth: 3,
+            output: "test.gramps".to_string(),
+            seed: Some(42),
+            strict: false,
+            adversarial: None,
+            progress_interval: 100,
+            config: None,
+            with_places: true,
+            with_citations: false,
+            with_notes: false,
+            with_media: false,
+            with_tags: false,
+        };
+        let (config, adv_config, output) = build_config(&args).unwrap();
+        assert_eq!(config.person_count, 50);
+        assert_eq!(config.generations, 3);
+        assert_eq!(config.seed, Some(42));
+        assert!(config.with_places);
+        assert!(!config.with_citations);
+        assert!(!adv_config.enabled);
+        assert_eq!(output, "test.gramps");
+    }
+
+    #[test]
+    fn generate_command_adversarial_flag_parses_all() {
+        let config = parse_adversarial_flag(&Some("all".to_string())).unwrap();
+        assert!(config.enabled);
+        assert!(!config.strategies.is_empty());
+    }
+
+    #[test]
+    fn generate_command_adversarial_flag_parses_list() {
+        let config =
+            parse_adversarial_flag(&Some("disconnected,one-parent".to_string())).unwrap();
+        assert!(config.enabled);
+        assert_eq!(config.strategies.len(), 2);
+    }
+
+    #[test]
+    fn generate_command_adversarial_flag_unknown_rejected() {
+        let result = parse_adversarial_flag(&Some("unknown_strategy".to_string()));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn generate_command_empty_output_path() {
+        let args = GenerateArgs {
+            count: 50,
+            depth: 3,
+            output: "".to_string(),
+            seed: None,
+            strict: false,
+            adversarial: None,
+            progress_interval: 100,
+            config: None,
+            with_places: false,
+            with_citations: false,
+            with_notes: false,
+            with_media: false,
+            with_tags: false,
+        };
+        // build_config should succeed even with empty output (it's just a string)
+        let result = build_config(&args);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn generate_command_zero_count_rejected() {
+        let args = GenerateArgs {
+            count: 0,
+            depth: 3,
+            output: "test.gramps".to_string(),
+            seed: None,
+            strict: false,
+            adversarial: None,
+            progress_interval: 100,
+            config: None,
+            with_places: false,
+            with_citations: false,
+            with_notes: false,
+            with_media: false,
+            with_tags: false,
+        };
+        let (config, _, _) = build_config(&args).unwrap();
+        // person_count is 0, generation should fail
+        let schema = Schema::new();
+        let adv_config = AdversarialConfig::default();
+        let result = generate_random(&config, &adv_config, &schema);
+        assert!(result.is_err());
+        match result {
+            Err(GenerationError::InvalidConfig(_)) => {} // Expected
+            _ => panic!("Expected InvalidConfig error"),
+        }
+    }
 }
