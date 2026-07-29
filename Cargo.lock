@@ -127,6 +127,7 @@ dependencies = [
  "env_logger",
  "log",
  "output",
+ "quick-xml",
  "serde",
  "serde_yaml",
  "typed-graph",
