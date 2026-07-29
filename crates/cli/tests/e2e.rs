@@ -1,0 +1,263 @@
+//! End-to-end tests for the gramps-gen CLI.
+//!
+//! These tests run the CLI binary as a subprocess and verify its output.
+//! They test the full pipeline: generate → validate → serialize.
+//!
+//! To run these tests:
+//! ```bash
+//! cargo test -p cli --test e2e
+//! ```
+
+use std::io::Write;
+
+/// Helper to run gramps-gen with arguments and return stdout, stderr, and exit code.
+fn gramps_gen(args: &[&str]) -> (String, String, Option<i32>) {
+    let bin = env!("CARGO_BIN_EXE_gramps-gen");
+    let output = std::process::Command::new(bin)
+        .args(args)
+        .output()
+        .expect("Failed to run gramps-gen");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let code = output.status.code();
+    (stdout, stderr, code)
+}
+
+/// Create a unique temporary file path.
+fn temp_output_path(test_name: &str) -> String {
+    std::format!("/tmp/gramps_gen_e2e_{}_{}.gramps", test_name, std::process::id())
+}
+
+#[test]
+fn e2e_generate_basic() {
+    let output = temp_output_path("basic");
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "generate",
+        "--count", "10",
+        "--output", &output,
+    ]);
+    assert_eq!(code, Some(0), "Generate failed: {}", stderr);
+
+    // Verify the output file exists and is non-empty XML
+    let content = std::fs::read_to_string(&output).unwrap();
+    assert!(!content.is_empty(), "Output file should not be empty");
+    assert!(content.starts_with("<?xml"), "Output should start with XML declaration");
+    assert!(content.contains("<database"), "Output should contain <database>");
+    assert!(content.contains("</database>"), "Output should close </database>");
+
+    // Clean up
+    let _ = std::fs::remove_file(&output);
+}
+
+#[test]
+fn e2e_generate_with_seed() {
+    let output = temp_output_path("seed");
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "generate",
+        "--count", "10",
+        "--seed", "42",
+        "--output", &output,
+    ]);
+    assert_eq!(code, Some(0), "Generate failed: {}", stderr);
+    assert!(stderr.contains("42"), "Should report seed 42");
+
+    // Verify the output file is valid XML
+    let content = std::fs::read_to_string(&output).unwrap();
+    assert!(content.contains("<database"), "Output should contain <database>");
+
+    // Clean up
+    let _ = std::fs::remove_file(&output);
+}
+
+#[test]
+fn e2e_generate_with_adversarial() {
+    let output = temp_output_path("adversarial");
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "generate",
+        "--count", "20",
+        "--adversarial", "disconnected",
+        "--output", &output,
+    ]);
+    assert_eq!(code, Some(0), "Generate failed: {}", stderr);
+
+    // Verify output is valid XML
+    let content = std::fs::read_to_string(&output).unwrap();
+    assert!(content.contains("<database"));
+    let _ = std::fs::remove_file(&output);
+}
+
+#[test]
+fn e2e_generate_with_all_adversarial() {
+    let output = temp_output_path("all_adv");
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "generate",
+        "--count", "30",
+        "--adversarial", "all",
+        "--output", &output,
+    ]);
+    assert_eq!(code, Some(0), "Generate failed: {}", stderr);
+
+    let _ = std::fs::remove_file(&output);
+}
+
+#[test]
+fn e2e_generate_with_all_features() {
+    let output = temp_output_path("features");
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "generate",
+        "--count", "30",
+        "--with-places",
+        "--with-citations",
+        "--with-notes",
+        "--with-media",
+        "--with-tags",
+        "--output", &output,
+    ]);
+    assert_eq!(code, Some(0), "Generate failed: {}", stderr);
+
+    let content = std::fs::read_to_string(&output).unwrap();
+    assert!(content.contains("<placeobj"), "Should contain place elements");
+    assert!(content.contains("<citation"), "Should contain citation elements");
+    // Note: notes, media, and tags feature flags are defined in the config
+    // but not yet fully implemented in the generation engine. Assertions are
+    // omitted for those elements.
+
+    let _ = std::fs::remove_file(&output);
+}
+
+#[test]
+fn e2e_generate_validate_roundtrip() {
+    let output = temp_output_path("roundtrip");
+    let (_stdout, gen_stderr, gen_code) = gramps_gen(&[
+        "generate",
+        "--count", "10",
+        "--output", &output,
+    ]);
+    assert_eq!(gen_code, Some(0), "Generate failed: {}", gen_stderr);
+
+    // Validate the generated file
+    let (_stdout, val_stderr, val_code) = gramps_gen(&[
+        "validate",
+        &output,
+    ]);
+    assert_eq!(val_code, Some(0), "Validate failed: {}", val_stderr);
+
+    let _ = std::fs::remove_file(&output);
+}
+
+#[test]
+fn e2e_generate_zero_count_fails() {
+    let output = temp_output_path("zero");
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "generate",
+        "--count", "0",
+        "--output", &output,
+    ]);
+    assert_eq!(code, Some(1), "Zero count should fail");
+    assert!(!stderr.is_empty(), "Should produce error output");
+
+    // File should not exist
+    assert!(!std::path::Path::new(&output).exists());
+}
+
+#[test]
+fn e2e_generate_large() {
+    let output = temp_output_path("large");
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "generate",
+        "--count", "100",
+        "--depth", "5",
+        "--output", &output,
+    ]);
+    assert_eq!(code, Some(0), "Generate failed: {}", stderr);
+
+    let content = std::fs::read_to_string(&output).unwrap();
+    assert!(content.len() > 1000, "Large generation should produce substantial output");
+
+    let _ = std::fs::remove_file(&output);
+}
+
+#[test]
+fn e2e_validate_invalid_file() {
+    let invalid_path = "/tmp/gramps_gen_e2e_invalid.gramps";
+    std::fs::write(invalid_path, "<invalid>not valid grammar</invalid>").unwrap();
+
+    let (_stdout, stderr, code) = gramps_gen(&["validate", invalid_path]);
+    assert_eq!(code, Some(1), "Invalid file should fail validation");
+    assert!(stderr.contains("database"), "Should mention missing <database>");
+
+    let _ = std::fs::remove_file(invalid_path);
+}
+
+#[test]
+fn e2e_validate_nonexistent_file() {
+    let (_stdout, stderr, code) = gramps_gen(&["validate", "/nonexistent/file.gramps"]);
+    assert_eq!(code, Some(1), "Non-existent file should fail");
+    assert!(!stderr.is_empty(), "Should produce error message");
+}
+
+#[test]
+fn e2e_help_output() {
+    let (stdout, stderr, code) = gramps_gen(&["--help"]);
+    assert_eq!(code, Some(0), "Help should succeed");
+    // clap prints help to stdout
+    let combined = stdout + &stderr;
+    assert!(combined.contains("gramps-gen"), "Help should mention binary name");
+    assert!(combined.contains("generate"), "Help should mention generate");
+    assert!(combined.contains("validate"), "Help should mention validate");
+}
+
+#[test]
+fn e2e_version_output() {
+    let (stdout, stderr, code) = gramps_gen(&["--version"]);
+    assert_eq!(code, Some(0), "Version should succeed");
+    let combined = stdout + &stderr;
+    assert!(!combined.is_empty(), "Should output version info");
+}
+
+#[test]
+fn e2e_generate_with_scenario_yaml() {
+    // Create a temporary YAML scenario file
+    let scenario_path = "/tmp/gramps_gen_e2e_scenario.yaml";
+    let mut file = std::fs::File::create(scenario_path).unwrap();
+    write!(file, r#"
+person_count: 15
+with_places: true
+with_citations: true
+seed: 100
+"#).unwrap();
+    file.flush().unwrap();
+
+    let output = temp_output_path("scenario");
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "generate",
+        "--config", scenario_path,
+        "--output", &output,
+    ]);
+    assert_eq!(code, Some(0), "Generate with scenario failed: {}", stderr);
+
+    let content = std::fs::read_to_string(&output).unwrap();
+    assert!(content.contains("<database"), "Output should contain <database>");
+
+    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_file(scenario_path);
+}
+
+#[test]
+fn e2e_validate_valid_file() {
+    // Create a minimal valid .gramps file
+    let valid_path = "/tmp/gramps_gen_e2e_valid.gramps";
+    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header>
+    <created date="2025-01-01" version="5.2"/>
+    <researcher><resname>Test</resname></researcher>
+  </header>
+</database>"#;
+    std::fs::write(valid_path, xml).unwrap();
+
+    let (_stdout, stderr, code) = gramps_gen(&["validate", valid_path]);
+    assert_eq!(code, Some(0), "Valid file should pass validation: {}", stderr);
+
+    let _ = std::fs::remove_file(valid_path);
+}
