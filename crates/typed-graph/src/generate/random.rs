@@ -458,6 +458,22 @@ fn schema_enum_values(schema: &crate::Schema, enum_name: &str) -> Vec<&'static s
         .unwrap_or_default()
 }
 
+/// Check whether a field exists for the given schema version.
+/// Uses the `field_availability` map generated at compile time.
+fn field_exists_for_version(
+    schema: &crate::Schema,
+    type_name: &str,
+    field_name: &str,
+    version: &str,
+) -> bool {
+    let key = format!("{}.{}", type_name, field_name);
+    schema
+        .field_availability
+        .get(key.as_str())
+        .map(|versions| versions.contains(&version))
+        .unwrap_or(false)
+}
+
 /// Generate a random Person node with procedural name, gender, and dates.
 ///
 /// Returns the handle of the created person node.
