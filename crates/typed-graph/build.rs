@@ -19,6 +19,13 @@ use std::env;
 use std::fs;
 use std::path::Path;
 
+// Inline the schema_convert module so build.rs can use its functions
+// without requiring a [build-dependencies] on typed-graph (which would
+// create a circular dependency since typed-graph's build.rs produces
+// generated code that typed-graph compiles).
+#[path = "src/schema_convert.rs"]
+mod schema_convert;
+
 // ---------------------------------------------------------------------------
 // Feature-to-version mapping
 // ---------------------------------------------------------------------------
@@ -80,8 +87,26 @@ fn main() {
     // Detect enabled features
     let enabled_versions = detect_enabled_features();
 
-    // Load schemas for enabled versions
-    let schemas: Vec<(String, serde_json::Value)> = load_schemas(&schemas_dir, &enabled_versions);
+    // Load enum constants for 5.1 conversion (optional; may not exist)
+    let enum_constants_path = crate_dir.join("build/enum_constants_5_1.json");
+    let enum_constants: serde_json::Value = if enum_constants_path.exists() {
+        match fs::read_to_string(&enum_constants_path) {
+            Ok(content) => serde_json::from_str(&content).unwrap_or_else(|_| {
+                eprintln!("cargo::warning=Failed to parse enum_constants_5_1.json");
+                serde_json::Value::Null
+            }),
+            Err(_) => {
+                eprintln!("cargo::warning=Failed to read enum_constants_5_1.json");
+                serde_json::Value::Null
+            }
+        }
+    } else {
+        serde_json::Value::Null
+    };
+
+    // Load schemas for enabled versions (with format conversion)
+    let schemas: Vec<(String, serde_json::Value)> =
+        load_schemas(&schemas_dir, &enabled_versions, &enum_constants);
 
     // Generate code from all loaded schemas
     let code = generate_code(&schemas);
@@ -115,10 +140,12 @@ fn detect_enabled_features() -> Vec<String> {
 // Schema loading
 // ---------------------------------------------------------------------------
 
-/// Load schema JSON files for the given versions.
+/// Load schema JSON files for the given versions, with automatic format
+/// detection and conversion from JSON Schema format to flat format.
 fn load_schemas(
     schemas_dir: &Path,
     versions: &[String],
+    enum_constants: &serde_json::Value,
 ) -> Vec<(String, serde_json::Value)> {
     let mut schemas: Vec<(String, serde_json::Value)> = Vec::new();
 
@@ -154,6 +181,32 @@ fn load_schemas(
                 eprintln!("error: failed to parse {}: {}", schema_path.display(), e);
                 std::process::exit(1);
             }
+        };
+
+        // Detect JSON Schema format and convert to flat format if needed
+        let schema = if schema_convert::is_json_schema_format(&schema) {
+            eprintln!(
+                "cargo::warning=schema-{}.json is in JSON Schema format; converting to flat format",
+                version
+            );
+            let converted =
+                schema_convert::convert(schema, version, enum_constants)
+                    .expect("schema conversion should succeed for valid Gramps JSON Schema");
+
+            // Validate the converted output before it reaches the merge algorithm
+            if let Err(errs) = schema_convert::validate_flat_format(&converted) {
+                for e in &errs {
+                    eprintln!("cargo::warning=schema-{}: {}", version, e);
+                }
+                panic!(
+                    "Converted schema-{} failed flat-format validation: {:#?}",
+                    version, errs
+                );
+            }
+
+            converted
+        } else {
+            schema
         };
 
         schemas.push((version.clone(), schema));

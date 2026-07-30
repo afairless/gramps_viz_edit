@@ -503,10 +503,8 @@ fn convert_enum_type(
                         // Integer value — look up by string key
                         let key = n.to_string();
                         if let Some(table) = lookup_table {
-                            if let Some(enum_table) = table.get(enum_name) {
-                                if let Some(name) = enum_table.get(&key).and_then(|v| v.as_str()) {
-                                    return Value::String(name.to_string());
-                                }
+                            if let Some(name) = table.get(&key).and_then(|v| v.as_str()) {
+                                return Value::String(name.to_string());
                             }
                         }
                         // Not found — emit warning and use fallback
@@ -864,7 +862,12 @@ mod tests {
                 "11": "ADOPT"
             }
         });
-        let result = convert_enum_type(&enum_info, "EventType", Some(&enum_constants));
+        let result = convert_enum_type(
+            &enum_info,
+            "EventType",
+            // Pass the per-enum lookup table (the value at enum_constants["EventType"])
+            enum_constants.get("EventType"),
+        );
         let values = result.get("values").and_then(|v| v.as_array()).unwrap();
         let strings: Vec<&str> = values.iter().filter_map(|v| v.as_str()).collect();
         assert!(strings.contains(&"POS_VALUE"));
@@ -879,7 +882,12 @@ mod tests {
         let enum_constants = json!({
             "EventType": {"0": "POS_VALUE"}
         });
-        let result = convert_enum_type(&enum_info, "EventType", Some(&enum_constants));
+        let result = convert_enum_type(
+            &enum_info,
+            "EventType",
+            // Pass the per-enum lookup table
+            enum_constants.get("EventType"),
+        );
         let values = result.get("values").and_then(|v| v.as_array()).unwrap();
         let strings: Vec<&str> = values.iter().filter_map(|v| v.as_str()).collect();
         assert!(strings.contains(&"POS_VALUE"));
