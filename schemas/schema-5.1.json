@@ -1,0 +1,4829 @@
+{
+  "version": "5.1",
+  "primary_types": {
+    "Person": {
+      "fields": {
+        "type": "object",
+        "title": "Person",
+        "properties": {
+          "_class": {
+            "enum": [
+              "Person"
+            ]
+          },
+          "handle": {
+            "type": "string",
+            "maxLength": 50,
+            "title": "Handle"
+          },
+          "gramps_id": {
+            "type": "string",
+            "title": "Gramps ID"
+          },
+          "gender": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2,
+            "title": "Gender"
+          },
+          "primary_name": {
+            "type": "object",
+            "title": "Name",
+            "properties": {
+              "_class": {
+                "enum": [
+                  "Name"
+                ]
+              },
+              "private": {
+                "type": "boolean",
+                "title": "Private"
+              },
+              "citation_list": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 50
+                },
+                "title": "Citations"
+              },
+              "note_list": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 50
+                },
+                "title": "Notes"
+              },
+              "date": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "title": "Date",
+                    "properties": {
+                      "_class": {
+                        "enum": [
+                          "Date"
+                        ]
+                      },
+                      "calendar": {
+                        "type": "integer",
+                        "title": "Calendar"
+                      },
+                      "modifier": {
+                        "type": "integer",
+                        "title": "Modifier"
+                      },
+                      "quality": {
+                        "type": "integer",
+                        "title": "Quality"
+                      },
+                      "dateval": {
+                        "type": "array",
+                        "title": "Values",
+                        "items": {
+                          "type": [
+                            "integer",
+                            "boolean"
+                          ]
+                        }
+                      },
+                      "text": {
+                        "type": "string",
+                        "title": "Text"
+                      },
+                      "sortval": {
+                        "type": "integer",
+                        "title": "Sort value"
+                      },
+                      "newyear": {
+                        "type": "integer",
+                        "title": "New year begins"
+                      }
+                    }
+                  }
+                ],
+                "title": "Date"
+              },
+              "first_name": {
+                "type": "string",
+                "title": "Given name"
+              },
+              "surname_list": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "title": "Surname",
+                  "properties": {
+                    "_class": {
+                      "enum": [
+                        "Surname"
+                      ]
+                    },
+                    "surname": {
+                      "type": "string",
+                      "title": "Surname"
+                    },
+                    "prefix": {
+                      "type": "string",
+                      "title": "Prefix"
+                    },
+                    "primary": {
+                      "type": "boolean",
+                      "title": "Primary"
+                    },
+                    "origintype": {
+                      "type": "object",
+                      "title": "Type",
+                      "properties": {
+                        "_class": {
+                          "enum": [
+                            "NameOriginType"
+                          ]
+                        },
+                        "string": {
+                          "type": "string",
+                          "title": "Type"
+                        }
+                      }
+                    },
+                    "connector": {
+                      "type": "string",
+                      "title": "Connector"
+                    }
+                  }
+                },
+                "title": "Surnames"
+              },
+              "suffix": {
+                "type": "string",
+                "title": "Suffix"
+              },
+              "title": {
+                "type": "string",
+                "title": "Title"
+              },
+              "type": {
+                "type": "object",
+                "title": "Type",
+                "properties": {
+                  "_class": {
+                    "enum": [
+                      "NameType"
+                    ]
+                  },
+                  "string": {
+                    "type": "string",
+                    "title": "Type"
+                  }
+                }
+              },
+              "group_as": {
+                "type": "string",
+                "title": "Group as"
+              },
+              "sort_as": {
+                "type": "integer",
+                "title": "Sort as"
+              },
+              "display_as": {
+                "type": "integer",
+                "title": "Display as"
+              },
+              "call": {
+                "type": "string",
+                "title": "Call name"
+              },
+              "nick": {
+                "type": "string",
+                "title": "Nick name"
+              },
+              "famnick": {
+                "type": "string",
+                "title": "Family nick name"
+              }
+            }
+          },
+          "alternate_names": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Name",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "Name"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "citation_list": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  },
+                  "title": "Citations"
+                },
+                "note_list": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  },
+                  "title": "Notes"
+                },
+                "date": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "title": "Date",
+                      "properties": {
+                        "_class": {
+                          "enum": [
+                            "Date"
+                          ]
+                        },
+                        "calendar": {
+                          "type": "integer",
+                          "title": "Calendar"
+                        },
+                        "modifier": {
+                          "type": "integer",
+                          "title": "Modifier"
+                        },
+                        "quality": {
+                          "type": "integer",
+                          "title": "Quality"
+                        },
+                        "dateval": {
+                          "type": "array",
+                          "title": "Values",
+                          "items": {
+                            "type": [
+                              "integer",
+                              "boolean"
+                            ]
+                          }
+                        },
+                        "text": {
+                          "type": "string",
+                          "title": "Text"
+                        },
+                        "sortval": {
+                          "type": "integer",
+                          "title": "Sort value"
+                        },
+                        "newyear": {
+                          "type": "integer",
+                          "title": "New year begins"
+                        }
+                      }
+                    }
+                  ],
+                  "title": "Date"
+                },
+                "first_name": {
+                  "type": "string",
+                  "title": "Given name"
+                },
+                "surname_list": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "title": "Surname",
+                    "properties": {
+                      "_class": {
+                        "enum": [
+                          "Surname"
+                        ]
+                      },
+                      "surname": {
+                        "type": "string",
+                        "title": "Surname"
+                      },
+                      "prefix": {
+                        "type": "string",
+                        "title": "Prefix"
+                      },
+                      "primary": {
+                        "type": "boolean",
+                        "title": "Primary"
+                      },
+                      "origintype": {
+                        "type": "object",
+                        "title": "Type",
+                        "properties": {
+                          "_class": {
+                            "enum": [
+                              "NameOriginType"
+                            ]
+                          },
+                          "string": {
+                            "type": "string",
+                            "title": "Type"
+                          }
+                        }
+                      },
+                      "connector": {
+                        "type": "string",
+                        "title": "Connector"
+                      }
+                    }
+                  },
+                  "title": "Surnames"
+                },
+                "suffix": {
+                  "type": "string",
+                  "title": "Suffix"
+                },
+                "title": {
+                  "type": "string",
+                  "title": "Title"
+                },
+                "type": {
+                  "type": "object",
+                  "title": "Type",
+                  "properties": {
+                    "_class": {
+                      "enum": [
+                        "NameType"
+                      ]
+                    },
+                    "string": {
+                      "type": "string",
+                      "title": "Type"
+                    }
+                  }
+                },
+                "group_as": {
+                  "type": "string",
+                  "title": "Group as"
+                },
+                "sort_as": {
+                  "type": "integer",
+                  "title": "Sort as"
+                },
+                "display_as": {
+                  "type": "integer",
+                  "title": "Display as"
+                },
+                "call": {
+                  "type": "string",
+                  "title": "Call name"
+                },
+                "nick": {
+                  "type": "string",
+                  "title": "Nick name"
+                },
+                "famnick": {
+                  "type": "string",
+                  "title": "Family nick name"
+                }
+              }
+            },
+            "title": "Alternate names"
+          },
+          "death_ref_index": {
+            "type": "integer",
+            "title": "Death reference index"
+          },
+          "birth_ref_index": {
+            "type": "integer",
+            "title": "Birth reference index"
+          },
+          "event_ref_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Event reference",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "EventRef"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "note_list": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  },
+                  "title": "Notes"
+                },
+                "attribute_list": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "title": "Attribute",
+                    "properties": {
+                      "_class": {
+                        "enum": [
+                          "Attribute"
+                        ]
+                      },
+                      "private": {
+                        "type": "boolean",
+                        "title": "Private"
+                      },
+                      "citation_list": {
+                        "type": "array",
+                        "title": "Citations",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 50
+                        }
+                      },
+                      "note_list": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 50
+                        },
+                        "title": "Notes"
+                      },
+                      "type": {
+                        "type": "object",
+                        "title": "Type",
+                        "properties": {
+                          "_class": {
+                            "enum": [
+                              "AttributeType"
+                            ]
+                          },
+                          "string": {
+                            "type": "string",
+                            "title": "Type"
+                          }
+                        }
+                      },
+                      "value": {
+                        "type": "string",
+                        "title": "Value"
+                      }
+                    }
+                  },
+                  "title": "Attributes"
+                },
+                "ref": {
+                  "type": "string",
+                  "maxLength": 50,
+                  "title": "Event"
+                },
+                "role": {
+                  "type": "object",
+                  "title": "Type",
+                  "properties": {
+                    "_class": {
+                      "enum": [
+                        "EventRoleType"
+                      ]
+                    },
+                    "string": {
+                      "type": "string",
+                      "title": "Type"
+                    }
+                  }
+                }
+              }
+            },
+            "title": "Event references"
+          },
+          "family_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Families"
+          },
+          "parent_family_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Parent families"
+          },
+          "media_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Media ref",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "MediaRef"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "citation_list": {
+                  "type": "array",
+                  "title": "Citations",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "note_list": {
+                  "type": "array",
+                  "title": "Notes",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "attribute_list": {
+                  "type": "array",
+                  "title": "Attributes",
+                  "items": {
+                    "type": "object",
+                    "title": "Attribute",
+                    "properties": {
+                      "_class": {
+                        "enum": [
+                          "Attribute"
+                        ]
+                      },
+                      "private": {
+                        "type": "boolean",
+                        "title": "Private"
+                      },
+                      "citation_list": {
+                        "type": "array",
+                        "title": "Citations",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 50
+                        }
+                      },
+                      "note_list": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 50
+                        },
+                        "title": "Notes"
+                      },
+                      "type": {
+                        "type": "object",
+                        "title": "Type",
+                        "properties": {
+                          "_class": {
+                            "enum": [
+                              "AttributeType"
+                            ]
+                          },
+                          "string": {
+                            "type": "string",
+                            "title": "Type"
+                          }
+                        }
+                      },
+                      "value": {
+                        "type": "string",
+                        "title": "Value"
+                      }
+                    }
+                  }
+                },
+                "ref": {
+                  "type": "string",
+                  "title": "Handle",
+                  "maxLength": 50
+                },
+                "rect": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      },
+                      "minItems": 4,
+                      "maxItems": 4
+                    }
+                  ],
+                  "title": "Region"
+                }
+              }
+            },
+            "title": "Media"
+          },
+          "address_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Address",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "Address"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "citation_list": {
+                  "type": "array",
+                  "title": "Citations",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "note_list": {
+                  "type": "array",
+                  "title": "Notes",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "date": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "title": "Date",
+                      "properties": {
+                        "_class": {
+                          "enum": [
+                            "Date"
+                          ]
+                        },
+                        "calendar": {
+                          "type": "integer",
+                          "title": "Calendar"
+                        },
+                        "modifier": {
+                          "type": "integer",
+                          "title": "Modifier"
+                        },
+                        "quality": {
+                          "type": "integer",
+                          "title": "Quality"
+                        },
+                        "dateval": {
+                          "type": "array",
+                          "title": "Values",
+                          "items": {
+                            "type": [
+                              "integer",
+                              "boolean"
+                            ]
+                          }
+                        },
+                        "text": {
+                          "type": "string",
+                          "title": "Text"
+                        },
+                        "sortval": {
+                          "type": "integer",
+                          "title": "Sort value"
+                        },
+                        "newyear": {
+                          "type": "integer",
+                          "title": "New year begins"
+                        }
+                      }
+                    }
+                  ],
+                  "title": "Date"
+                },
+                "street": {
+                  "type": "string",
+                  "title": "Street"
+                },
+                "locality": {
+                  "type": "string",
+                  "title": "Locality"
+                },
+                "city": {
+                  "type": "string",
+                  "title": "City"
+                },
+                "county": {
+                  "type": "string",
+                  "title": "County"
+                },
+                "state": {
+                  "type": "string",
+                  "title": "State"
+                },
+                "country": {
+                  "type": "string",
+                  "title": "Country"
+                },
+                "postal": {
+                  "type": "string",
+                  "title": "Postal Code"
+                },
+                "phone": {
+                  "type": "string",
+                  "title": "Phone"
+                }
+              }
+            },
+            "title": "Addresses"
+          },
+          "attribute_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Attribute",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "Attribute"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "citation_list": {
+                  "type": "array",
+                  "title": "Citations",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "note_list": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  },
+                  "title": "Notes"
+                },
+                "type": {
+                  "type": "object",
+                  "title": "Type",
+                  "properties": {
+                    "_class": {
+                      "enum": [
+                        "AttributeType"
+                      ]
+                    },
+                    "string": {
+                      "type": "string",
+                      "title": "Type"
+                    }
+                  }
+                },
+                "value": {
+                  "type": "string",
+                  "title": "Value"
+                }
+              }
+            },
+            "title": "Attributes"
+          },
+          "urls": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Url",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "Url"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "path": {
+                  "type": "string",
+                  "title": "Path"
+                },
+                "desc": {
+                  "type": "string",
+                  "title": "Description"
+                },
+                "type": {
+                  "type": "object",
+                  "title": "Type",
+                  "properties": {
+                    "_class": {
+                      "enum": [
+                        "UrlType"
+                      ]
+                    },
+                    "string": {
+                      "type": "string",
+                      "title": "Type"
+                    }
+                  }
+                }
+              }
+            },
+            "title": "Urls"
+          },
+          "lds_ord_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "LDS Ordinance",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "LdsOrd"
+                  ]
+                },
+                "citation_list": {
+                  "type": "array",
+                  "title": "Citations",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "note_list": {
+                  "type": "array",
+                  "title": "Notes",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "date": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "title": "Date",
+                      "properties": {
+                        "_class": {
+                          "enum": [
+                            "Date"
+                          ]
+                        },
+                        "calendar": {
+                          "type": "integer",
+                          "title": "Calendar"
+                        },
+                        "modifier": {
+                          "type": "integer",
+                          "title": "Modifier"
+                        },
+                        "quality": {
+                          "type": "integer",
+                          "title": "Quality"
+                        },
+                        "dateval": {
+                          "type": "array",
+                          "title": "Values",
+                          "items": {
+                            "type": [
+                              "integer",
+                              "boolean"
+                            ]
+                          }
+                        },
+                        "text": {
+                          "type": "string",
+                          "title": "Text"
+                        },
+                        "sortval": {
+                          "type": "integer",
+                          "title": "Sort value"
+                        },
+                        "newyear": {
+                          "type": "integer",
+                          "title": "New year begins"
+                        }
+                      }
+                    }
+                  ],
+                  "title": "Date"
+                },
+                "type": {
+                  "type": "integer",
+                  "title": "Type"
+                },
+                "place": {
+                  "type": "string",
+                  "title": "Place"
+                },
+                "famc": {
+                  "type": [
+                    "null",
+                    "string"
+                  ],
+                  "title": "Family"
+                },
+                "temple": {
+                  "type": "string",
+                  "title": "Temple"
+                },
+                "status": {
+                  "type": "integer",
+                  "title": "Status"
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                }
+              }
+            },
+            "title": "LDS ordinances"
+          },
+          "citation_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Citations"
+          },
+          "note_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Notes"
+          },
+          "change": {
+            "type": "integer",
+            "title": "Last changed"
+          },
+          "tag_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Tags"
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private"
+          },
+          "person_ref_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Person ref",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "PersonRef"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "citation_list": {
+                  "type": "array",
+                  "title": "Citations",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "note_list": {
+                  "type": "array",
+                  "title": "Notes",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "ref": {
+                  "type": "string",
+                  "title": "Handle",
+                  "maxLength": 50
+                },
+                "rel": {
+                  "type": "string",
+                  "title": "Association"
+                }
+              }
+            },
+            "title": "Person references"
+          }
+        }
+      },
+      "inherit_mixins": [
+        "CitationBase",
+        "NoteBase",
+        "AttributeBase",
+        "MediaBase",
+        "AddressBase",
+        "UrlBase",
+        "LdsOrdBase",
+        "TagBase"
+      ]
+    },
+    "Family": {
+      "fields": {
+        "type": "object",
+        "title": "Family",
+        "properties": {
+          "_class": {
+            "enum": [
+              "Family"
+            ]
+          },
+          "handle": {
+            "type": "string",
+            "maxLength": 50,
+            "title": "Handle"
+          },
+          "gramps_id": {
+            "type": "string",
+            "title": "Gramps ID"
+          },
+          "father_handle": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 50,
+            "title": "Father"
+          },
+          "mother_handle": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 50,
+            "title": "Mother"
+          },
+          "child_ref_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Child Reference",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "ChildRef"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "citation_list": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  },
+                  "title": "Citations"
+                },
+                "note_list": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  },
+                  "title": "Notes"
+                },
+                "ref": {
+                  "type": "string",
+                  "maxLength": 50,
+                  "title": "Handle"
+                },
+                "frel": {
+                  "type": "object",
+                  "title": "Type",
+                  "properties": {
+                    "_class": {
+                      "enum": [
+                        "ChildRefType"
+                      ]
+                    },
+                    "string": {
+                      "type": "string",
+                      "title": "Type"
+                    }
+                  }
+                },
+                "mrel": {
+                  "type": "object",
+                  "title": "Type",
+                  "properties": {
+                    "_class": {
+                      "enum": [
+                        "ChildRefType"
+                      ]
+                    },
+                    "string": {
+                      "type": "string",
+                      "title": "Type"
+                    }
+                  }
+                }
+              }
+            },
+            "title": "Children"
+          },
+          "type": {
+            "type": "object",
+            "title": "Type",
+            "properties": {
+              "_class": {
+                "enum": [
+                  "FamilyRelType"
+                ]
+              },
+              "string": {
+                "type": "string",
+                "title": "Type"
+              }
+            }
+          },
+          "event_ref_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Event reference",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "EventRef"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "note_list": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  },
+                  "title": "Notes"
+                },
+                "attribute_list": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "title": "Attribute",
+                    "properties": {
+                      "_class": {
+                        "enum": [
+                          "Attribute"
+                        ]
+                      },
+                      "private": {
+                        "type": "boolean",
+                        "title": "Private"
+                      },
+                      "citation_list": {
+                        "type": "array",
+                        "title": "Citations",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 50
+                        }
+                      },
+                      "note_list": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 50
+                        },
+                        "title": "Notes"
+                      },
+                      "type": {
+                        "type": "object",
+                        "title": "Type",
+                        "properties": {
+                          "_class": {
+                            "enum": [
+                              "AttributeType"
+                            ]
+                          },
+                          "string": {
+                            "type": "string",
+                            "title": "Type"
+                          }
+                        }
+                      },
+                      "value": {
+                        "type": "string",
+                        "title": "Value"
+                      }
+                    }
+                  },
+                  "title": "Attributes"
+                },
+                "ref": {
+                  "type": "string",
+                  "maxLength": 50,
+                  "title": "Event"
+                },
+                "role": {
+                  "type": "object",
+                  "title": "Type",
+                  "properties": {
+                    "_class": {
+                      "enum": [
+                        "EventRoleType"
+                      ]
+                    },
+                    "string": {
+                      "type": "string",
+                      "title": "Type"
+                    }
+                  }
+                }
+              }
+            },
+            "title": "Events"
+          },
+          "media_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Media ref",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "MediaRef"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "citation_list": {
+                  "type": "array",
+                  "title": "Citations",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "note_list": {
+                  "type": "array",
+                  "title": "Notes",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "attribute_list": {
+                  "type": "array",
+                  "title": "Attributes",
+                  "items": {
+                    "type": "object",
+                    "title": "Attribute",
+                    "properties": {
+                      "_class": {
+                        "enum": [
+                          "Attribute"
+                        ]
+                      },
+                      "private": {
+                        "type": "boolean",
+                        "title": "Private"
+                      },
+                      "citation_list": {
+                        "type": "array",
+                        "title": "Citations",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 50
+                        }
+                      },
+                      "note_list": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 50
+                        },
+                        "title": "Notes"
+                      },
+                      "type": {
+                        "type": "object",
+                        "title": "Type",
+                        "properties": {
+                          "_class": {
+                            "enum": [
+                              "AttributeType"
+                            ]
+                          },
+                          "string": {
+                            "type": "string",
+                            "title": "Type"
+                          }
+                        }
+                      },
+                      "value": {
+                        "type": "string",
+                        "title": "Value"
+                      }
+                    }
+                  }
+                },
+                "ref": {
+                  "type": "string",
+                  "title": "Handle",
+                  "maxLength": 50
+                },
+                "rect": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      },
+                      "minItems": 4,
+                      "maxItems": 4
+                    }
+                  ],
+                  "title": "Region"
+                }
+              }
+            },
+            "title": "Media"
+          },
+          "attribute_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Attribute",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "Attribute"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "citation_list": {
+                  "type": "array",
+                  "title": "Citations",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "note_list": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  },
+                  "title": "Notes"
+                },
+                "type": {
+                  "type": "object",
+                  "title": "Type",
+                  "properties": {
+                    "_class": {
+                      "enum": [
+                        "AttributeType"
+                      ]
+                    },
+                    "string": {
+                      "type": "string",
+                      "title": "Type"
+                    }
+                  }
+                },
+                "value": {
+                  "type": "string",
+                  "title": "Value"
+                }
+              }
+            },
+            "title": "Attributes"
+          },
+          "lds_ord_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "LDS Ordinance",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "LdsOrd"
+                  ]
+                },
+                "citation_list": {
+                  "type": "array",
+                  "title": "Citations",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "note_list": {
+                  "type": "array",
+                  "title": "Notes",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "date": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "title": "Date",
+                      "properties": {
+                        "_class": {
+                          "enum": [
+                            "Date"
+                          ]
+                        },
+                        "calendar": {
+                          "type": "integer",
+                          "title": "Calendar"
+                        },
+                        "modifier": {
+                          "type": "integer",
+                          "title": "Modifier"
+                        },
+                        "quality": {
+                          "type": "integer",
+                          "title": "Quality"
+                        },
+                        "dateval": {
+                          "type": "array",
+                          "title": "Values",
+                          "items": {
+                            "type": [
+                              "integer",
+                              "boolean"
+                            ]
+                          }
+                        },
+                        "text": {
+                          "type": "string",
+                          "title": "Text"
+                        },
+                        "sortval": {
+                          "type": "integer",
+                          "title": "Sort value"
+                        },
+                        "newyear": {
+                          "type": "integer",
+                          "title": "New year begins"
+                        }
+                      }
+                    }
+                  ],
+                  "title": "Date"
+                },
+                "type": {
+                  "type": "integer",
+                  "title": "Type"
+                },
+                "place": {
+                  "type": "string",
+                  "title": "Place"
+                },
+                "famc": {
+                  "type": [
+                    "null",
+                    "string"
+                  ],
+                  "title": "Family"
+                },
+                "temple": {
+                  "type": "string",
+                  "title": "Temple"
+                },
+                "status": {
+                  "type": "integer",
+                  "title": "Status"
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                }
+              }
+            },
+            "title": "LDS ordinances"
+          },
+          "citation_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Citations"
+          },
+          "note_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Notes"
+          },
+          "change": {
+            "type": "integer",
+            "title": "Last changed"
+          },
+          "tag_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Tags"
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private"
+          }
+        }
+      },
+      "inherit_mixins": [
+        "CitationBase",
+        "NoteBase",
+        "MediaBase",
+        "AttributeBase",
+        "LdsOrdBase",
+        "TagBase"
+      ]
+    },
+    "Event": {
+      "fields": {
+        "type": "object",
+        "title": "Event",
+        "properties": {
+          "_class": {
+            "enum": [
+              "Event"
+            ]
+          },
+          "handle": {
+            "type": "string",
+            "maxLength": 50,
+            "title": "Handle"
+          },
+          "gramps_id": {
+            "type": "string",
+            "title": "Gramps ID"
+          },
+          "type": {
+            "type": "object",
+            "title": "Type",
+            "properties": {
+              "_class": {
+                "enum": [
+                  "EventType"
+                ]
+              },
+              "string": {
+                "type": "string",
+                "title": "Type"
+              }
+            }
+          },
+          "date": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "title": "Date",
+                "properties": {
+                  "_class": {
+                    "enum": [
+                      "Date"
+                    ]
+                  },
+                  "calendar": {
+                    "type": "integer",
+                    "title": "Calendar"
+                  },
+                  "modifier": {
+                    "type": "integer",
+                    "title": "Modifier"
+                  },
+                  "quality": {
+                    "type": "integer",
+                    "title": "Quality"
+                  },
+                  "dateval": {
+                    "type": "array",
+                    "title": "Values",
+                    "items": {
+                      "type": [
+                        "integer",
+                        "boolean"
+                      ]
+                    }
+                  },
+                  "text": {
+                    "type": "string",
+                    "title": "Text"
+                  },
+                  "sortval": {
+                    "type": "integer",
+                    "title": "Sort value"
+                  },
+                  "newyear": {
+                    "type": "integer",
+                    "title": "New year begins"
+                  }
+                }
+              }
+            ],
+            "title": "Date"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "place": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 50,
+            "title": "Place"
+          },
+          "citation_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Citations"
+          },
+          "note_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Notes"
+          },
+          "media_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Media ref",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "MediaRef"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "citation_list": {
+                  "type": "array",
+                  "title": "Citations",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "note_list": {
+                  "type": "array",
+                  "title": "Notes",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "attribute_list": {
+                  "type": "array",
+                  "title": "Attributes",
+                  "items": {
+                    "type": "object",
+                    "title": "Attribute",
+                    "properties": {
+                      "_class": {
+                        "enum": [
+                          "Attribute"
+                        ]
+                      },
+                      "private": {
+                        "type": "boolean",
+                        "title": "Private"
+                      },
+                      "citation_list": {
+                        "type": "array",
+                        "title": "Citations",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 50
+                        }
+                      },
+                      "note_list": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 50
+                        },
+                        "title": "Notes"
+                      },
+                      "type": {
+                        "type": "object",
+                        "title": "Type",
+                        "properties": {
+                          "_class": {
+                            "enum": [
+                              "AttributeType"
+                            ]
+                          },
+                          "string": {
+                            "type": "string",
+                            "title": "Type"
+                          }
+                        }
+                      },
+                      "value": {
+                        "type": "string",
+                        "title": "Value"
+                      }
+                    }
+                  }
+                },
+                "ref": {
+                  "type": "string",
+                  "title": "Handle",
+                  "maxLength": 50
+                },
+                "rect": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      },
+                      "minItems": 4,
+                      "maxItems": 4
+                    }
+                  ],
+                  "title": "Region"
+                }
+              }
+            },
+            "title": "Media"
+          },
+          "attribute_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Attribute",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "Attribute"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "citation_list": {
+                  "type": "array",
+                  "title": "Citations",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "note_list": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  },
+                  "title": "Notes"
+                },
+                "type": {
+                  "type": "object",
+                  "title": "Type",
+                  "properties": {
+                    "_class": {
+                      "enum": [
+                        "AttributeType"
+                      ]
+                    },
+                    "string": {
+                      "type": "string",
+                      "title": "Type"
+                    }
+                  }
+                },
+                "value": {
+                  "type": "string",
+                  "title": "Value"
+                }
+              }
+            },
+            "title": "Media"
+          },
+          "change": {
+            "type": "integer",
+            "title": "Last changed"
+          },
+          "tag_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Tags"
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private"
+          }
+        }
+      },
+      "inherit_mixins": [
+        "CitationBase",
+        "NoteBase",
+        "MediaBase",
+        "AttributeBase",
+        "TagBase"
+      ]
+    },
+    "Place": {
+      "fields": {
+        "type": "object",
+        "title": "Place",
+        "properties": {
+          "_class": {
+            "enum": [
+              "Place"
+            ]
+          },
+          "handle": {
+            "type": "string",
+            "maxLength": 50,
+            "title": "Handle"
+          },
+          "gramps_id": {
+            "type": "string",
+            "title": "Gramps ID"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "long": {
+            "type": "string",
+            "title": "Longitude"
+          },
+          "lat": {
+            "type": "string",
+            "title": "Latitude"
+          },
+          "placeref_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Place ref",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "PlaceRef"
+                  ]
+                },
+                "ref": {
+                  "type": "string",
+                  "title": "Handle",
+                  "maxLength": 50
+                },
+                "date": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "title": "Date",
+                      "properties": {
+                        "_class": {
+                          "enum": [
+                            "Date"
+                          ]
+                        },
+                        "calendar": {
+                          "type": "integer",
+                          "title": "Calendar"
+                        },
+                        "modifier": {
+                          "type": "integer",
+                          "title": "Modifier"
+                        },
+                        "quality": {
+                          "type": "integer",
+                          "title": "Quality"
+                        },
+                        "dateval": {
+                          "type": "array",
+                          "title": "Values",
+                          "items": {
+                            "type": [
+                              "integer",
+                              "boolean"
+                            ]
+                          }
+                        },
+                        "text": {
+                          "type": "string",
+                          "title": "Text"
+                        },
+                        "sortval": {
+                          "type": "integer",
+                          "title": "Sort value"
+                        },
+                        "newyear": {
+                          "type": "integer",
+                          "title": "New year begins"
+                        }
+                      }
+                    }
+                  ],
+                  "title": "Date"
+                }
+              }
+            },
+            "title": "Places"
+          },
+          "name": {
+            "type": "object",
+            "title": "Place Name",
+            "properties": {
+              "_class": {
+                "enum": [
+                  "PlaceName"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "title": "Text"
+              },
+              "date": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "title": "Date",
+                    "properties": {
+                      "_class": {
+                        "enum": [
+                          "Date"
+                        ]
+                      },
+                      "calendar": {
+                        "type": "integer",
+                        "title": "Calendar"
+                      },
+                      "modifier": {
+                        "type": "integer",
+                        "title": "Modifier"
+                      },
+                      "quality": {
+                        "type": "integer",
+                        "title": "Quality"
+                      },
+                      "dateval": {
+                        "type": "array",
+                        "title": "Values",
+                        "items": {
+                          "type": [
+                            "integer",
+                            "boolean"
+                          ]
+                        }
+                      },
+                      "text": {
+                        "type": "string",
+                        "title": "Text"
+                      },
+                      "sortval": {
+                        "type": "integer",
+                        "title": "Sort value"
+                      },
+                      "newyear": {
+                        "type": "integer",
+                        "title": "New year begins"
+                      }
+                    }
+                  }
+                ],
+                "title": "Date"
+              },
+              "lang": {
+                "type": "string",
+                "title": "Language"
+              }
+            }
+          },
+          "alt_names": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Place Name",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "PlaceName"
+                  ]
+                },
+                "value": {
+                  "type": "string",
+                  "title": "Text"
+                },
+                "date": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "title": "Date",
+                      "properties": {
+                        "_class": {
+                          "enum": [
+                            "Date"
+                          ]
+                        },
+                        "calendar": {
+                          "type": "integer",
+                          "title": "Calendar"
+                        },
+                        "modifier": {
+                          "type": "integer",
+                          "title": "Modifier"
+                        },
+                        "quality": {
+                          "type": "integer",
+                          "title": "Quality"
+                        },
+                        "dateval": {
+                          "type": "array",
+                          "title": "Values",
+                          "items": {
+                            "type": [
+                              "integer",
+                              "boolean"
+                            ]
+                          }
+                        },
+                        "text": {
+                          "type": "string",
+                          "title": "Text"
+                        },
+                        "sortval": {
+                          "type": "integer",
+                          "title": "Sort value"
+                        },
+                        "newyear": {
+                          "type": "integer",
+                          "title": "New year begins"
+                        }
+                      }
+                    }
+                  ],
+                  "title": "Date"
+                },
+                "lang": {
+                  "type": "string",
+                  "title": "Language"
+                }
+              }
+            },
+            "title": "Alternate Names"
+          },
+          "place_type": {
+            "type": "object",
+            "title": "Type",
+            "properties": {
+              "_class": {
+                "enum": [
+                  "PlaceType"
+                ]
+              },
+              "string": {
+                "type": "string",
+                "title": "Type"
+              }
+            }
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "alt_loc": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Location",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "Location"
+                  ]
+                },
+                "street": {
+                  "type": "string",
+                  "title": "Street"
+                },
+                "locality": {
+                  "type": "string",
+                  "title": "Locality"
+                },
+                "city": {
+                  "type": "string",
+                  "title": "City"
+                },
+                "county": {
+                  "type": "string",
+                  "title": "County"
+                },
+                "state": {
+                  "type": "string",
+                  "title": "State"
+                },
+                "country": {
+                  "type": "string",
+                  "title": "Country"
+                },
+                "postal": {
+                  "type": "string",
+                  "title": "Postal Code"
+                },
+                "phone": {
+                  "type": "string",
+                  "title": "Phone"
+                },
+                "parish": {
+                  "type": "string",
+                  "title": "Parish"
+                }
+              }
+            },
+            "title": "Alternate Locations"
+          },
+          "urls": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Url",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "Url"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "path": {
+                  "type": "string",
+                  "title": "Path"
+                },
+                "desc": {
+                  "type": "string",
+                  "title": "Description"
+                },
+                "type": {
+                  "type": "object",
+                  "title": "Type",
+                  "properties": {
+                    "_class": {
+                      "enum": [
+                        "UrlType"
+                      ]
+                    },
+                    "string": {
+                      "type": "string",
+                      "title": "Type"
+                    }
+                  }
+                }
+              }
+            },
+            "title": "URLs"
+          },
+          "media_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Media ref",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "MediaRef"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "citation_list": {
+                  "type": "array",
+                  "title": "Citations",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "note_list": {
+                  "type": "array",
+                  "title": "Notes",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "attribute_list": {
+                  "type": "array",
+                  "title": "Attributes",
+                  "items": {
+                    "type": "object",
+                    "title": "Attribute",
+                    "properties": {
+                      "_class": {
+                        "enum": [
+                          "Attribute"
+                        ]
+                      },
+                      "private": {
+                        "type": "boolean",
+                        "title": "Private"
+                      },
+                      "citation_list": {
+                        "type": "array",
+                        "title": "Citations",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 50
+                        }
+                      },
+                      "note_list": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 50
+                        },
+                        "title": "Notes"
+                      },
+                      "type": {
+                        "type": "object",
+                        "title": "Type",
+                        "properties": {
+                          "_class": {
+                            "enum": [
+                              "AttributeType"
+                            ]
+                          },
+                          "string": {
+                            "type": "string",
+                            "title": "Type"
+                          }
+                        }
+                      },
+                      "value": {
+                        "type": "string",
+                        "title": "Value"
+                      }
+                    }
+                  }
+                },
+                "ref": {
+                  "type": "string",
+                  "title": "Handle",
+                  "maxLength": 50
+                },
+                "rect": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      },
+                      "minItems": 4,
+                      "maxItems": 4
+                    }
+                  ],
+                  "title": "Region"
+                }
+              }
+            },
+            "title": "Media"
+          },
+          "citation_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Citations"
+          },
+          "note_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Notes"
+          },
+          "change": {
+            "type": "integer",
+            "title": "Last changed"
+          },
+          "tag_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Tags"
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private"
+          }
+        }
+      },
+      "inherit_mixins": [
+        "CitationBase",
+        "NoteBase",
+        "MediaBase",
+        "UrlBase",
+        "TagBase"
+      ]
+    },
+    "Source": {
+      "fields": {
+        "type": "object",
+        "title": "Source",
+        "properties": {
+          "_class": {
+            "enum": [
+              "Source"
+            ]
+          },
+          "handle": {
+            "type": "string",
+            "maxLength": 50,
+            "title": "Handle"
+          },
+          "gramps_id": {
+            "type": "string",
+            "title": "Gramps ID"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "author": {
+            "type": "string",
+            "title": "Author"
+          },
+          "pubinfo": {
+            "type": "string",
+            "title": "Publication info"
+          },
+          "note_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Notes"
+          },
+          "media_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Media ref",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "MediaRef"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "citation_list": {
+                  "type": "array",
+                  "title": "Citations",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "note_list": {
+                  "type": "array",
+                  "title": "Notes",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "attribute_list": {
+                  "type": "array",
+                  "title": "Attributes",
+                  "items": {
+                    "type": "object",
+                    "title": "Attribute",
+                    "properties": {
+                      "_class": {
+                        "enum": [
+                          "Attribute"
+                        ]
+                      },
+                      "private": {
+                        "type": "boolean",
+                        "title": "Private"
+                      },
+                      "citation_list": {
+                        "type": "array",
+                        "title": "Citations",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 50
+                        }
+                      },
+                      "note_list": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 50
+                        },
+                        "title": "Notes"
+                      },
+                      "type": {
+                        "type": "object",
+                        "title": "Type",
+                        "properties": {
+                          "_class": {
+                            "enum": [
+                              "AttributeType"
+                            ]
+                          },
+                          "string": {
+                            "type": "string",
+                            "title": "Type"
+                          }
+                        }
+                      },
+                      "value": {
+                        "type": "string",
+                        "title": "Value"
+                      }
+                    }
+                  }
+                },
+                "ref": {
+                  "type": "string",
+                  "title": "Handle",
+                  "maxLength": 50
+                },
+                "rect": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      },
+                      "minItems": 4,
+                      "maxItems": 4
+                    }
+                  ],
+                  "title": "Region"
+                }
+              }
+            },
+            "title": "Media"
+          },
+          "abbrev": {
+            "type": "string",
+            "title": "Abbreviation"
+          },
+          "change": {
+            "type": "integer",
+            "title": "Last changed"
+          },
+          "attribute_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Attribute",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "SrcAttribute"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "type": {
+                  "type": "object",
+                  "title": "Type",
+                  "properties": {
+                    "_class": {
+                      "enum": [
+                        "SrcAttributeType"
+                      ]
+                    },
+                    "string": {
+                      "type": "string",
+                      "title": "Type"
+                    }
+                  }
+                },
+                "value": {
+                  "type": "string",
+                  "title": "Value"
+                }
+              }
+            },
+            "title": "Source Attributes"
+          },
+          "reporef_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Repository ref",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "RepoRef"
+                  ]
+                },
+                "note_list": {
+                  "type": "array",
+                  "title": "Notes",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "ref": {
+                  "type": "string",
+                  "title": "Handle",
+                  "maxLength": 50
+                },
+                "call_number": {
+                  "type": "string",
+                  "title": "Call Number"
+                },
+                "media_type": {
+                  "type": "object",
+                  "title": "Type",
+                  "properties": {
+                    "_class": {
+                      "enum": [
+                        "SourceMediaType"
+                      ]
+                    },
+                    "string": {
+                      "type": "string",
+                      "title": "Type"
+                    }
+                  }
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                }
+              }
+            },
+            "title": "Repositories"
+          },
+          "tag_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Tags"
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private"
+          }
+        }
+      },
+      "inherit_mixins": [
+        "MediaBase",
+        "NoteBase",
+        "TagBase"
+      ]
+    },
+    "Citation": {
+      "fields": {
+        "type": "object",
+        "title": "Citation",
+        "properties": {
+          "_class": {
+            "enum": [
+              "Citation"
+            ]
+          },
+          "handle": {
+            "type": "string",
+            "maxLength": 50,
+            "title": "Handle"
+          },
+          "gramps_id": {
+            "type": "string",
+            "title": "Gramps ID"
+          },
+          "date": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "title": "Date",
+                "properties": {
+                  "_class": {
+                    "enum": [
+                      "Date"
+                    ]
+                  },
+                  "calendar": {
+                    "type": "integer",
+                    "title": "Calendar"
+                  },
+                  "modifier": {
+                    "type": "integer",
+                    "title": "Modifier"
+                  },
+                  "quality": {
+                    "type": "integer",
+                    "title": "Quality"
+                  },
+                  "dateval": {
+                    "type": "array",
+                    "title": "Values",
+                    "items": {
+                      "type": [
+                        "integer",
+                        "boolean"
+                      ]
+                    }
+                  },
+                  "text": {
+                    "type": "string",
+                    "title": "Text"
+                  },
+                  "sortval": {
+                    "type": "integer",
+                    "title": "Sort value"
+                  },
+                  "newyear": {
+                    "type": "integer",
+                    "title": "New year begins"
+                  }
+                }
+              }
+            ],
+            "title": "Date"
+          },
+          "page": {
+            "type": "string",
+            "title": "Page"
+          },
+          "confidence": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4,
+            "title": "Confidence"
+          },
+          "source_handle": {
+            "type": "string",
+            "maxLength": 50,
+            "title": "Source"
+          },
+          "note_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Notes"
+          },
+          "media_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Media ref",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "MediaRef"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "citation_list": {
+                  "type": "array",
+                  "title": "Citations",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "note_list": {
+                  "type": "array",
+                  "title": "Notes",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "attribute_list": {
+                  "type": "array",
+                  "title": "Attributes",
+                  "items": {
+                    "type": "object",
+                    "title": "Attribute",
+                    "properties": {
+                      "_class": {
+                        "enum": [
+                          "Attribute"
+                        ]
+                      },
+                      "private": {
+                        "type": "boolean",
+                        "title": "Private"
+                      },
+                      "citation_list": {
+                        "type": "array",
+                        "title": "Citations",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 50
+                        }
+                      },
+                      "note_list": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 50
+                        },
+                        "title": "Notes"
+                      },
+                      "type": {
+                        "type": "object",
+                        "title": "Type",
+                        "properties": {
+                          "_class": {
+                            "enum": [
+                              "AttributeType"
+                            ]
+                          },
+                          "string": {
+                            "type": "string",
+                            "title": "Type"
+                          }
+                        }
+                      },
+                      "value": {
+                        "type": "string",
+                        "title": "Value"
+                      }
+                    }
+                  }
+                },
+                "ref": {
+                  "type": "string",
+                  "title": "Handle",
+                  "maxLength": 50
+                },
+                "rect": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      },
+                      "minItems": 4,
+                      "maxItems": 4
+                    }
+                  ],
+                  "title": "Region"
+                }
+              }
+            },
+            "title": "Media"
+          },
+          "attribute_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Attribute",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "SrcAttribute"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "type": {
+                  "type": "object",
+                  "title": "Type",
+                  "properties": {
+                    "_class": {
+                      "enum": [
+                        "SrcAttributeType"
+                      ]
+                    },
+                    "string": {
+                      "type": "string",
+                      "title": "Type"
+                    }
+                  }
+                },
+                "value": {
+                  "type": "string",
+                  "title": "Value"
+                }
+              }
+            },
+            "title": "Source Attributes"
+          },
+          "change": {
+            "type": "integer",
+            "title": "Last changed"
+          },
+          "tag_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Tags"
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private"
+          }
+        }
+      },
+      "inherit_mixins": [
+        "MediaBase",
+        "NoteBase",
+        "TagBase"
+      ]
+    },
+    "Repository": {
+      "fields": {
+        "type": "object",
+        "title": "Repository",
+        "properties": {
+          "_class": {
+            "enum": [
+              "Repository"
+            ]
+          },
+          "handle": {
+            "type": "string",
+            "maxLength": 50,
+            "title": "Handle"
+          },
+          "gramps_id": {
+            "type": "string",
+            "title": "Gramps ID"
+          },
+          "type": {
+            "type": "object",
+            "title": "Type",
+            "properties": {
+              "_class": {
+                "enum": [
+                  "RepositoryType"
+                ]
+              },
+              "string": {
+                "type": "string",
+                "title": "Type"
+              }
+            }
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "note_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Notes"
+          },
+          "address_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Address",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "Address"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "citation_list": {
+                  "type": "array",
+                  "title": "Citations",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "note_list": {
+                  "type": "array",
+                  "title": "Notes",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "date": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "title": "Date",
+                      "properties": {
+                        "_class": {
+                          "enum": [
+                            "Date"
+                          ]
+                        },
+                        "calendar": {
+                          "type": "integer",
+                          "title": "Calendar"
+                        },
+                        "modifier": {
+                          "type": "integer",
+                          "title": "Modifier"
+                        },
+                        "quality": {
+                          "type": "integer",
+                          "title": "Quality"
+                        },
+                        "dateval": {
+                          "type": "array",
+                          "title": "Values",
+                          "items": {
+                            "type": [
+                              "integer",
+                              "boolean"
+                            ]
+                          }
+                        },
+                        "text": {
+                          "type": "string",
+                          "title": "Text"
+                        },
+                        "sortval": {
+                          "type": "integer",
+                          "title": "Sort value"
+                        },
+                        "newyear": {
+                          "type": "integer",
+                          "title": "New year begins"
+                        }
+                      }
+                    }
+                  ],
+                  "title": "Date"
+                },
+                "street": {
+                  "type": "string",
+                  "title": "Street"
+                },
+                "locality": {
+                  "type": "string",
+                  "title": "Locality"
+                },
+                "city": {
+                  "type": "string",
+                  "title": "City"
+                },
+                "county": {
+                  "type": "string",
+                  "title": "County"
+                },
+                "state": {
+                  "type": "string",
+                  "title": "State"
+                },
+                "country": {
+                  "type": "string",
+                  "title": "Country"
+                },
+                "postal": {
+                  "type": "string",
+                  "title": "Postal Code"
+                },
+                "phone": {
+                  "type": "string",
+                  "title": "Phone"
+                }
+              }
+            },
+            "title": "Addresses"
+          },
+          "urls": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Url",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "Url"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "path": {
+                  "type": "string",
+                  "title": "Path"
+                },
+                "desc": {
+                  "type": "string",
+                  "title": "Description"
+                },
+                "type": {
+                  "type": "object",
+                  "title": "Type",
+                  "properties": {
+                    "_class": {
+                      "enum": [
+                        "UrlType"
+                      ]
+                    },
+                    "string": {
+                      "type": "string",
+                      "title": "Type"
+                    }
+                  }
+                }
+              }
+            },
+            "title": "URLs"
+          },
+          "change": {
+            "type": "integer",
+            "title": "Last changed"
+          },
+          "tag_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Tags"
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private"
+          }
+        }
+      },
+      "inherit_mixins": [
+        "NoteBase",
+        "AddressBase",
+        "UrlBase",
+        "TagBase"
+      ]
+    },
+    "Media": {
+      "fields": {
+        "type": "object",
+        "title": "Media",
+        "properties": {
+          "_class": {
+            "enum": [
+              "Media"
+            ]
+          },
+          "handle": {
+            "type": "string",
+            "maxLength": 50,
+            "title": "Handle"
+          },
+          "gramps_id": {
+            "type": "string",
+            "title": "Gramps ID"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "mime": {
+            "type": "string",
+            "title": "MIME"
+          },
+          "desc": {
+            "type": "string",
+            "title": "Description"
+          },
+          "checksum": {
+            "type": "string",
+            "title": "Checksum"
+          },
+          "attribute_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Attribute",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "Attribute"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "citation_list": {
+                  "type": "array",
+                  "title": "Citations",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "note_list": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  },
+                  "title": "Notes"
+                },
+                "type": {
+                  "type": "object",
+                  "title": "Type",
+                  "properties": {
+                    "_class": {
+                      "enum": [
+                        "AttributeType"
+                      ]
+                    },
+                    "string": {
+                      "type": "string",
+                      "title": "Type"
+                    }
+                  }
+                },
+                "value": {
+                  "type": "string",
+                  "title": "Value"
+                }
+              }
+            },
+            "title": "Attributes"
+          },
+          "citation_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Citations"
+          },
+          "note_list": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes"
+          },
+          "change": {
+            "type": "integer",
+            "title": "Last changed"
+          },
+          "date": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "title": "Date",
+                "properties": {
+                  "_class": {
+                    "enum": [
+                      "Date"
+                    ]
+                  },
+                  "calendar": {
+                    "type": "integer",
+                    "title": "Calendar"
+                  },
+                  "modifier": {
+                    "type": "integer",
+                    "title": "Modifier"
+                  },
+                  "quality": {
+                    "type": "integer",
+                    "title": "Quality"
+                  },
+                  "dateval": {
+                    "type": "array",
+                    "title": "Values",
+                    "items": {
+                      "type": [
+                        "integer",
+                        "boolean"
+                      ]
+                    }
+                  },
+                  "text": {
+                    "type": "string",
+                    "title": "Text"
+                  },
+                  "sortval": {
+                    "type": "integer",
+                    "title": "Sort value"
+                  },
+                  "newyear": {
+                    "type": "integer",
+                    "title": "New year begins"
+                  }
+                }
+              }
+            ],
+            "title": "Date"
+          },
+          "tag_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Tags"
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private"
+          }
+        }
+      },
+      "inherit_mixins": [
+        "CitationBase",
+        "NoteBase",
+        "AttributeBase",
+        "TagBase"
+      ]
+    },
+    "Note": {
+      "fields": {
+        "type": "object",
+        "title": "Note",
+        "properties": {
+          "_class": {
+            "enum": [
+              "Note"
+            ]
+          },
+          "handle": {
+            "type": "string",
+            "maxLength": 50,
+            "title": "Handle"
+          },
+          "gramps_id": {
+            "type": "string",
+            "title": "Gramps ID"
+          },
+          "text": {
+            "type": "object",
+            "title": "Styled Text",
+            "properties": {
+              "_class": {
+                "enum": [
+                  "StyledText"
+                ]
+              },
+              "string": {
+                "type": "string",
+                "title": "Text"
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "title": "Tag",
+                  "properties": {
+                    "_class": {
+                      "enum": [
+                        "StyledTextTag"
+                      ]
+                    },
+                    "name": {
+                      "type": "object",
+                      "title": "Type",
+                      "properties": {
+                        "_class": {
+                          "enum": [
+                            "StyledTextTagType"
+                          ]
+                        },
+                        "string": {
+                          "type": "string",
+                          "title": "Type"
+                        }
+                      }
+                    },
+                    "value": {
+                      "type": [
+                        "null",
+                        "string",
+                        "integer"
+                      ],
+                      "title": "Value"
+                    },
+                    "ranges": {
+                      "type": "array",
+                      "items": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer"
+                        },
+                        "minItems": 2,
+                        "maxItems": 2
+                      },
+                      "title": "Ranges"
+                    }
+                  }
+                },
+                "title": "Styled Text Tags"
+              }
+            }
+          },
+          "format": {
+            "type": "integer",
+            "title": "Format"
+          },
+          "type": {
+            "type": "object",
+            "title": "Type",
+            "properties": {
+              "_class": {
+                "enum": [
+                  "NoteType"
+                ]
+              },
+              "string": {
+                "type": "string",
+                "title": "Type"
+              }
+            }
+          },
+          "change": {
+            "type": "integer",
+            "title": "Last changed"
+          },
+          "tag_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Tags"
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private"
+          }
+        }
+      },
+      "inherit_mixins": [
+        "TagBase"
+      ]
+    },
+    "Tag": {
+      "fields": {
+        "type": "object",
+        "title": "Tag",
+        "properties": {
+          "_class": {
+            "enum": [
+              "Tag"
+            ]
+          },
+          "handle": {
+            "type": "string",
+            "maxLength": 50,
+            "title": "Handle"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "color": {
+            "type": "string",
+            "maxLength": 13,
+            "title": "Color"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0,
+            "title": "Priority"
+          },
+          "change": {
+            "type": "integer",
+            "title": "Last changed"
+          }
+        }
+      },
+      "inherit_mixins": []
+    }
+  },
+  "secondary_types": {
+    "EventRef": {
+      "fields": {
+        "type": "object",
+        "title": "Event reference",
+        "properties": {
+          "_class": {
+            "enum": [
+              "EventRef"
+            ]
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private"
+          },
+          "note_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Notes"
+          },
+          "attribute_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Attribute",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "Attribute"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "citation_list": {
+                  "type": "array",
+                  "title": "Citations",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "note_list": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  },
+                  "title": "Notes"
+                },
+                "type": {
+                  "type": "object",
+                  "title": "Type",
+                  "properties": {
+                    "_class": {
+                      "enum": [
+                        "AttributeType"
+                      ]
+                    },
+                    "string": {
+                      "type": "string",
+                      "title": "Type"
+                    }
+                  }
+                },
+                "value": {
+                  "type": "string",
+                  "title": "Value"
+                }
+              }
+            },
+            "title": "Attributes"
+          },
+          "ref": {
+            "type": "string",
+            "maxLength": 50,
+            "title": "Event"
+          },
+          "role": {
+            "type": "object",
+            "title": "Type",
+            "properties": {
+              "_class": {
+                "enum": [
+                  "EventRoleType"
+                ]
+              },
+              "string": {
+                "type": "string",
+                "title": "Type"
+              }
+            }
+          }
+        }
+      }
+    },
+    "ChildRef": {
+      "fields": {
+        "type": "object",
+        "title": "Child Reference",
+        "properties": {
+          "_class": {
+            "enum": [
+              "ChildRef"
+            ]
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private"
+          },
+          "citation_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Citations"
+          },
+          "note_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Notes"
+          },
+          "ref": {
+            "type": "string",
+            "maxLength": 50,
+            "title": "Handle"
+          },
+          "frel": {
+            "type": "object",
+            "title": "Type",
+            "properties": {
+              "_class": {
+                "enum": [
+                  "ChildRefType"
+                ]
+              },
+              "string": {
+                "type": "string",
+                "title": "Type"
+              }
+            }
+          },
+          "mrel": {
+            "type": "object",
+            "title": "Type",
+            "properties": {
+              "_class": {
+                "enum": [
+                  "ChildRefType"
+                ]
+              },
+              "string": {
+                "type": "string",
+                "title": "Type"
+              }
+            }
+          }
+        }
+      }
+    },
+    "PersonRef": {
+      "fields": {
+        "type": "object",
+        "title": "Person ref",
+        "properties": {
+          "_class": {
+            "enum": [
+              "PersonRef"
+            ]
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private"
+          },
+          "citation_list": {
+            "type": "array",
+            "title": "Citations",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            }
+          },
+          "note_list": {
+            "type": "array",
+            "title": "Notes",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            }
+          },
+          "ref": {
+            "type": "string",
+            "title": "Handle",
+            "maxLength": 50
+          },
+          "rel": {
+            "type": "string",
+            "title": "Association"
+          }
+        }
+      }
+    },
+    "PlaceRef": {
+      "fields": {
+        "type": "object",
+        "title": "Place ref",
+        "properties": {
+          "_class": {
+            "enum": [
+              "PlaceRef"
+            ]
+          },
+          "ref": {
+            "type": "string",
+            "title": "Handle",
+            "maxLength": 50
+          },
+          "date": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "title": "Date",
+                "properties": {
+                  "_class": {
+                    "enum": [
+                      "Date"
+                    ]
+                  },
+                  "calendar": {
+                    "type": "integer",
+                    "title": "Calendar"
+                  },
+                  "modifier": {
+                    "type": "integer",
+                    "title": "Modifier"
+                  },
+                  "quality": {
+                    "type": "integer",
+                    "title": "Quality"
+                  },
+                  "dateval": {
+                    "type": "array",
+                    "title": "Values",
+                    "items": {
+                      "type": [
+                        "integer",
+                        "boolean"
+                      ]
+                    }
+                  },
+                  "text": {
+                    "type": "string",
+                    "title": "Text"
+                  },
+                  "sortval": {
+                    "type": "integer",
+                    "title": "Sort value"
+                  },
+                  "newyear": {
+                    "type": "integer",
+                    "title": "New year begins"
+                  }
+                }
+              }
+            ],
+            "title": "Date"
+          }
+        }
+      }
+    },
+    "LdsOrd": {
+      "fields": {
+        "type": "object",
+        "title": "LDS Ordinance",
+        "properties": {
+          "_class": {
+            "enum": [
+              "LdsOrd"
+            ]
+          },
+          "citation_list": {
+            "type": "array",
+            "title": "Citations",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            }
+          },
+          "note_list": {
+            "type": "array",
+            "title": "Notes",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            }
+          },
+          "date": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "title": "Date",
+                "properties": {
+                  "_class": {
+                    "enum": [
+                      "Date"
+                    ]
+                  },
+                  "calendar": {
+                    "type": "integer",
+                    "title": "Calendar"
+                  },
+                  "modifier": {
+                    "type": "integer",
+                    "title": "Modifier"
+                  },
+                  "quality": {
+                    "type": "integer",
+                    "title": "Quality"
+                  },
+                  "dateval": {
+                    "type": "array",
+                    "title": "Values",
+                    "items": {
+                      "type": [
+                        "integer",
+                        "boolean"
+                      ]
+                    }
+                  },
+                  "text": {
+                    "type": "string",
+                    "title": "Text"
+                  },
+                  "sortval": {
+                    "type": "integer",
+                    "title": "Sort value"
+                  },
+                  "newyear": {
+                    "type": "integer",
+                    "title": "New year begins"
+                  }
+                }
+              }
+            ],
+            "title": "Date"
+          },
+          "type": {
+            "type": "integer",
+            "title": "Type"
+          },
+          "place": {
+            "type": "string",
+            "title": "Place"
+          },
+          "famc": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "title": "Family"
+          },
+          "temple": {
+            "type": "string",
+            "title": "Temple"
+          },
+          "status": {
+            "type": "integer",
+            "title": "Status"
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private"
+          }
+        }
+      }
+    },
+    "Address": {
+      "fields": {
+        "type": "object",
+        "title": "Address",
+        "properties": {
+          "_class": {
+            "enum": [
+              "Address"
+            ]
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private"
+          },
+          "citation_list": {
+            "type": "array",
+            "title": "Citations",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            }
+          },
+          "note_list": {
+            "type": "array",
+            "title": "Notes",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            }
+          },
+          "date": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "title": "Date",
+                "properties": {
+                  "_class": {
+                    "enum": [
+                      "Date"
+                    ]
+                  },
+                  "calendar": {
+                    "type": "integer",
+                    "title": "Calendar"
+                  },
+                  "modifier": {
+                    "type": "integer",
+                    "title": "Modifier"
+                  },
+                  "quality": {
+                    "type": "integer",
+                    "title": "Quality"
+                  },
+                  "dateval": {
+                    "type": "array",
+                    "title": "Values",
+                    "items": {
+                      "type": [
+                        "integer",
+                        "boolean"
+                      ]
+                    }
+                  },
+                  "text": {
+                    "type": "string",
+                    "title": "Text"
+                  },
+                  "sortval": {
+                    "type": "integer",
+                    "title": "Sort value"
+                  },
+                  "newyear": {
+                    "type": "integer",
+                    "title": "New year begins"
+                  }
+                }
+              }
+            ],
+            "title": "Date"
+          },
+          "street": {
+            "type": "string",
+            "title": "Street"
+          },
+          "locality": {
+            "type": "string",
+            "title": "Locality"
+          },
+          "city": {
+            "type": "string",
+            "title": "City"
+          },
+          "county": {
+            "type": "string",
+            "title": "County"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "country": {
+            "type": "string",
+            "title": "Country"
+          },
+          "postal": {
+            "type": "string",
+            "title": "Postal Code"
+          },
+          "phone": {
+            "type": "string",
+            "title": "Phone"
+          }
+        }
+      }
+    },
+    "Attribute": {
+      "fields": {
+        "type": "object",
+        "title": "Attribute",
+        "properties": {
+          "_class": {
+            "enum": [
+              "Attribute"
+            ]
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private"
+          },
+          "citation_list": {
+            "type": "array",
+            "title": "Citations",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            }
+          },
+          "note_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Notes"
+          },
+          "type": {
+            "type": "object",
+            "title": "Type",
+            "properties": {
+              "_class": {
+                "enum": [
+                  "AttributeType"
+                ]
+              },
+              "string": {
+                "type": "string",
+                "title": "Type"
+              }
+            }
+          },
+          "value": {
+            "type": "string",
+            "title": "Value"
+          }
+        }
+      }
+    },
+    "Url": {
+      "fields": {
+        "type": "object",
+        "title": "Url",
+        "properties": {
+          "_class": {
+            "enum": [
+              "Url"
+            ]
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "desc": {
+            "type": "string",
+            "title": "Description"
+          },
+          "type": {
+            "type": "object",
+            "title": "Type",
+            "properties": {
+              "_class": {
+                "enum": [
+                  "UrlType"
+                ]
+              },
+              "string": {
+                "type": "string",
+                "title": "Type"
+              }
+            }
+          }
+        }
+      }
+    },
+    "Name": {
+      "fields": {
+        "type": "object",
+        "title": "Name",
+        "properties": {
+          "_class": {
+            "enum": [
+              "Name"
+            ]
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private"
+          },
+          "citation_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Citations"
+          },
+          "note_list": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "title": "Notes"
+          },
+          "date": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "title": "Date",
+                "properties": {
+                  "_class": {
+                    "enum": [
+                      "Date"
+                    ]
+                  },
+                  "calendar": {
+                    "type": "integer",
+                    "title": "Calendar"
+                  },
+                  "modifier": {
+                    "type": "integer",
+                    "title": "Modifier"
+                  },
+                  "quality": {
+                    "type": "integer",
+                    "title": "Quality"
+                  },
+                  "dateval": {
+                    "type": "array",
+                    "title": "Values",
+                    "items": {
+                      "type": [
+                        "integer",
+                        "boolean"
+                      ]
+                    }
+                  },
+                  "text": {
+                    "type": "string",
+                    "title": "Text"
+                  },
+                  "sortval": {
+                    "type": "integer",
+                    "title": "Sort value"
+                  },
+                  "newyear": {
+                    "type": "integer",
+                    "title": "New year begins"
+                  }
+                }
+              }
+            ],
+            "title": "Date"
+          },
+          "first_name": {
+            "type": "string",
+            "title": "Given name"
+          },
+          "surname_list": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "Surname",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "Surname"
+                  ]
+                },
+                "surname": {
+                  "type": "string",
+                  "title": "Surname"
+                },
+                "prefix": {
+                  "type": "string",
+                  "title": "Prefix"
+                },
+                "primary": {
+                  "type": "boolean",
+                  "title": "Primary"
+                },
+                "origintype": {
+                  "type": "object",
+                  "title": "Type",
+                  "properties": {
+                    "_class": {
+                      "enum": [
+                        "NameOriginType"
+                      ]
+                    },
+                    "string": {
+                      "type": "string",
+                      "title": "Type"
+                    }
+                  }
+                },
+                "connector": {
+                  "type": "string",
+                  "title": "Connector"
+                }
+              }
+            },
+            "title": "Surnames"
+          },
+          "suffix": {
+            "type": "string",
+            "title": "Suffix"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "type": {
+            "type": "object",
+            "title": "Type",
+            "properties": {
+              "_class": {
+                "enum": [
+                  "NameType"
+                ]
+              },
+              "string": {
+                "type": "string",
+                "title": "Type"
+              }
+            }
+          },
+          "group_as": {
+            "type": "string",
+            "title": "Group as"
+          },
+          "sort_as": {
+            "type": "integer",
+            "title": "Sort as"
+          },
+          "display_as": {
+            "type": "integer",
+            "title": "Display as"
+          },
+          "call": {
+            "type": "string",
+            "title": "Call name"
+          },
+          "nick": {
+            "type": "string",
+            "title": "Nick name"
+          },
+          "famnick": {
+            "type": "string",
+            "title": "Family nick name"
+          }
+        }
+      }
+    },
+    "Surname": {
+      "fields": {
+        "type": "object",
+        "title": "Surname",
+        "properties": {
+          "_class": {
+            "enum": [
+              "Surname"
+            ]
+          },
+          "surname": {
+            "type": "string",
+            "title": "Surname"
+          },
+          "prefix": {
+            "type": "string",
+            "title": "Prefix"
+          },
+          "primary": {
+            "type": "boolean",
+            "title": "Primary"
+          },
+          "origintype": {
+            "type": "object",
+            "title": "Type",
+            "properties": {
+              "_class": {
+                "enum": [
+                  "NameOriginType"
+                ]
+              },
+              "string": {
+                "type": "string",
+                "title": "Type"
+              }
+            }
+          },
+          "connector": {
+            "type": "string",
+            "title": "Connector"
+          }
+        }
+      }
+    },
+    "Location": {
+      "fields": {
+        "type": "object",
+        "title": "Location",
+        "properties": {
+          "_class": {
+            "enum": [
+              "Location"
+            ]
+          },
+          "street": {
+            "type": "string",
+            "title": "Street"
+          },
+          "locality": {
+            "type": "string",
+            "title": "Locality"
+          },
+          "city": {
+            "type": "string",
+            "title": "City"
+          },
+          "county": {
+            "type": "string",
+            "title": "County"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "country": {
+            "type": "string",
+            "title": "Country"
+          },
+          "postal": {
+            "type": "string",
+            "title": "Postal Code"
+          },
+          "phone": {
+            "type": "string",
+            "title": "Phone"
+          },
+          "parish": {
+            "type": "string",
+            "title": "Parish"
+          }
+        }
+      }
+    },
+    "MediaRef": {
+      "fields": {
+        "type": "object",
+        "title": "Media ref",
+        "properties": {
+          "_class": {
+            "enum": [
+              "MediaRef"
+            ]
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private"
+          },
+          "citation_list": {
+            "type": "array",
+            "title": "Citations",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            }
+          },
+          "note_list": {
+            "type": "array",
+            "title": "Notes",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            }
+          },
+          "attribute_list": {
+            "type": "array",
+            "title": "Attributes",
+            "items": {
+              "type": "object",
+              "title": "Attribute",
+              "properties": {
+                "_class": {
+                  "enum": [
+                    "Attribute"
+                  ]
+                },
+                "private": {
+                  "type": "boolean",
+                  "title": "Private"
+                },
+                "citation_list": {
+                  "type": "array",
+                  "title": "Citations",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  }
+                },
+                "note_list": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 50
+                  },
+                  "title": "Notes"
+                },
+                "type": {
+                  "type": "object",
+                  "title": "Type",
+                  "properties": {
+                    "_class": {
+                      "enum": [
+                        "AttributeType"
+                      ]
+                    },
+                    "string": {
+                      "type": "string",
+                      "title": "Type"
+                    }
+                  }
+                },
+                "value": {
+                  "type": "string",
+                  "title": "Value"
+                }
+              }
+            }
+          },
+          "ref": {
+            "type": "string",
+            "title": "Handle",
+            "maxLength": 50
+          },
+          "rect": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                },
+                "minItems": 4,
+                "maxItems": 4
+              }
+            ],
+            "title": "Region"
+          }
+        }
+      }
+    },
+    "Tag": {
+      "fields": {
+        "type": "object",
+        "title": "Tag",
+        "properties": {
+          "_class": {
+            "enum": [
+              "Tag"
+            ]
+          },
+          "handle": {
+            "type": "string",
+            "maxLength": 50,
+            "title": "Handle"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "color": {
+            "type": "string",
+            "maxLength": 13,
+            "title": "Color"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0,
+            "title": "Priority"
+          },
+          "change": {
+            "type": "integer",
+            "title": "Last changed"
+          }
+        }
+      }
+    },
+    "RepoRef": {
+      "fields": {
+        "type": "object",
+        "title": "Repository ref",
+        "properties": {
+          "_class": {
+            "enum": [
+              "RepoRef"
+            ]
+          },
+          "note_list": {
+            "type": "array",
+            "title": "Notes",
+            "items": {
+              "type": "string",
+              "maxLength": 50
+            }
+          },
+          "ref": {
+            "type": "string",
+            "title": "Handle",
+            "maxLength": 50
+          },
+          "call_number": {
+            "type": "string",
+            "title": "Call Number"
+          },
+          "media_type": {
+            "type": "object",
+            "title": "Type",
+            "properties": {
+              "_class": {
+                "enum": [
+                  "SourceMediaType"
+                ]
+              },
+              "string": {
+                "type": "string",
+                "title": "Type"
+              }
+            }
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private"
+          }
+        }
+      }
+    }
+  },
+  "enum_types": {
+    "EventType": {
+      "values": [
+        11,
+        14,
+        9,
+        15,
+        16,
+        17,
+        12,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        0,
+        13,
+        25,
+        7,
+        8,
+        26,
+        27,
+        28,
+        6,
+        29,
+        31,
+        30,
+        1,
+        10,
+        5,
+        4,
+        3,
+        2,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        1,
+        0,
+        39,
+        40,
+        41,
+        42,
+        43,
+        -1,
+        44
+      ]
+    },
+    "EventRoleType": {
+      "values": [
+        4,
+        5,
+        3,
+        2,
+        0,
+        8,
+        6,
+        9,
+        1,
+        0,
+        1,
+        -1,
+        7
+      ]
+    },
+    "ChildRefType": {
+      "values": [
+        2,
+        1,
+        7,
+        5,
+        0,
+        1,
+        0,
+        4,
+        3,
+        6
+      ]
+    },
+    "NameType": {
+      "values": [
+        1,
+        2,
+        0,
+        3,
+        1,
+        0,
+        -1
+      ]
+    },
+    "AttributeType": {
+      "values": [
+        10,
+        9,
+        1,
+        8,
+        0,
+        2,
+        11,
+        3,
+        12,
+        4,
+        7,
+        5,
+        15,
+        1,
+        0,
+        6,
+        14,
+        -1,
+        13
+      ]
+    },
+    "UrlType": {
+      "values": [
+        0,
+        1,
+        1,
+        0,
+        -1,
+        4,
+        2,
+        3
+      ]
+    },
+    "NoteType": {
+      "values": [
+        6,
+        7,
+        5,
+        19,
+        22,
+        0,
+        10,
+        11,
+        9,
+        1,
+        24,
+        8,
+        26,
+        17,
+        18,
+        4,
+        20,
+        14,
+        1,
+        0,
+        15,
+        16,
+        23,
+        2,
+        12,
+        13,
+        21,
+        25,
+        3,
+        -1
+      ]
+    },
+    "SourceMediaType": {
+      "values": [
+        1,
+        2,
+        3,
+        0,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        1,
+        0,
+        12,
+        -1,
+        13
+      ]
+    },
+    "RepositoryType": {
+      "values": [
+        5,
+        4,
+        7,
+        2,
+        3,
+        8,
+        0,
+        1,
+        1,
+        0,
+        9,
+        -1,
+        6
+      ]
+    },
+    "PlaceType": {
+      "values": [
+        13,
+        19,
+        4,
+        1,
+        3,
+        0,
+        10,
+        12,
+        18,
+        17,
+        6,
+        14,
+        11,
+        20,
+        5,
+        1,
+        0,
+        8,
+        9,
+        2,
+        7,
+        15,
+        -1,
+        16
+      ]
+    },
+    "FamilyRelType": {
+      "values": [
+        2,
+        4,
+        0,
+        1,
+        0,
+        3,
+        1
+      ]
+    }
+  }
+}
