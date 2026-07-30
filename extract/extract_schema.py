@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
-"""Extract Gramps schema from the Python data model and emit schema.json.
+"""Extract Gramps schema from the Python data model and emit schema-{version}.json.
 
 Usage:
     PYTHONPATH=/path/to/gramps/repo python extract_schema.py
 
 This imports gramps.gen.lib from a local Gramps source clone and introspects
 the primary data classes (Person, Family, Event, Place, etc.) to produce a
-schema.json artifact describing the data model structure.
+schema-{version}.json artifact describing the data model structure.
 
 ⚠ WARNING: Only point PYTHONPATH at a trusted Gramps source checkout.
   The extractor imports and executes Python code from that path.
 
 If Gramps is not available, run with --mock to use built-in mock classes
 for testing or development.
+
+Options:
+    --version VERSION   Override the schema version string (default: auto-detect
+                        from Gramps source, or 5.2 if not available)
+    --output PATH       Write output to PATH (default: schemas/schema-{version}.json)
 """
 
 import argparse
@@ -25,6 +30,7 @@ import sys
 import types
 from pathlib import Path
 from collections import OrderedDict
+import re
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # ---- Primary types to extract ----
@@ -380,6 +386,49 @@ def try_import_gramps() -> Optional[types.ModuleType]:
         return None
 
 
+def detect_gramps_version() -> Optional[str]:
+    """Detect the Gramps version from the installed gramps package.
+
+    Tries in order:
+    1. import gramps.version and read VERSION or VERSION tuple
+    2. Parse gramps/version.py if available
+
+    Returns a major.minor string (e.g. "5.2") or None if detection fails.
+    """
+    try:
+        import gramps.version as gv
+
+        # Gramps has VERSION tuple like (5, 2, 0)
+        if hasattr(gv, "VERSION"):
+            v = gv.VERSION
+            if isinstance(v, (tuple, list)) and len(v) >= 2:
+                return f"{v[0]}.{v[1]}"
+        # Some versions have VERSION as a string
+        if hasattr(gv, "VERSION"):
+            v = str(gv.VERSION)
+            match = re.match(r"(\d+)\.(\d+)", v)
+            if match:
+                return f"{match.group(1)}.{match.group(2)}"
+    except (ImportError, AttributeError):
+        pass
+
+    # Try reading gramps/version.py directly
+    try:
+        import importlib.util
+
+        spec = importlib.util.find_spec("gramps.version")
+        if spec and spec.origin:
+            with open(spec.origin) as f:
+                content = f.read()
+            match = re.search(r"VERSION\s*=\s*\(?(\d+),\s*(\d+)", content)
+            if match:
+                return f"{match.group(1)}.{match.group(2)}"
+    except Exception:
+        pass
+
+    return None
+
+
 def extract_schema(gramps_lib: Any) -> Dict[str, Any]:
     """Extract schema from Gramps classes.
 
@@ -432,8 +481,8 @@ def main():
     )
     parser.add_argument(
         "--version",
-        default="5.2",
-        help="Schema version string to embed in the output (default: 5.2)",
+        default=None,
+        help="Schema version string to embed in the output (default: auto-detect from Gramps source)",
     )
     parser.add_argument(
         "--mock",
@@ -473,9 +522,12 @@ def main():
 
     schema = extract_schema(gramps_lib)
 
-    # Override version from --version flag if provided
-    if args.version:
-        schema["version"] = args.version
+    # Resolve version: auto-detect from Gramps source, or use --version flag
+    version = args.version
+    if version is None:
+        version = detect_gramps_version()
+    if version:
+        schema["version"] = version
 
     output_path = args.output
     try:
