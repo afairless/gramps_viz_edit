@@ -427,7 +427,7 @@ mod tests {
         };
         let (config, _, _) = build_config(&args).unwrap();
         // person_count is 0, generation should fail
-        let schema = Schema::new();
+        let schema = Schema::default();
         let adv_config = AdversarialConfig::default();
         let result = generate_random(&config, &adv_config, &schema);
         assert!(result.is_err());

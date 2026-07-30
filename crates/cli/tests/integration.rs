@@ -5,7 +5,7 @@ use tempfile::NamedTempFile;
 /// Integration test: generate a small valid family tree.
 #[test]
 fn generate_small_family_tree() {
-    let schema = typed_graph::Schema::new();
+    let schema = typed_graph::Schema::default();
     let config = typed_graph::generate::RandomConfig {
         person_count: 10,
         family_count: 5,
@@ -38,7 +38,7 @@ fn generate_small_family_tree() {
 /// Integration test: single person generation.
 #[test]
 fn generate_single_person() {
-    let schema = typed_graph::Schema::new();
+    let schema = typed_graph::Schema::default();
     let config = typed_graph::generate::RandomConfig {
         person_count: 1,
         family_count: 0,
@@ -69,7 +69,7 @@ fn generate_single_person() {
 /// Integration test: zero person count should fail gracefully.
 #[test]
 fn generate_zero_persons_fails() {
-    let schema = typed_graph::Schema::new();
+    let schema = typed_graph::Schema::default();
     let config = typed_graph::generate::RandomConfig {
         person_count: 0,
         family_count: 0,
@@ -95,7 +95,7 @@ fn generate_zero_persons_fails() {
 /// Integration test: adversarial generation produces valid graph.
 #[test]
 fn generate_with_adversarial_all_preserves_validity() {
-    let schema = typed_graph::Schema::new();
+    let schema = typed_graph::Schema::default();
     let config = typed_graph::generate::RandomConfig {
         person_count: 50,
         family_count: 25,
@@ -145,7 +145,7 @@ fn generate_with_adversarial_all_preserves_validity() {
 /// Integration test: serialize and validate roundtrip.
 #[test]
 fn generate_serialize_and_validate_roundtrip() {
-    let schema = typed_graph::Schema::new();
+    let schema = typed_graph::Schema::default();
     let config = typed_graph::generate::RandomConfig {
         person_count: 20,
         family_count: 10,
