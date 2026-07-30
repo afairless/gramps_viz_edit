@@ -69,6 +69,10 @@ pub struct GenerateArgs {
     /// Generate Tag nodes
     #[arg(long)]
     pub with_tags: bool,
+
+    /// Schema version to use (e.g., "5.1", "5.2"). Default: highest installed.
+    #[arg(long, default_value = "default")]
+    pub schema_version: String,
 }
 
 /// Run the generate command with the full five-stage pipeline.
@@ -119,7 +123,22 @@ pub fn run(args: GenerateArgs) -> Result<(), crate::error::CliError> {
 
     // Stage 5: Serialize
     let map = SerializationMap::new();
-    let writer = GraphXmlWriter::new(map);
+    // Resolve schema version: "default" → highest installed
+    let schema_version = if args.schema_version == "default" {
+        Schema::default_version().to_string()
+    } else {
+        // Validate that the requested version is available
+        if Schema::for_version(&args.schema_version).is_none() {
+            return Err(crate::error::CliError::ConfigError(format!(
+                "schema version {} is not available in this build.\n  Available versions: {}\n  Rebuild with: cargo build --features schema-{}",
+                args.schema_version,
+                Schema::available_versions().join(", "),
+                args.schema_version.replace('.', "-")
+            )));
+        }
+        args.schema_version.clone()
+    };
+    let writer = GraphXmlWriter::new(map, &schema_version);
     let file = std::fs::File::create(&output_path).map_err(|e| crate::error::CliError::Io {
         path: output_path.clone(),
         source: e,
@@ -330,6 +349,7 @@ mod tests {
             with_notes: false,
             with_media: false,
             with_tags: false,
+            schema_version: "default".to_string(),
         };
         let (config, adv_config, output) = build_config(&args).unwrap();
         assert_eq!(config.person_count, 50);
@@ -378,6 +398,7 @@ mod tests {
             with_notes: false,
             with_media: false,
             with_tags: false,
+            schema_version: "default".to_string(),
         };
         // build_config should succeed even with empty output (it's just a string)
         let result = build_config(&args);
@@ -400,6 +421,7 @@ mod tests {
             with_notes: false,
             with_media: false,
             with_tags: false,
+            schema_version: "default".to_string(),
         };
         let (config, _, _) = build_config(&args).unwrap();
         // person_count is 0, generation should fail
