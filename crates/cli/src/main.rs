@@ -7,6 +7,7 @@ use clap::Parser;
 use clap::Subcommand;
 use cli::commands::extract_schema;
 use cli::commands::generate::GenerateArgs;
+use cli::commands::schema::SchemaCommand;
 use cli::commands::validate::ValidateArgs;
 use cli::error::CliError;
 
@@ -26,6 +27,9 @@ enum Command {
     Validate(ValidateArgs),
     /// Extract the schema from a Gramps installation
     ExtractSchema(ExtractSchemaArgs),
+    /// List and download Gramps schemas
+    #[command(subcommand)]
+    Schema(SchemaCommand),
 }
 
 /// Arguments for the `extract-schema` command.
@@ -38,6 +42,7 @@ fn main() -> Result<(), CliError> {
         Command::Generate(args) => cli::commands::generate::run(args)?,
         Command::Validate(args) => cli::commands::validate::run(args)?,
         Command::ExtractSchema(args) => extract_schema::run(args)?,
+        Command::Schema(args) => cli::commands::schema::run(args)?,
     }
     Ok(())
 }

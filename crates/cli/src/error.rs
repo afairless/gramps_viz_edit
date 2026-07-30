@@ -20,6 +20,16 @@ pub enum CliError {
     SerializationFailed(output::SerializationError),
     /// Scenario file parse error.
     ScenarioError(crate::scenario::ScenarioError),
+    /// GitHub API unreachable or rate-limited.
+    GitHubApiError(String),
+    /// Git clone failed.
+    GitCloneFailed(String),
+    /// Schema extraction (Python) failed.
+    SchemaExtractionFailed(String),
+    /// Schema version not found in tag map.
+    SchemaDownloadError(String),
+    /// Python 3 not available.
+    PythonNotFound,
 }
 
 impl fmt::Display for CliError {
@@ -42,6 +52,21 @@ impl fmt::Display for CliError {
             }
             CliError::ScenarioError(e) => {
                 write!(f, "scenario error: {}", e)
+            }
+            CliError::GitHubApiError(msg) => {
+                write!(f, "GitHub API error: {}", msg)
+            }
+            CliError::GitCloneFailed(msg) => {
+                write!(f, "git clone failed: {}", msg)
+            }
+            CliError::SchemaExtractionFailed(msg) => {
+                write!(f, "schema extraction failed: {}", msg)
+            }
+            CliError::SchemaDownloadError(msg) => {
+                write!(f, "schema download error: {}", msg)
+            }
+            CliError::PythonNotFound => {
+                write!(f, "Python 3 not found. Install Python 3 or manually place a schema file.")
             }
         }
     }
