@@ -11,14 +11,18 @@ gramps_viz_edit/
 ├── Cargo.toml                    # Workspace root (resolver = "2")
 ├── schemas/
 │   ├── schema-5.2.json               # Canonical Gramps 5.2 schema (committed artifact)
+│   └── schema-5.1.json               # Gramps 5.1 schema in JSON Schema format (auto-converted)
 ├── extract/
 │   └── extract_schema.py         # Python extractor (reads Gramps Python classes)
 ├── crates/
 │   ├── typed-graph/              # Core: graph model, schema codegen, validation, generation
-│   │   ├── build.rs              # Reads schema-5.2.json → generates Rust types at compile time
+│   │   ├── build.rs              # Reads schema files → generates Rust types at compile time
+│   │   ├── build/
+│   │   │   └── enum_constants_5_1.json  # Enum integer→name lookup tables for 5.1 conversion
 │   │   └── src/
 │   │       ├── lib.rs            # Re-exports, unit tests
 │   │       ├── schema.rs         # include!($OUT_DIR/generated_schema.rs)
+│   │       ├── schema_convert.rs # JSON Schema → flat format converter + unit tests
 │   │       ├── graph.rs          # Graph struct, NodeKind, ValidationState, GraphError
 │   │       ├── validate.rs       # Structural + referential validation
 │   │       ├── date.rs           # DateValue convenience impls (new, new_ymd, display_text, is_valid)
@@ -45,8 +49,11 @@ gramps_viz_edit/
 │       │       ├── validate.rs   # Minimal XML structure check
 │       │       └── extract_schema.rs # Stub
 │       └── tests/
-│           ├── e2e.rs            # Subprocess-based E2E tests
+│           ├── e2e.rs              # Subprocess-based E2E tests
 │           └── integration.rs    # Integration tests
+│   ├── typed-graph/tests/
+│       ├── schema_convert_tests.rs   # Integration tests for schema_convert via #[path] include
+│       └── merged_schema.rs          # Integration tests for merged 5.1+5.2 schema
 ```
 
 ## Key Design Rules
@@ -58,6 +65,39 @@ gramps_viz_edit/
 - `typed-graph/build.rs` reads all enabled versioned schema files at compile time and generates `$OUT_DIR/generated_schema.rs` containing: `Node` enum, `Edge` enum, all `XxxData` structs, secondary/embedded ref structs, enum types, and `Schema` runtime metadata.
 - `typed-graph/src/schema.rs` includes the generated code via `include!`.
 - To update the schema: run `gramps-gen schema download <version>` or manually place `schema-{version}.json` and rebuild with the corresponding feature flag.
+
+#### Schema Formats
+
+Two formats are supported:
+
+| Format | Example file | Key indicator |
+|---|---|---|
+| **Custom flat** | schema-5.2.json | Fields have explicit `type`, `kind`, `required`, `target`, `schema` keys |
+| **JSON Schema** | schema-5.1.json | Fields nested under `properties` in a `{type: "object", title: "...", properties: {...}}` envelope |
+
+`schema_convert.rs` detects and automatically converts JSON Schema format to flat
+format at build time (in memory, never modifying the file on disk). Enum integer
+values are mapped to names using `build/enum_constants_5_1.json`. The extraction
+script produces JSON Schema format for Gramps 5.1 and prints a warning directing
+users to rely on the build-time converter.
+
+#### Version-specific field helpers
+
+When multiple schema versions are merged, fields that exist in only one version
+become `Option<T>`. Helper functions in `graph.rs` abstract over the version-
+specific wrapping:
+
+| Helper | Purpose |
+|---|---|
+| `into_gender_field` / `gender_value` | Gender: `i32` in 5.2, `Option<i32>` in merged |
+| `into_event_type_field` / `event_type_eq` | EventType: enum in 5.2, `Option<enum>` in merged |
+| `into_source_handle_field` / `get_source_handle` / `is_source_handle_empty` | source_handle: `String` in 5.2, `Option<String>` in merged |
+| `make_event_ref` / `make_child_ref` | Ref structs with version-specific optional fields |
+| `edge_place_place_ref` | Edge variants with/without metadata |
+
+These helpers use `#[cfg(feature = "schema-5-1")]` to select the right variant
+at compile time. Generator and builder code **must** use these helpers instead
+of direct struct field access to support merged schemas.
 
 ### 2. Graph model invariants
 

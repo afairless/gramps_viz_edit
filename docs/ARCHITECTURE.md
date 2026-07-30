@@ -168,7 +168,35 @@ Each version also gets its own `static LazyLock<Schema>` instance with
 version-specific metadata (required fields, cardinality constraints,
 valid enum values, field availability).
 
-**Generated code includesonstraints,\nvalid enum values, field availability).\n\n**Generated code includes**:", {"oldText": "7. **`Schema` struct**: Runtime metadata with `version`, `required_fields: HashMap<&str, Vec<&str>>`, `cardinality_constraints: HashMap<&str, (Option<u32>, Option<u32>)>`", "newText": "7. **`Schema` struct**: Runtime metadata with `version`, `required_fields`, `cardinality_constraints`, `valid_enum_values`, and `field_availability`\n8. **`Schema::available_versions()`**: Returns all compiled-in versions\n9. **`Schema::default_version()`**: Returns the highest compiled-in version\n10. **`Schema::for_version(version)`**: Returns the `Schema` for a specific version"}]
+### Two Schema Formats
+
+The project supports two schema JSON formats:
+
+| Format | Used by | Characteristics |
+|---|---|---|
+| **Custom flat** | schema-5.2.json | Fields explicitly typed with `type`, `kind`, `required`, `target`, `schema`, `items`, `edges` keys directly on each field entry. This is the canonical format that drives codegen. |
+| **JSON Schema** | schema-5.1.json (legacy) | Fields wrapped in a `{"type": "object", "title": "...", "properties": {...}}` envelope. Field types inferred from JSON Schema keywords (`string`, `integer`, `array`, `object`). Enum values are integers, not strings. |
+
+#### Build-time Format Conversion (`schema_convert.rs`)
+
+When `build.rs` detects a JSON Schema format file (by checking for a `"properties"`
+key inside the `fields` object), it calls `schema_convert::convert()` to normalize
+it to flat format **in memory**. The on-disk file is never modified.
+
+The converter (`crates/typed-graph/src/schema_convert.rs`) handles:
+
+- **Primary/secondary type conversion**: Extracts `properties` → new `fields`,
+  maps JSON Schema types to flat types, infers `kind` (handle/handle_ref),
+  determines `required` via `oneOf` null-wrapper heuristics.
+- **Enum type conversion**: Maps integer values to string names using
+  `build/enum_constants_5_1.json` lookup tables.
+- **Date normalization**: Converts 5.1's `Date` object (with `dateval` array)
+  to 5.2-compatible `DateValue` with `year`/`month`/`day` scalars.
+- **Synthetic types**: Generates `PlaceName` and `StyledText` secondary types.
+- **Output validation**: `validate_flat_format()` checks structural correctness
+  before the merge algorithm runs.
+
+### Generated Code Includes
 
 1. **`Handle` type alias**: `pub type Handle = String`
 2. **Enum types**: From `schema.enum_types`, with `#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]`
@@ -181,7 +209,10 @@ valid enum values, field availability).
    - Embedded refs without metadata: `PlacePlaceRef { source, target }`
    - Mixin edges: `CitationRef`, `NoteRef`, `MediaRef`, `TagRef`
    - Deduplicated across types (mixins produce one variant regardless of how many types use them)
-7. **`Schema` struct**: Runtime metadata with `version`, `required_fields: HashMap<&str, Vec<&str>>`, `cardinality_constraints: HashMap<&str, (Option<u32>, Option<u32>)>`
+7. **`Schema` struct**: Runtime metadata with `version`, `required_fields`, `cardinality_constraints`, `valid_enum_values`, and `field_availability`
+8. **`Schema::available_versions()`**: Returns all compiled-in versions
+9. **`Schema::default_version()`**: Returns the highest compiled-in version
+10. **`Schema::for_version(version)`**: Returns the `Schema` for a specific version
 
 ---
 
