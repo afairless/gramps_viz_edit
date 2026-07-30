@@ -371,10 +371,10 @@ pub fn deep_nesting(depth: usize) -> GraphTransform {
 
                 // Add PlacePlaceRef edge from child to parent
                 graph
-                    .add_edge(crate::Edge::PlacePlaceRef {
-                        source: current_parent.clone(),
-                        target: parent_handle.clone(),
-                    })
+                    .add_edge(crate::edge_place_place_ref(
+                        current_parent.clone(),
+                        parent_handle.clone(),
+                    ))
                     .map_err(|_| {
                         AdversarialError::TransformNotApplicable(format!(
                             "failed to add PlacePlaceRef edge: {} -> {}",
@@ -433,7 +433,7 @@ pub fn max_ref_chains(chain_length: usize) -> GraphTransform {
                         // We'll update source_handle after creating the Source
                         let citation = crate::CitationData {
                             handle: h.clone(),
-                            source_handle: String::new(), // placeholder, updated below
+                            source_handle: crate::into_source_handle_field(String::new()), // placeholder, updated below
                             ..crate::CitationData::default()
                         };
                         graph
@@ -466,7 +466,7 @@ pub fn max_ref_chains(chain_length: usize) -> GraphTransform {
                         if let Some(crate::Node::Citation(ref mut citation)) =
                             graph.get_node_mut(citation_handle)
                         {
-                            citation.source_handle = h.clone();
+                            crate::set_source_handle(citation, h.clone());
                         }
 
                         h
@@ -785,10 +785,16 @@ pub fn double_gender(fraction: f64) -> GraphTransform {
 
         for handle in person_handles.iter().take(swap_count) {
             if let Some(crate::Node::Person(ref mut person)) = graph.get_node_mut(handle) {
-                match person.gender {
+                match crate::gender_cmp(&person.gender) {
                     // Swap Male ↔ Female
-                    0 => person.gender = 1,
-                    1 => person.gender = 0,
+                    #[cfg(feature = "schema-5-1")]
+                    Some(0) => crate::set_gender(person, 1),
+                    #[cfg(feature = "schema-5-1")]
+                    Some(1) => crate::set_gender(person, 0),
+                    #[cfg(not(feature = "schema-5-1"))]
+                    0 => crate::set_gender(person, 1),
+                    #[cfg(not(feature = "schema-5-1"))]
+                    1 => crate::set_gender(person, 0),
                     // Leave Unknown(2) and Other(3) unchanged
                     _ => {}
                 }
