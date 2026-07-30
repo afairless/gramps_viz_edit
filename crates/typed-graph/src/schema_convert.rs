@@ -122,14 +122,23 @@ pub fn convert(
         result.insert("enum_types".to_string(), Value::Object(Map::new()));
     }
 
-    // Add DateValue secondary type if not already present (for 5.1-only builds)
-    // Always add it; the merge in build.rs will deduplicate if 5.2 provides it.
+    // Add synthetic secondary types that are defined inline in the JSON Schema
+    // format but need to exist as proper secondary types in the flat format.
     if let Some(st) = result
         .get_mut("secondary_types")
         .and_then(|v| v.as_object_mut())
     {
         if !st.contains_key("DateValue") {
             st.insert("DateValue".to_string(), build_date_value_secondary_type());
+        }
+        if !st.contains_key("PlaceName") {
+            st.insert("PlaceName".to_string(), build_place_name_secondary_type());
+        }
+        if !st.contains_key("StyledText") {
+            st.insert(
+                "StyledText".to_string(),
+                build_styled_text_secondary_type(),
+            );
         }
     }
 
@@ -297,7 +306,7 @@ fn convert_field(
             }
         }
         "object" => {
-            // Object fields are embedded types (or Date)
+            // Object fields are embedded types (or Date, or Type enum references)
             let title = field_schema
                 .get("title")
                 .and_then(|v| v.as_str())
@@ -314,12 +323,56 @@ fn convert_field(
                     Value::String("DateValue".to_string()),
                 );
                 flat.insert("required".to_string(), Value::Bool(false));
+            } else if title == "Type" {
+                // Fields like frel/mrel with title "Type" are actually enum refs
+                // to ChildRefType. Detect via _class.enum in properties.
+                let enum_target = field_schema
+                    .get("properties")
+                    .and_then(|p| p.get("_class"))
+                    .and_then(|c| c.get("enum"))
+                    .and_then(|e| e.as_array())
+                    .and_then(|arr| arr.first())
+                    .and_then(|v| v.as_str())
+                    .map(|class_name| {
+                        // Map class name to enum type name
+                        match class_name {
+                            "ChildRefType" => "ChildRefType",
+                            "EventRoleType" => "EventRoleType",
+                            "AttributeType" => "AttributeType",
+                            "NameType" => "NameType",
+                            "NameOriginType" => "NameOriginType",
+                            "NoteType" => "NoteType",
+                            _ => class_name,
+                        }
+                    });
+                if let Some(target) = enum_target {
+                    flat.insert(
+                        "type".to_string(),
+                        Value::String("enum_ref".to_string()),
+                    );
+                    flat.insert("target".to_string(), Value::String(target.to_string()));
+                    flat.insert("required".to_string(), Value::Bool(true));
+                } else {
+                    flat.insert(
+                        "type".to_string(),
+                        Value::String("embedded".to_string()),
+                    );
+                    flat.insert(
+                        "schema".to_string(),
+                        Value::String(normalize_type_title(title)),
+                    );
+                    flat.insert("required".to_string(), Value::Bool(true));
+                }
             } else {
+                // Use normalized title for the schema name
                 flat.insert(
                     "type".to_string(),
                     Value::String("embedded".to_string()),
                 );
-                flat.insert("schema".to_string(), Value::String(title.to_string()));
+                flat.insert(
+                    "schema".to_string(),
+                    Value::String(normalize_type_title(title)),
+                );
                 // Embedded objects are required unless they have oneOf null wrapper
                 // (handled above in oneOf branch)
                 flat.insert("required".to_string(), Value::Bool(true));
@@ -369,6 +422,47 @@ fn detect_enum_ref(field_name: &str) -> Option<String> {
     }
 }
 
+/// Normalize a type title from JSON Schema format to the proper PascalCase
+/// type name used in the custom flat format.
+///
+/// JSON Schema titles often contain spaces (e.g., "Place Name", "Event reference")
+/// while the flat format uses compact PascalCase (e.g., "PlaceName", "EventRef").
+fn normalize_type_title(title: &str) -> String {
+    match title {
+        "Event reference" | "Event Reference" => "EventRef".to_string(),
+        "Child Reference" => "ChildRef".to_string(),
+        "Person ref" | "Person Ref" => "PersonRef".to_string(),
+        "Place ref" | "Place Ref" => "PlaceRef".to_string(),
+        "Media ref" | "Media Ref" => "MediaRef".to_string(),
+        "Repository ref" | "Repository Ref" => "RepoRef".to_string(),
+        "Source ref" | "Source Ref" => "SourceRef".to_string(),
+        "LDS Ordinance" => "LdsOrd".to_string(),
+        "Place Name" => "PlaceName".to_string(),
+        "Styled Text" => "StyledText".to_string(),
+        _ => {
+            // General normalization: strip separators (spaces, hyphens, underscores)
+            // and capitalize each part
+            if title.contains(|c: char| c.is_whitespace() || c == '-' || c == '_') {
+                title
+                    .split(|c: char| c.is_whitespace() || c == '-' || c == '_')
+                    .filter(|s| !s.is_empty())
+                    .map(|part| {
+                        let mut chars = part.chars();
+                        match chars.next() {
+                            None => String::new(),
+                            Some(f) => {
+                                f.to_uppercase().to_string() + chars.as_str()
+                            }
+                        }
+                    })
+                    .collect()
+            } else {
+                title.to_string()
+            }
+        }
+    }
+}
+
 /// Convert array `items` from JSON Schema format to flat format.
 fn convert_array_items(
     items: &Value,
@@ -404,27 +498,23 @@ fn convert_array_items(
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
 
-                if title.ends_with("Ref") || title.ends_with("reference") {
-                    // Embedded ref with edge metadata
-                    let embedded_name = if title.ends_with("reference") {
-                        // Normalize "Event reference" → "EventRef"
-                        let base = title.trim_end_matches(" reference");
-                        format!("{}Ref", base)
-                    } else {
-                        title.to_string()
-                    };
+                // Normalize the title to a proper type name
+                let normalized_title = normalize_type_title(title);
 
+                // Check if this is a Ref type (embedded ref with edge metadata)
+                if normalized_title.ends_with("Ref") && !normalized_title.ends_with("AttributeRef")
+                {
                     result.insert(
                         "embedded".to_string(),
-                        Value::String(embedded_name.clone()),
+                        Value::String(normalized_title.clone()),
                     );
 
                     // Add edges
-                    let edges = build_edges_for_ref(&embedded_name, field_name);
+                    let edges = build_edges_for_ref(&normalized_title, field_name);
                     result.insert("edges".to_string(), Value::Array(edges));
                 } else {
-                    // Plain embedded type (e.g., Attribute, Address, Url, LdsOrd)
-                    result.insert("embedded".to_string(), Value::String(title.to_string()));
+                    // Plain embedded type (e.g., Attribute, Address, Url, LdsOrd, PlaceName)
+                    result.insert("embedded".to_string(), Value::String(normalized_title));
                     // These don't have edge metadata (they are embedded values)
                     result.insert("edges".to_string(), Value::Array(vec![]));
                 }
@@ -569,6 +659,48 @@ fn build_date_value_secondary_type() -> Value {
     text.insert("type".to_string(), Value::String("string".to_string()));
     text.insert("required".to_string(), Value::Bool(false));
     fields.insert("text".to_string(), Value::Object(text));
+
+    let mut result = Map::new();
+    result.insert("fields".to_string(), Value::Object(fields));
+    Value::Object(result)
+}
+
+/// Build the PlaceName secondary type definition (from 5.1 schema).
+fn build_place_name_secondary_type() -> Value {
+    let mut fields = Map::new();
+
+    let mut value = Map::new();
+    value.insert("type".to_string(), Value::String("string".to_string()));
+    value.insert("required".to_string(), Value::Bool(false));
+    fields.insert("value".to_string(), Value::Object(value));
+
+    let mut date = Map::new();
+    date.insert(
+        "type".to_string(),
+        Value::String("embedded".to_string()),
+    );
+    date.insert("schema".to_string(), Value::String("DateValue".to_string()));
+    date.insert("required".to_string(), Value::Bool(false));
+    fields.insert("date".to_string(), Value::Object(date));
+
+    let mut result = Map::new();
+    result.insert("fields".to_string(), Value::Object(fields));
+    Value::Object(result)
+}
+
+/// Build the StyledText secondary type definition (from 5.1 schema).
+fn build_styled_text_secondary_type() -> Value {
+    let mut fields = Map::new();
+
+    let mut string = Map::new();
+    string.insert("type".to_string(), Value::String("string".to_string()));
+    string.insert("required".to_string(), Value::Bool(false));
+    fields.insert("string".to_string(), Value::Object(string));
+
+    let mut format = Map::new();
+    format.insert("type".to_string(), Value::String("integer".to_string()));
+    format.insert("required".to_string(), Value::Bool(false));
+    fields.insert("format".to_string(), Value::Object(format));
 
     let mut result = Map::new();
     result.insert("fields".to_string(), Value::Object(fields));
