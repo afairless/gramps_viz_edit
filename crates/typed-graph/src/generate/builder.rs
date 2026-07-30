@@ -21,7 +21,6 @@
 //!     .unwrap();
 //! ```
 
-use crate::ChildRef;
 use crate::ChildRefType;
 use crate::CitationData;
 use crate::DateValue;
@@ -362,7 +361,7 @@ impl<'a, 'b> PersonBuilder<'a, 'b> {
     ///
     /// Matches the codegen Gender enum: 0=Male, 1=Female, 2=Unknown, 3=Other.
     pub fn with_gender(mut self, gender: i32) -> Self {
-        self.data.gender = gender;
+        crate::set_gender(&mut self.data, gender);
         self
     }
 
@@ -473,7 +472,7 @@ impl<'a, 'b> PersonBuilder<'a, 'b> {
                 field: "handle",
             });
         }
-        if !(0..=3).contains(&self.data.gender) {
+        if !crate::is_gender_valid(&self.data.gender) {
             return Err(BuilderError::MissingRequiredField {
                 builder_type: "Person",
                 field: "gender (must be 0-3)",
@@ -527,7 +526,7 @@ impl<'a, 'b> PersonBuilder<'a, 'b> {
             let event_handle = uuid::Uuid::new_v4().to_string();
             let event = EventData {
                 handle: event_handle.clone(),
-                event_type: EventType::Birth,
+                event_type: crate::into_event_type_field(EventType::Birth),
                 date: Some(date),
                 ..EventData::default()
             };
@@ -539,10 +538,10 @@ impl<'a, 'b> PersonBuilder<'a, 'b> {
             let edge = Edge::PersonEventRef {
                 source: person_handle.clone(),
                 target: event_handle,
-                metadata: Box::new(crate::EventRef {
-                    ref_field: person_handle.clone(),
-                    role: Some(EventRoleType::Primary),
-                }),
+                metadata: Box::new(crate::make_event_ref(
+                    person_handle.clone(),
+                    Some(EventRoleType::Primary),
+                )),
             };
             self.builder
                 .graph
@@ -555,7 +554,7 @@ impl<'a, 'b> PersonBuilder<'a, 'b> {
             let event_handle = uuid::Uuid::new_v4().to_string();
             let event = EventData {
                 handle: event_handle.clone(),
-                event_type: EventType::Death,
+                event_type: crate::into_event_type_field(EventType::Death),
                 date: Some(date),
                 ..EventData::default()
             };
@@ -567,10 +566,10 @@ impl<'a, 'b> PersonBuilder<'a, 'b> {
             let edge = Edge::PersonEventRef {
                 source: person_handle.clone(),
                 target: event_handle,
-                metadata: Box::new(crate::EventRef {
-                    ref_field: person_handle.clone(),
-                    role: Some(EventRoleType::Primary),
-                }),
+                metadata: Box::new(crate::make_event_ref(
+                    person_handle.clone(),
+                    Some(EventRoleType::Primary),
+                )),
             };
             self.builder
                 .graph
@@ -645,19 +644,19 @@ impl<'a, 'b> FamilyBuilder<'a, 'b> {
     ///
     /// Adds to `child_ref_list` and records a `FamilyChildRef` edge.
     pub fn add_child(mut self, child_handle: &Handle, relation: ChildRefType) -> Self {
-        self.data.child_ref_list.push(ChildRef {
-            ref_field: child_handle.clone(),
-            relation: Some(relation),
-        });
+        self.data.child_ref_list.push(crate::make_child_ref(
+            child_handle.clone(),
+            Some(relation),
+        ));
         self
     }
 
     /// Add a child with [`ChildRefType::Birth`] relation.
     pub fn add_child_birth(mut self, child_handle: &Handle) -> Self {
-        self.data.child_ref_list.push(ChildRef {
-            ref_field: child_handle.clone(),
-            relation: Some(ChildRefType::Birth),
-        });
+        self.data.child_ref_list.push(crate::make_child_ref(
+            child_handle.clone(),
+            Some(ChildRefType::Birth),
+        ));
         self
     }
 
@@ -767,10 +766,10 @@ impl<'a, 'b> FamilyBuilder<'a, 'b> {
             let edge = Edge::FamilyChildRef {
                 source: family_handle.clone(),
                 target: child_handle.clone(),
-                metadata: Box::new(ChildRef {
-                    ref_field: child_handle.clone(),
-                    relation: None,
-                }),
+                metadata: Box::new(crate::make_child_ref(
+                    child_handle.clone(),
+                    None,
+                )),
             };
             let _ = self.builder.graph.add_edge(edge);
         }
@@ -780,7 +779,7 @@ impl<'a, 'b> FamilyBuilder<'a, 'b> {
             let event_handle = uuid::Uuid::new_v4().to_string();
             let event = EventData {
                 handle: event_handle.clone(),
-                event_type: EventType::Marriage,
+                event_type: crate::into_event_type_field(EventType::Marriage),
                 date: Some(date),
                 ..EventData::default()
             };
@@ -792,10 +791,10 @@ impl<'a, 'b> FamilyBuilder<'a, 'b> {
             let edge = Edge::FamilyEventRef {
                 source: family_handle.clone(),
                 target: event_handle,
-                metadata: Box::new(crate::EventRef {
-                    ref_field: family_handle.clone(),
-                    role: Some(EventRoleType::Family),
-                }),
+                metadata: Box::new(crate::make_event_ref(
+                    family_handle.clone(),
+                    Some(EventRoleType::Family),
+                )),
             };
             self.builder
                 .graph
@@ -827,7 +826,7 @@ impl<'a, 'b> EventBuilder<'a, 'b> {
         self
     }
     pub fn with_event_type(mut self, event_type: EventType) -> Self {
-        self.data.event_type = event_type;
+        self.data.event_type = crate::into_event_type_field(event_type);
         self
     }
     pub fn with_date(mut self, date: DateValue) -> Self {
@@ -976,7 +975,7 @@ impl<'a, 'b> CitationBuilder<'a, 'b> {
         self
     }
     pub fn with_source(mut self, source_handle: &Handle) -> Self {
-        self.data.source_handle = source_handle.clone();
+        self.data.source_handle = crate::into_source_handle_field(source_handle.clone());
         self
     }
     pub fn build(self) -> Result<Handle, BuilderError> {
@@ -987,21 +986,21 @@ impl<'a, 'b> CitationBuilder<'a, 'b> {
                 field: "handle",
             });
         }
-        if self.data.source_handle.is_empty() {
+        if crate::is_source_handle_empty(&self.data.source_handle) {
             return Err(BuilderError::MissingRequiredField {
                 builder_type: "Citation",
                 field: "source_handle",
             });
         }
-        if !self.builder.graph.contains_node(&self.data.source_handle) {
+        if !self.builder.graph.contains_node(&crate::get_source_handle(&self.data.source_handle)) {
             return Err(BuilderError::InvalidHandle {
                 builder_type: "Citation",
-                handle: self.data.source_handle.clone(),
+                handle: crate::get_source_handle(&self.data.source_handle),
                 target_type: "Source",
             });
         }
 
-        let source_handle = self.data.source_handle.clone();
+        let source_handle = crate::get_source_handle(&self.data.source_handle);
         let node = Node::Citation(self.data);
         self.builder
             .graph
