@@ -89,6 +89,28 @@ adversarial:
     - double-gender
 ```
 
+### With a specific schema version
+
+```bash
+# Use a specific Gramps schema version
+gramps-gen generate --count 200 --schema-version 5.2
+
+gramps-gen generate --count 200 --schema-version 5.1
+```
+
+### Schema management
+
+```bash
+# List available schemas (local + remote)
+gramps-gen schema list
+
+# Download a schema from Gramps GitHub
+gramps-gen schema download 5.1
+
+# Download all available schemas
+gramps-gen schema download --all
+```
+
 ### Validate a `.gramps` file
 
 ```bash
@@ -106,6 +128,8 @@ gramps-gen validate output.gramps --strict
 | `generate` | Generate a random family tree dataset in `.gramps` format |
 | `validate` | Validate the XML structure and namespace of a `.gramps` file |
 | `extract-schema` | Extract the Gramps schema from a local Gramps source checkout (stub) |
+| `schema list` | List local and available Gramps schemas |
+| `schema download` | Download a schema from Gramps GitHub |
 
 ## Pipeline
 
@@ -141,11 +165,12 @@ Generate → Validate (Gate 1) → Adversarial Transform → Validate (Gate 2) �
 
 The project uses a schema extraction pipeline:
 
-1. `extract/extract_schema.py` introspects Gramps Python classes to produce `schemas/schema-5.2.json`
-2. `typed-graph/build.rs` reads `schema-5.2.json` at compile time and generates Rust types:
+1. `extract/extract_schema.py` introspects Gramps Python classes to produce `schemas/schema-{version}.json`
+2. `typed-graph/build.rs` reads all enabled versioned schema files at compile time and generates Rust types:
    - `Node` enum (10 primary types: Person, Family, Event, Place, Source, Citation, Repository, Media, Note, Tag)
    - `Edge` enum (~45 edge variants covering handle refs, embedded refs, and mixins)
    - Data structs, ref structs, enum types, and `Schema` runtime metadata
+   - Multi-version support via Cargo features (default: `schema-5-2`)
 
 ### Graph model
 

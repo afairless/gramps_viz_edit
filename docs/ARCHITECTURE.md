@@ -27,6 +27,8 @@ A **Python extractor** (`extract/extract_schema.py`) introspects Gramps Python c
               ▼
 ┌─────────────────────────────┐
 │    schemas/schema-5.2.json       │  Committed artifact (Gramps 5.2)
+│    schemas/schema-5.1.json       │  Committed artifact (Gramps 5.1)
+│    (... more versions)          │
 └─────────────┬───────────────┘
               │ build.rs reads at compile time
               ▼
@@ -120,9 +122,17 @@ Re-runs `graph.validate(&schema)` to catch any issues introduced by transforms.
 
 ## Schema Extraction and Codegen
 
-### `schemas/schema-5.2.json`
+### `schemas/schema-5.2.json` (and other versioned schemas)
 
-A committed JSON artifact describing:
+A committed JSON artifact describing the Gramps data model for a specific version.
+
+**Multi-version support**: The project supports multiple Gramps schema versions
+via Cargo features. Each version has its own file (`schema-5.0.json`,
+`schema-5.1.json`, `schema-5.2.json`, etc.). The build script reads all enabled
+schemas and generates a **union type** covering all fields and enum variants
+across versions.
+
+Each schema file describes:
 
 - **10 primary types**: Person, Family, Event, Place, Source, Citation, Repository, Media, Note, Tag
 - Fields with types, required flags, and cardinality constraints
@@ -132,9 +142,33 @@ A committed JSON artifact describing:
 - Secondary types (EventRef, ChildRef, PersonRef, RepoRef, Name, Surname, etc.)
 - Enum types (EventType, EventRoleType, ChildRefType, Gender, etc.)
 
-### `build.rs` (typed-graph)
+### `build.rs` (typed-graph) — multi-version codegen
 
-Reads `schema-5.2.json` at compile time and generates `$OUT_DIR/generated_schema.rs`:
+Reads all enabled versioned schema files at compile time and generates
+`$OUT_DIR/generated_schema.rs`. The build system uses Cargo features to
+select which schema versions to compile in:
+
+| Feature | Version | Description |
+|---|---|---|
+| `schema-5-0` | 5.0 | Gramps 5.0.x support |
+| `schema-5-1` | 5.1 | Gramps 5.1.x support |
+| `schema-5-2` (default) | 5.2 | Gramps 5.2.x support |
+| `schema-6-0` | 6.0 | Gramps 6.0.x support (experimental) |
+| `all-schemas` | all | Enable all available versions |
+
+**Union merge algorithm**: When multiple versions are enabled, the build
+script merges them into a single set of Rust types:
+
+1. **Enum types**: Union of all values across all enabled versions
+2. **Data structs**: Union of all fields across all enabled versions
+3. **Optionality rule**: A field is `Option<T>` if ANY version doesn't require it
+4. **Conflict detection**: If a field has different types across versions, a build error is emitted
+
+Each version also gets its own `static LazyLock<Schema>` instance with
+version-specific metadata (required fields, cardinality constraints,
+valid enum values, field availability).
+
+**Generated code includesonstraints,\nvalid enum values, field availability).\n\n**Generated code includes**:", {"oldText": "7. **`Schema` struct**: Runtime metadata with `version`, `required_fields: HashMap<&str, Vec<&str>>`, `cardinality_constraints: HashMap<&str, (Option<u32>, Option<u32>)>`", "newText": "7. **`Schema` struct**: Runtime metadata with `version`, `required_fields`, `cardinality_constraints`, `valid_enum_values`, and `field_availability`\n8. **`Schema::available_versions()`**: Returns all compiled-in versions\n9. **`Schema::default_version()`**: Returns the highest compiled-in version\n10. **`Schema::for_version(version)`**: Returns the `Schema` for a specific version"}]
 
 1. **`Handle` type alias**: `pub type Handle = String`
 2. **Enum types**: From `schema.enum_types`, with `#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]`
@@ -358,6 +392,8 @@ Future: plan describes extracting this from the Gramps RelaxNG schema at build t
 | `gramps-gen generate` | Full 5-stage pipeline → `.gramps` output |
 | `gramps-gen validate <file>` | Minimal XML structure check (well-formedness, root element, namespace) |
 | `gramps-gen extract-schema <path>` | Stub (planned: run Python extractor) |
+| `gramps-gen schema list` | List local and available Gramps schemas |
+| `gramps-gen schema download [VERSION]` | Download a schema from Gramps GitHub |
 
 ### Generate flags
 
@@ -370,6 +406,7 @@ Future: plan describes extracting this from the Gramps RelaxNG schema at build t
 --adversarial <LIST>     Comma-separated strategies or "all"
 -c, --config <FILE>      YAML scenario file
 --with-places / --with-citations / --with-notes / --with-media / --with-tags
+--schema-version <VERSION>  Schema version to use [default: highest installed]
 ```
 
 ### YAML scenario format

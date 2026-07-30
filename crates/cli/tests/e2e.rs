@@ -261,3 +261,46 @@ fn e2e_validate_valid_file() {
 
     let _ = std::fs::remove_file(valid_path);
 }
+
+#[test]
+fn e2e_schema_list_output() {
+    let (stdout, stderr, code) = gramps_gen(&["schema", "list"]);
+    assert_eq!(code, Some(0), "Schema list should succeed: {}", stderr);
+    let combined = stdout + &stderr;
+    assert!(combined.contains("Local schemas"), "Should show local schemas");
+    assert!(combined.contains("5.2"), "Should mention version 5.2");
+}
+
+#[test]
+fn e2e_generate_with_schema_version_52() {
+    let output = temp_output_path("schema_52");
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "generate",
+        "--count", "5",
+        "--seed", "42",
+        "--schema-version", "5.2",
+        "--output", &output,
+    ]);
+    assert_eq!(code, Some(0), "Generate with schema-version 5.2 failed: {}", stderr);
+
+    let content = std::fs::read_to_string(&output).unwrap();
+    assert!(content.contains(r#"version="5.2""#), "XML should have version 5.2");
+
+    let _ = std::fs::remove_file(&output);
+}
+
+#[test]
+fn e2e_generate_with_schema_version_unknown() {
+    let output = temp_output_path("schema_unknown");
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "generate",
+        "--count", "5",
+        "--schema-version", "99.99",
+        "--output", &output,
+    ]);
+    assert_eq!(code, Some(1), "Unknown schema version should fail");
+    assert!(stderr.contains("not available"), "Should mention not available");
+
+    // File should not exist
+    assert!(!std::path::Path::new(&output).exists());
+}
