@@ -424,11 +424,16 @@ def main():
 
     output_path = Path.cwd() / "schemas"
     output_path.mkdir(exist_ok=True, parents=True)
-    output_filename = "schema.json"
+    output_filename = "schema-5.2.json"
     output_filepath = output_path / output_filename
 
     parser = argparse.ArgumentParser(
-        description="Extract Gramps schema and emit schema.json"
+        description="Extract Gramps schema and emit schema-{version}.json"
+    )
+    parser.add_argument(
+        "--version",
+        default="5.2",
+        help="Schema version string to embed in the output (default: 5.2)",
     )
     parser.add_argument(
         "--mock",
@@ -439,7 +444,7 @@ def main():
         "--output",
         "-o",
         default=output_filepath,
-        help="Output path for schema.json (default: schema.json)",
+        help="Output path for schema-{version}.json (default: schemas/schema-5.2.json)",
     )
     args = parser.parse_args()
 
@@ -467,6 +472,10 @@ def main():
             sys.exit(1)
 
     schema = extract_schema(gramps_lib)
+
+    # Override version from --version flag if provided
+    if args.version:
+        schema["version"] = args.version
 
     output_path = args.output
     try:

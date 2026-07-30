@@ -141,8 +141,8 @@ Generate → Validate (Gate 1) → Adversarial Transform → Validate (Gate 2) �
 
 The project uses a schema extraction pipeline:
 
-1. `extract/extract_schema.py` introspects Gramps Python classes to produce `schemas/schema.json`
-2. `typed-graph/build.rs` reads `schema.json` at compile time and generates Rust types:
+1. `extract/extract_schema.py` introspects Gramps Python classes to produce `schemas/schema-5.2.json`
+2. `typed-graph/build.rs` reads `schema-5.2.json` at compile time and generates Rust types:
    - `Node` enum (10 primary types: Person, Family, Event, Place, Source, Citation, Repository, Media, Note, Tag)
    - `Edge` enum (~45 edge variants covering handle refs, embedded refs, and mixins)
    - Data structs, ref structs, enum types, and `Schema` runtime metadata
@@ -187,4 +187,3 @@ cargo clippy --all-targets --all-features -- -D warnings
 # Build release
 cargo build --release
 ```
-

@@ -12,7 +12,7 @@ The system is a **Rust workspace** with three crates:
 | `output` | Gramps XML serialization |
 | `cli` | CLI binary (`gramps-gen`), scenario parsing, pipeline wiring |
 
-A **Python extractor** (`extract/extract_schema.py`) introspects Gramps Python classes to produce `schemas/schema.json`, which drives compile-time Rust code generation.
+A **Python extractor** (`extract/extract_schema.py`) introspects Gramps Python classes to produce `schemas/schema-5.2.json`, which drives compile-time Rust code generation.
 
 ---
 
@@ -26,7 +26,7 @@ A **Python extractor** (`extract/extract_schema.py`) introspects Gramps Python c
               │ emits
               ▼
 ┌─────────────────────────────┐
-│    schemas/schema.json       │  Committed artifact (Gramps 5.2)
+│    schemas/schema-5.2.json       │  Committed artifact (Gramps 5.2)
 └─────────────┬───────────────┘
               │ build.rs reads at compile time
               ▼
@@ -120,7 +120,7 @@ Re-runs `graph.validate(&schema)` to catch any issues introduced by transforms.
 
 ## Schema Extraction and Codegen
 
-### `schemas/schema.json`
+### `schemas/schema-5.2.json`
 
 A committed JSON artifact describing:
 
@@ -134,7 +134,7 @@ A committed JSON artifact describing:
 
 ### `build.rs` (typed-graph)
 
-Reads `schema.json` at compile time and generates `$OUT_DIR/generated_schema.rs`:
+Reads `schema-5.2.json` at compile time and generates `$OUT_DIR/generated_schema.rs`:
 
 1. **`Handle` type alias**: `pub type Handle = String`
 2. **Enum types**: From `schema.enum_types`, with `#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]`
@@ -450,7 +450,7 @@ cargo test -p cli --test e2e    # E2E tests
 
 | Dependency | Crate | Usage |
 |---|---|---|
-| `serde` / `serde_json` | typed-graph (build) | Parse schema.json in build.rs |
+| `serde` / `serde_json` | typed-graph (build) | Parse schema-5.2.json in build.rs |
 | `rand` | typed-graph | RNG for procedural generation |
 | `uuid` (v4 feature) | typed-graph | Auto-generated handles |
 | `quick-xml` | output | XML serialization |

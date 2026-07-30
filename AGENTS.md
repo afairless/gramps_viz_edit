@@ -10,12 +10,12 @@
 gramps_viz_edit/
 ├── Cargo.toml                    # Workspace root (resolver = "2")
 ├── schemas/
-│   └── schema.json               # Canonical Gramps 5.2 schema (committed artifact)
+│   ├── schema-5.2.json               # Canonical Gramps 5.2 schema (committed artifact)
 ├── extract/
 │   └── extract_schema.py         # Python extractor (reads Gramps Python classes)
 ├── crates/
 │   ├── typed-graph/              # Core: graph model, schema codegen, validation, generation
-│   │   ├── build.rs              # Reads schema.json → generates Rust types at compile time
+│   │   ├── build.rs              # Reads schema-5.2.json → generates Rust types at compile time
 │   │   └── src/
 │   │       ├── lib.rs            # Re-exports, unit tests
 │   │       ├── schema.rs         # include!($OUT_DIR/generated_schema.rs)
@@ -53,10 +53,10 @@ gramps_viz_edit/
 
 ### 1. Schema-driven codegen
 
-- `schemas/schema.json` is the **sole source of truth** for Gramps data types, edges, required fields, and cardinality.
-- `typed-graph/build.rs` reads `schema.json` at compile time and generates `$OUT_DIR/generated_schema.rs` containing: `Node` enum, `Edge` enum, all `XxxData` structs, secondary/embedded ref structs, enum types, and `Schema` runtime metadata.
+- `schemas/schema-5.2.json` is the **sole source of truth** for Gramps data types, edges, required fields, and cardinality.
+- `typed-graph/build.rs` reads `schema-5.2.json` at compile time and generates `$OUT_DIR/generated_schema.rs` containing: `Node` enum, `Edge` enum, all `XxxData` structs, secondary/embedded ref structs, enum types, and `Schema` runtime metadata.
 - `typed-graph/src/schema.rs` includes the generated code via `include!`.
-- To update the schema: update `schema.json` and rebuild. The Python extractor at `extract/extract_schema.py` can regenerate `schema.json` from a Gramps Python source checkout.
+- To update the schema: update `schema-5.2.json` (or download a different version) and rebuild. The Python extractor at `extract/extract_schema.py` can regenerate `schema-{version}.json` from a Gramps Python source checkout.
 
 ### 2. Graph model invariants
 
