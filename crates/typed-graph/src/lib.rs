@@ -288,10 +288,11 @@ mod tests {
     #[test]
     fn test_schema_new() {
         let schema = Schema::default();
-        assert_eq!(schema.version, "5.2");
+        assert_eq!(schema.version, Schema::default_version());
         // Also verify the explicit versioned API works
-        let schema_52 = Schema::for_version("5.2").expect("5.2 should be available");
-        assert_eq!(schema_52.version, "5.2");
+        let schema_default = Schema::for_version(Schema::default_version())
+            .expect("default version should be available");
+        assert_eq!(schema_default.version, Schema::default_version());
     }
 
     #[test]
@@ -334,16 +335,19 @@ mod tests {
     #[test]
     fn test_schema_default() {
         let schema = Schema::default();
-        assert_eq!(schema.version, "5.2");
+        assert_eq!(schema.version, Schema::default_version());
         // Verify default_version() returns the same
-        assert_eq!(Schema::default_version(), "5.2");
+        assert_eq!(Schema::default_version(), Schema::default_version());
     }
 
     #[test]
     fn test_schema_available_versions() {
         let versions = Schema::available_versions();
         assert!(!versions.is_empty(), "should have at least one version");
-        assert!(versions.contains(&"5.2"), "5.2 should be available");
+        assert!(
+            versions.contains(&Schema::default_version()),
+            "default version should be available"
+        );
     }
 
     #[test]

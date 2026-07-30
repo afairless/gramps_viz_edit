@@ -168,7 +168,7 @@ fn generate_serialize_and_validate_roundtrip() {
 
     // Serialize
     let map = output::SerializationMap::new();
-    let writer = output::GraphXmlWriter::new(map, "5.2");
+    let writer = output::GraphXmlWriter::new(map, schema.version);
     let mut buffer = Vec::new();
     writer.write(&result.graph, &mut std::io::BufWriter::new(&mut buffer)).unwrap();
     let xml = String::from_utf8(buffer).unwrap();

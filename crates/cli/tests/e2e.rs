@@ -268,6 +268,8 @@ fn e2e_schema_list_output() {
     assert_eq!(code, Some(0), "Schema list should succeed: {}", stderr);
     let combined = stdout + &stderr;
     assert!(combined.contains("Local schemas"), "Should show local schemas");
+    // Note: this assertion assumes default features (schema-5-2).
+    // Single-version builds (e.g. --features schema-5-1) need separate test jobs.
     assert!(combined.contains("5.2"), "Should mention version 5.2");
 }
 
@@ -284,6 +286,8 @@ fn e2e_generate_with_schema_version_52() {
     assert_eq!(code, Some(0), "Generate with schema-version 5.2 failed: {}", stderr);
 
     let content = std::fs::read_to_string(&output).unwrap();
+    // Note: this assertion assumes default features (schema-5-2).
+    // Single-version builds (e.g. --features schema-5-1) need separate test jobs.
     assert!(content.contains(r#"version="5.2""#), "XML should have version 5.2");
 
     let _ = std::fs::remove_file(&output);
