@@ -420,7 +420,7 @@ mod tests {
                 }),
             )
             .unwrap();
-        let schema = Schema::new();
+        let schema = Schema::default();
         let errors = structural_validation(&graph, &schema);
         assert!(
             errors.iter().any(|e| matches!(e, ValidationError::MissingRequired { node, field } if node == "p1" && field == "handle")),
@@ -445,7 +445,7 @@ mod tests {
                 }),
             )
             .unwrap();
-        let schema = Schema::new();
+        let schema = Schema::default();
         let errors = structural_validation(&graph, &schema);
         let missing: Vec<_> = errors
             .iter()
@@ -478,7 +478,7 @@ mod tests {
                 }),
             )
             .unwrap();
-        let schema = Schema::new();
+        let schema = Schema::default();
         let errors = structural_validation(&graph, &schema);
         let cardinality: Vec<_> = errors
             .iter()
@@ -567,7 +567,7 @@ mod tests {
             )
             .unwrap();
 
-        let schema = Schema::new();
+        let schema = Schema::default();
         let errors = validate(&graph, &schema);
         assert!(
             errors.len() >= 2,
@@ -593,7 +593,7 @@ mod tests {
                 }),
             )
             .unwrap();
-        let schema = Schema::new();
+        let schema = Schema::default();
         let errors = validate(&graph, &schema);
         assert!(
             errors.is_empty(),
@@ -617,7 +617,7 @@ mod tests {
                 }),
             )
             .unwrap();
-        let schema = Schema::new();
+        let schema = Schema::default();
         let result = validate_strict(&graph, &schema);
         assert!(result.is_err(), "Strict validation should fail");
     }
@@ -643,7 +643,7 @@ mod tests {
                 }),
             )
             .unwrap();
-        let schema = Schema::new();
+        let schema = Schema::default();
         let errors = graph.validate(&schema);
         assert!(errors.is_empty(), "Should have no errors: {:?}", errors);
         assert_eq!(
@@ -665,7 +665,7 @@ mod tests {
                 }),
             )
             .unwrap();
-        let schema = Schema::new();
+        let schema = Schema::default();
         let errors = graph.validate(&schema);
         assert!(!errors.is_empty(), "Should have errors");
         assert!(
@@ -691,7 +691,7 @@ mod tests {
                 }),
             )
             .unwrap();
-        let schema = Schema::new();
+        let schema = Schema::default();
         graph.validate(&schema);
         assert!(graph.assert_valid().is_ok());
     }
@@ -709,7 +709,7 @@ mod tests {
     #[test]
     fn validate_empty_graph() {
         let graph = Graph::new();
-        let schema = Schema::new();
+        let schema = Schema::default();
         let errors = validate(&graph, &schema);
         assert!(
             errors.is_empty(),
@@ -742,7 +742,7 @@ mod tests {
             )
             .unwrap();
 
-        let schema = Schema::new();
+        let schema = Schema::default();
         let errors = validate(&graph, &schema);
         assert!(
             errors.len() >= 2,
@@ -754,7 +754,7 @@ mod tests {
     #[test]
     fn validation_state_transitions() {
         let mut graph = Graph::new();
-        let schema = Schema::new();
+        let schema = Schema::default();
 
         // Initial: Unvalidated
         assert_eq!(
@@ -815,7 +815,7 @@ mod tests {
     #[test]
     fn validate_graph_with_all_required_fields() {
         let mut graph = Graph::new();
-        let schema = Schema::new();
+        let schema = Schema::default();
 
         // Add a fully specified Person node
         graph
@@ -902,7 +902,7 @@ mod tests {
     #[test]
     fn dangling_reference_in_citation_edge() {
         let mut graph = Graph::new();
-        let schema = Schema::new();
+        let schema = Schema::default();
 
         // Add a Citation node with a source_handle pointing to a non-existent Source
         graph

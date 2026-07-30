@@ -1267,7 +1267,7 @@ mod tests {
     fn disconnected_subgraphs_validates_ok() {
         // Use the random generation engine to create a valid graph,
         // then apply disconnected_subgraphs and verify it still validates.
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let config = crate::generate::RandomConfig {
             person_count: 20,
             family_count: 6,
@@ -1306,7 +1306,7 @@ mod tests {
 
     #[test]
     fn disconnected_subgraphs_k_3_produces_three_clusters() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let config = crate::generate::RandomConfig {
             person_count: 30,
             family_count: 10,
@@ -1502,7 +1502,7 @@ mod tests {
 
     #[test]
     fn deep_nesting_validates_ok() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
 
         // Create a graph with a place and rebuild validation
         let graph = build_graph_with_place();
@@ -1627,7 +1627,7 @@ mod tests {
 
     #[test]
     fn max_ref_chains_validates_ok() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let graph = build_graph_with_event();
         let transform = max_ref_chains(5);
         let mut graph = transform(graph).unwrap();
@@ -1676,7 +1676,7 @@ mod tests {
     fn build_graph_with_soft_edges() -> Graph {
         use crate::generate::random::RandomConfig;
 
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let config = RandomConfig {
             person_count: 3,
             family_count: 2,
@@ -1697,7 +1697,7 @@ mod tests {
 
     #[test]
     fn orphaned_references_validity_preserving() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let graph = build_graph_with_soft_edges();
 
         let transform = orphaned_references(0.5);
@@ -1918,7 +1918,7 @@ mod tests {
     fn build_graph_with_persons() -> Graph {
         use crate::generate::random::RandomConfig;
 
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let config = RandomConfig {
             person_count: 5,
             family_count: 2,
@@ -2053,7 +2053,7 @@ mod tests {
 
     #[test]
     fn double_gender_validity_preserving() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let graph = build_graph_with_persons();
         let transform = double_gender(1.0);
         let mut result = transform(graph).unwrap();
@@ -2210,7 +2210,7 @@ mod tests {
 
     #[test]
     fn property_validity_preserving_strategies_produce_valid_graphs() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let validity_preserving = vec![
             AdversarialStrategy::DisconnectedSubgraphs,
             AdversarialStrategy::DeepNesting,
@@ -2251,7 +2251,7 @@ mod tests {
 
     #[test]
     fn property_adversarial_disabled_produces_valid_graph() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         for seed in 0..30 {
             let config = RandomConfig {
                 person_count: 15,
@@ -2283,7 +2283,7 @@ mod tests {
 
     #[test]
     fn property_multiple_validity_preserving_strategies_compose() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let combined_strategies = vec![
             AdversarialStrategy::DisconnectedSubgraphs,
             AdversarialStrategy::DeepNesting,
@@ -2316,7 +2316,7 @@ mod tests {
 
     #[test]
     fn property_category_a_and_b_compose() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         for seed in 0..20 {
             let config = RandomConfig {
                 person_count: 15,

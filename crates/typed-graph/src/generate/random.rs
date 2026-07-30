@@ -2688,7 +2688,7 @@ mod tests {
             enabled: true,
             strategies: vec![AdversarialStrategy::OneParentFamilies(0.0)],
         };
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let result =
             generate_random(&config, &adversarial, &schema).expect("generation should succeed");
 
@@ -2731,7 +2731,7 @@ mod tests {
             enabled: true,
             strategies: vec![AdversarialStrategy::OneParentFamilies(1.0)],
         };
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let result =
             generate_random(&config, &adversarial, &schema).expect("generation should succeed");
 
@@ -2767,7 +2767,7 @@ mod tests {
             enabled: true,
             strategies: vec![AdversarialStrategy::OneParentFamilies(0.5)],
         };
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let mut result =
             generate_random(&config, &adversarial, &schema).expect("generation should succeed");
 
@@ -2793,7 +2793,7 @@ mod tests {
             enabled: true,
             strategies: vec![AdversarialStrategy::OneParentFamilies(1.0)],
         };
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let result =
             generate_random(&config, &adversarial, &schema).expect("generation should succeed");
 
@@ -2824,7 +2824,7 @@ mod tests {
             enabled: true,
             strategies: vec![AdversarialStrategy::OneParentFamilies(1.0)],
         };
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let result = generate_random(&config, &adversarial, &schema)
             .expect("single person generation should succeed");
         assert_eq!(result.stats.person_count, 1);
@@ -2848,7 +2848,7 @@ mod tests {
             enabled: true,
             strategies: vec![AdversarialStrategy::MissingEvents(0.0)],
         };
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let result =
             generate_random(&config, &adversarial, &schema).expect("generation should succeed");
 
@@ -2879,7 +2879,7 @@ mod tests {
             enabled: true,
             strategies: vec![AdversarialStrategy::MissingEvents(1.0)],
         };
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let result =
             generate_random(&config, &adversarial, &schema).expect("generation should succeed");
 
@@ -2913,7 +2913,7 @@ mod tests {
             enabled: true,
             strategies: vec![AdversarialStrategy::MissingEvents(0.5)],
         };
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let mut result =
             generate_random(&config, &adversarial, &schema).expect("generation should succeed");
 
@@ -2939,7 +2939,7 @@ mod tests {
             enabled: true,
             strategies: vec![AdversarialStrategy::MissingEvents(0.5)],
         };
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let result =
             generate_random(&config, &adversarial, &schema).expect("generation should succeed");
 
@@ -2973,7 +2973,7 @@ mod tests {
             enabled: true,
             strategies: vec![AdversarialStrategy::MissingEvents(1.0)],
         };
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let result =
             generate_random(&config, &adversarial, &schema).expect("generation should succeed");
 
@@ -3010,7 +3010,7 @@ mod tests {
                 enabled: true,
                 strategies: vec![AdversarialStrategy::OneParentFamilies(0.8)],
             };
-            let schema = crate::Schema::new();
+            let schema = crate::Schema::default();
             if let Ok(result) = generate_random(&config, &adversarial, &schema) {
                 for w in &result.warnings {
                     if w.contains("father skipped") {
@@ -3986,7 +3986,7 @@ mod tests {
 
     #[test]
     fn generate_random_basic() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let config = RandomConfig {
             person_count: 10,
             generations: 2,
@@ -4005,7 +4005,7 @@ mod tests {
 
     #[test]
     fn generate_random_person_count() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let config = RandomConfig {
             person_count: 15,
             generations: 2,
@@ -4024,7 +4024,7 @@ mod tests {
 
     #[test]
     fn generate_random_family_count_nonzero() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let config = RandomConfig {
             person_count: 20,
             generations: 2,
@@ -4043,7 +4043,7 @@ mod tests {
 
     #[test]
     fn generate_random_events_present() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let config = RandomConfig {
             person_count: 10,
             generations: 2,
@@ -4062,7 +4062,7 @@ mod tests {
 
     #[test]
     fn generate_random_seed_reproducibility() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let config = RandomConfig {
             person_count: 10,
             generations: 2,
@@ -4081,7 +4081,7 @@ mod tests {
 
     #[test]
     fn generate_random_different_seeds_differ() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let config1 = RandomConfig {
             person_count: 10,
             generations: 2,
@@ -4106,7 +4106,7 @@ mod tests {
 
     #[test]
     fn generate_random_seed_recorded() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let config = RandomConfig {
             seed: Some(42),
             ..RandomConfig::default()
@@ -4119,7 +4119,7 @@ mod tests {
 
     #[test]
     fn generate_random_stats_match() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let config = RandomConfig {
             person_count: 10,
             generations: 2,
@@ -4145,7 +4145,7 @@ mod tests {
 
     #[test]
     fn generate_random_invalid_config_zero_persons() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let config = RandomConfig {
             person_count: 0,
             ..RandomConfig::default()
@@ -4160,7 +4160,7 @@ mod tests {
 
     #[test]
     fn generate_random_invalid_config_bad_range() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let config = RandomConfig {
             start_year: 2000,
             end_year: 1900,
@@ -4176,7 +4176,7 @@ mod tests {
 
     #[test]
     fn generate_random_with_places() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let config = RandomConfig {
             person_count: 10,
             generations: 2,
@@ -4195,7 +4195,7 @@ mod tests {
 
     #[test]
     fn generate_random_with_citations() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let config = RandomConfig {
             person_count: 10,
             generations: 2,
@@ -4215,7 +4215,7 @@ mod tests {
 
     #[test]
     fn generate_random_large_count() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let config = RandomConfig {
             person_count: 50,
             generations: 3,
@@ -4229,7 +4229,7 @@ mod tests {
 
     #[test]
     fn generate_random_validates_ok() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let config = RandomConfig {
             person_count: 10,
             generations: 2,
@@ -4257,7 +4257,7 @@ mod tests {
     fn property_generate_validate_always_passes() {
         // For any valid RandomConfig, the generated graph passes structural
         // and referential validation.
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         for seed in 0..20 {
             let config = RandomConfig {
                 person_count: 10 + (seed % 10) as usize,
@@ -4284,7 +4284,7 @@ mod tests {
     #[test]
     fn property_same_seed_same_graph() {
         // For any seed, generate_random(config, seed) == generate_random(config, seed)
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         for seed in 0..20 {
             let config = RandomConfig {
                 person_count: 10,
@@ -4311,7 +4311,7 @@ mod tests {
     #[test]
     fn property_all_persons_have_unique_handles() {
         // For any config, no two person nodes share a handle.
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         for seed in 0..20 {
             let config = RandomConfig {
                 person_count: 15,
@@ -4335,7 +4335,7 @@ mod tests {
 
     #[test]
     fn property_optional_features_produce_nodes() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         for seed in 0..10 {
             let config = RandomConfig {
                 person_count: 10,
@@ -4369,7 +4369,7 @@ mod tests {
 
     #[test]
     fn property_families_have_at_least_one_parent() {
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         for seed in 0..20 {
             let config = RandomConfig {
                 person_count: 15,
@@ -4397,7 +4397,7 @@ mod tests {
     #[test]
     fn property_event_dates_consistent() {
         // For any config, birth event dates match person birth dates.
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         for seed in 0..20 {
             let config = RandomConfig {
                 person_count: 10,

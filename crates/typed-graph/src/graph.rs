@@ -911,7 +911,7 @@ mod tests {
             .unwrap();
 
         // Validate -> Valid
-        let schema = Schema::new();
+        let schema = Schema::default();
         graph.validate(&schema);
         assert_eq!(graph.validation_state(), &ValidationState::Valid);
 
@@ -954,7 +954,7 @@ mod tests {
             .unwrap();
 
         // Validate -> Valid
-        let schema = Schema::new();
+        let schema = Schema::default();
         graph.validate(&schema);
         assert_eq!(graph.validation_state(), &ValidationState::Valid);
 

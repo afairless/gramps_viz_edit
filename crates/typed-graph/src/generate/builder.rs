@@ -2038,7 +2038,7 @@ mod tests {
             .unwrap();
 
         // Run validation
-        let schema = crate::Schema::new();
+        let schema = crate::Schema::default();
         let errors = graph.validate(&schema);
         assert!(
             errors.is_empty(),

@@ -3,6 +3,8 @@
 //! This crate provides the core graph model, schema-driven codegen types,
 //! validation, and generation capabilities for Gramps family tree datasets.
 
+#![deny(deprecated)]
+
 pub mod date;
 pub mod generate;
 pub mod graph;
@@ -285,7 +287,7 @@ mod tests {
 
     #[test]
     fn test_schema_new() {
-        let schema = Schema::new();
+        let schema = Schema::default();
         assert_eq!(schema.version, "5.2");
         // Also verify the explicit versioned API works
         let schema_52 = Schema::for_version("5.2").expect("5.2 should be available");
@@ -294,7 +296,7 @@ mod tests {
 
     #[test]
     fn test_schema_required_fields() {
-        let schema = Schema::new();
+        let schema = Schema::default();
 
         // Person requires handle and gender
         let person_required = schema.required_fields.get("Person");
@@ -315,7 +317,7 @@ mod tests {
 
     #[test]
     fn test_schema_cardinality_constraints() {
-        let schema = Schema::new();
+        let schema = Schema::default();
 
         // Check cardinality constraints exist
         let person_event_ref = schema.cardinality_constraints.get("Person.event_ref_list");
@@ -350,6 +352,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_schema_new_and_versioned_api_consistent() {
         // Schema::new() should produce the same data as for_version(default_version())
         let default = Schema::new();
