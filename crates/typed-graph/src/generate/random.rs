@@ -447,6 +447,17 @@ pub(crate) struct PersonSummary {
     pub is_child: bool,
 }
 
+/// Get the list of valid enum values for a given enum type name from the
+/// schema. Returns the string values that are valid for the current schema
+/// version, useful for filtering enum-typed fields during generation.
+fn schema_enum_values(schema: &crate::Schema, enum_name: &str) -> Vec<&'static str> {
+    schema
+        .valid_enum_values
+        .get(enum_name)
+        .cloned()
+        .unwrap_or_default()
+}
+
 /// Generate a random Person node with procedural name, gender, and dates.
 ///
 /// Returns the handle of the created person node.
@@ -460,6 +471,7 @@ pub(crate) fn generate_random_person(
     rng: &mut impl rand::Rng,
     generation_layer: usize,
     missing_events_fraction: f64,
+    schema: &crate::Schema,
 ) -> Result<(crate::Handle, Option<String>), GenerationError> {
     let handle = uuid::Uuid::new_v4().to_string();
 
@@ -472,15 +484,24 @@ pub(crate) fn generate_random_person(
     used_names.insert(surname.clone());
 
     // Select gender: 0 (Male) or 1 (Female) with equal probability,
-    // occasionally 2 (Unknown, ~5%)
+    // occasionally 2 (Unknown) or 3 (Other), but only if those values are
+    // valid for the current schema version.
     let gender: i32 = {
+        let valid_genders = schema_enum_values(schema, "Gender");
+        let has_female = valid_genders.contains(&"1");
+        let has_unknown = valid_genders.contains(&"2");
+        let has_other = valid_genders.contains(&"3");
         let roll: f64 = rng.gen();
-        if roll < 0.475 {
+        if roll < 0.475 || !has_female {
             0
         } else if roll < 0.95 {
             1
-        } else {
+        } else if has_unknown && (roll < 0.975 || !has_other) {
             2
+        } else if has_other {
+            3
+        } else {
+            0
         }
     };
 
@@ -1345,7 +1366,7 @@ pub struct GenerationStats {
 pub fn generate_random(
     config: &RandomConfig,
     adversarial_config: &AdversarialConfig,
-    _schema: &crate::Schema,
+    schema: &crate::Schema,
 ) -> Result<GenerationResult, GenerationError> {
     // Validate config
     if config.person_count == 0 {
@@ -1473,6 +1494,7 @@ pub fn generate_random(
                 &mut rng,
                 layer,
                 missing_events_fraction,
+                schema,
             )?;
 
             if let Some(w) = person_warning {
@@ -2019,7 +2041,7 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
         let (handle, _person_warning) =
-            generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0, 0.0)
+            generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0, 0.0, &crate::Schema::default())
                 .expect("person generation should succeed");
 
         assert!(graph.contains_node(&handle));
@@ -2034,7 +2056,7 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
         let (handle, _person_warning) =
-            generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0, 0.0)
+            generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0, 0.0, &crate::Schema::default())
                 .expect("person generation should succeed");
 
         match graph.get_node(&handle).unwrap() {
@@ -2053,7 +2075,7 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
         let (handle, _person_warning) =
-            generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0, 0.0)
+            generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0, 0.0, &crate::Schema::default())
                 .expect("person generation should succeed");
 
         match graph.get_node(&handle).unwrap() {
@@ -2080,7 +2102,7 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
         let (_handle, _person_warning) =
-            generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 1, 0.0)
+            generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 1, 0.0, &crate::Schema::default())
                 .expect("person generation should succeed");
 
         // Layer 1: end_year-85 to end_year-55 = 1915 to 1945
@@ -2110,7 +2132,7 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
         let (handle, _person_warning) =
-            generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0, 0.0)
+            generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0, 0.0, &crate::Schema::default())
                 .expect("person generation should succeed");
 
         // Check that if death event exists, its date is after birth
@@ -2158,9 +2180,9 @@ mod tests {
         let mut rng1 = rand::rngs::StdRng::seed_from_u64(42);
         let mut rng2 = rand::rngs::StdRng::seed_from_u64(42);
 
-        let (h1, _pw) = generate_random_person(&mut graph1, &config, &mut used1, &mut rng1, 0, 0.0)
+        let (h1, _pw) = generate_random_person(&mut graph1, &config, &mut used1, &mut rng1, 0, 0.0, &crate::Schema::default())
             .expect("person gen should succeed");
-        let (h2, _pw) = generate_random_person(&mut graph2, &config, &mut used2, &mut rng2, 0, 0.0)
+        let (h2, _pw) = generate_random_person(&mut graph2, &config, &mut used2, &mut rng2, 0, 0.0, &crate::Schema::default())
             .expect("person gen should succeed");
 
         // Same seed should produce the same person data (excluding UUID handle)
