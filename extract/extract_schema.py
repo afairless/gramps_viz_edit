@@ -388,6 +388,27 @@ def try_import_gramps() -> Optional[types.ModuleType]:
         return None
 
 
+def _is_json_schema_format(schema: Dict[str, Any]) -> bool:
+    """Detect if the extracted schema is in JSON Schema format.
+
+    JSON Schema format (Gramps 5.1 style) has fields like:
+        "fields": { "type": "object", "title": "Person", "properties": {...} }
+
+    Custom flat format (Gramps 5.2 style) has fields like:
+        "fields": { "handle": {"type": "string", "kind": "handle"}, ... }
+
+    The key indicator is whether a "properties" key exists inside the
+    fields object of any primary or secondary type.
+    """
+    for type_category in ("primary_types", "secondary_types"):
+        for type_name, type_info in schema.get(type_category, {}).items():
+            if isinstance(type_info, dict):
+                fields = type_info.get("fields", {})
+                if isinstance(fields, dict) and "properties" in fields:
+                    return True
+    return False
+
+
 def detect_gramps_version() -> Optional[str]:
     """Detect the Gramps version from the installed gramps package.
 
@@ -642,6 +663,25 @@ def main():
         file=sys.stderr,
     )
     print(f"  Enum types: {len(schema.get('enum_types', {}))}", file=sys.stderr)
+
+    # Detect JSON Schema format and warn users
+    if _is_json_schema_format(schema):
+        print(
+            "\n⚠ Warning: This schema is in JSON Schema format (Gramps 5.1 style).",
+            file=sys.stderr,
+        )
+        print(
+            "  The build system (typed-graph/build.rs) automatically converts",
+            file=sys.stderr,
+        )
+        print(
+            "  JSON Schema format to the custom flat format at compile time.",
+            file=sys.stderr,
+        )
+        print(
+            "  No manual conversion is needed — the schema file can be used as-is.",
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":
