@@ -287,6 +287,9 @@ mod tests {
     fn test_schema_new() {
         let schema = Schema::new();
         assert_eq!(schema.version, "5.2");
+        // Also verify the explicit versioned API works
+        let schema_52 = Schema::for_version("5.2").expect("5.2 should be available");
+        assert_eq!(schema_52.version, "5.2");
     }
 
     #[test]
@@ -330,6 +333,32 @@ mod tests {
     fn test_schema_default() {
         let schema = Schema::default();
         assert_eq!(schema.version, "5.2");
+        // Verify default_version() returns the same
+        assert_eq!(Schema::default_version(), "5.2");
+    }
+
+    #[test]
+    fn test_schema_available_versions() {
+        let versions = Schema::available_versions();
+        assert!(!versions.is_empty(), "should have at least one version");
+        assert!(versions.contains(&"5.2"), "5.2 should be available");
+    }
+
+    #[test]
+    fn test_schema_for_version_unknown() {
+        assert!(Schema::for_version("99.99").is_none(), "unknown version should return None");
+    }
+
+    #[test]
+    fn test_schema_new_and_versioned_api_consistent() {
+        // Schema::new() should produce the same data as for_version(default_version())
+        let default = Schema::new();
+        let explicit = Schema::for_version(Schema::default_version())
+            .expect("default version should be available")
+            .clone();
+        assert_eq!(default.version, explicit.version);
+        assert_eq!(default.required_fields, explicit.required_fields);
+        assert_eq!(default.cardinality_constraints, explicit.cardinality_constraints);
     }
 
     // -----------------------------------------------------------------------
