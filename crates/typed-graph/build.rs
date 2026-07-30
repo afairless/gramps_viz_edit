@@ -796,6 +796,7 @@ fn generate_schema_metadata(
     // new() — backward-compatible alias
     code.push_str("    /// Create a Schema instance with the default (highest) version.\n");
     code.push_str("    /// This is a backward-compatible alias for `for_version(Schema::default_version())`.\n");
+    code.push_str("    #[deprecated = \"Use Schema::for_version(version) or Schema::for_version(Schema::default_version()) instead\"]\n");
     code.push_str("    pub fn new() -> Self {\n");
     code.push_str("        Self::for_version(Self::default_version())\n");
     code.push_str("            .expect(\"default version should always be available\")\n");
@@ -806,7 +807,9 @@ fn generate_schema_metadata(
     // Default impl
     code.push_str("impl Default for Schema {\n");
     code.push_str("    fn default() -> Self {\n");
-    code.push_str("        Self::new()\n");
+    code.push_str("        Self::for_version(Self::default_version())\n");
+    code.push_str("            .expect(\"default version should always be available\")\n");
+    code.push_str("            .clone()\n");
     code.push_str("    }\n");
     code.push_str("}\n\n");
 }
