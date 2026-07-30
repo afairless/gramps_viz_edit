@@ -301,7 +301,7 @@ pub fn node_kind(node: &Node) -> NodeKind {
 /// Extract the source and target handles from any [`Edge`] variant.
 pub(crate) fn edge_source_target(edge: &Edge) -> (Handle, Handle) {
     match edge {
-        Edge::CitationMediaRef { source, target }
+        Edge::CitationMediaRef { source, target, .. }
         | Edge::CitationNote { source, target }
         | Edge::CitationSource { source, target }
         | Edge::CitationTag { source, target }
@@ -310,13 +310,13 @@ pub(crate) fn edge_source_target(edge: &Edge) -> (Handle, Handle) {
         | Edge::MediaRef { source, target }
         | Edge::TagRef { source, target }
         | Edge::EventCitation { source, target }
-        | Edge::EventMediaRef { source, target }
+        | Edge::EventMediaRef { source, target, .. }
         | Edge::EventNote { source, target }
         | Edge::EventPlace { source, target }
         | Edge::EventTag { source, target }
         | Edge::FamilyCitation { source, target }
         | Edge::FamilyFather { source, target }
-        | Edge::FamilyMediaRef { source, target }
+        | Edge::FamilyMediaRef { source, target, .. }
         | Edge::FamilyMother { source, target }
         | Edge::FamilyNote { source, target }
         | Edge::FamilyTag { source, target }
@@ -327,19 +327,19 @@ pub(crate) fn edge_source_target(edge: &Edge) -> (Handle, Handle) {
         | Edge::NoteTag { source, target }
         | Edge::PersonCitation { source, target }
         | Edge::PersonFamily { source, target }
-        | Edge::PersonMediaRef { source, target }
+        | Edge::PersonMediaRef { source, target, .. }
         | Edge::PersonNote { source, target }
         | Edge::PersonParentFamily { source, target }
         | Edge::PersonTag { source, target }
         | Edge::PlaceCitation { source, target }
-        | Edge::PlaceMediaRef { source, target }
+        | Edge::PlaceMediaRef { source, target, .. }
         | Edge::PlaceNote { source, target }
-        | Edge::PlacePlaceRef { source, target }
+        | Edge::PlacePlaceRef { source, target, .. }
         | Edge::PlaceTag { source, target }
-        | Edge::RepositoryMediaRef { source, target }
+        | Edge::RepositoryMediaRef { source, target, .. }
         | Edge::RepositoryNote { source, target }
         | Edge::RepositoryTag { source, target }
-        | Edge::SourceMediaRef { source, target }
+        | Edge::SourceMediaRef { source, target, .. }
         | Edge::SourceNote { source, target }
         | Edge::SourceTag { source, target }
         | Edge::TagTag { source, target } => (source.clone(), target.clone()),
@@ -369,6 +369,241 @@ pub(crate) fn edge_source_target(edge: &Edge) -> (Handle, Handle) {
             metadata: _,
         } => (source.clone(), target.clone()),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Helper functions for schema-version-specific edge construction
+// ---------------------------------------------------------------------------
+
+/// Create a PlacePlaceRef edge with appropriate fields for the current schema.
+#[cfg(feature = "schema-5-1")]
+pub fn edge_place_place_ref(
+    source: Handle,
+    target: Handle,
+) -> Edge {
+    Edge::PlacePlaceRef {
+        source,
+        target: target.clone(),
+        metadata: Box::new(crate::PlaceRef {
+            ref_field: target,
+            date: None,
+        }),
+    }
+}
+
+/// Create a PlacePlaceRef edge with appropriate fields for the current schema.
+#[cfg(not(feature = "schema-5-1"))]
+pub fn edge_place_place_ref(source: Handle, target: Handle) -> Edge {
+    Edge::PlacePlaceRef { source, target }
+}
+
+/// Create an EventRef with appropriate fields for the current schema.
+#[cfg(feature = "schema-5-1")]
+pub fn make_event_ref(
+    ref_field: Handle,
+    role: Option<crate::EventRoleType>,
+) -> crate::EventRef {
+    crate::EventRef {
+        ref_field,
+        role,
+        attribute_list: vec![],
+        note_list: vec![],
+    }
+}
+
+/// Create an EventRef with appropriate fields for the current schema.
+#[cfg(not(feature = "schema-5-1"))]
+pub fn make_event_ref(
+    ref_field: Handle,
+    role: Option<crate::EventRoleType>,
+) -> crate::EventRef {
+    crate::EventRef { ref_field, role }
+}
+
+/// Create a ChildRef with appropriate fields for the current schema.
+#[cfg(feature = "schema-5-1")]
+pub fn make_child_ref(
+    ref_field: Handle,
+    relation: Option<crate::ChildRefType>,
+) -> crate::ChildRef {
+    crate::ChildRef {
+        ref_field,
+        relation,
+        citation_list: vec![],
+        note_list: vec![],
+        frel: None,
+        mrel: None,
+    }
+}
+
+/// Create a ChildRef with appropriate fields for the current schema.
+#[cfg(not(feature = "schema-5-1"))]
+pub fn make_child_ref(
+    ref_field: Handle,
+    relation: Option<crate::ChildRefType>,
+) -> crate::ChildRef {
+    crate::ChildRef { ref_field, relation }
+}
+
+/// Get the gender value from a PersonData, adapting Option<i32> (5.1) to i32 (5.2).
+#[cfg(feature = "schema-5-1")]
+pub fn gender_value(gender: Option<i32>) -> i32 {
+    gender.unwrap_or(0)
+}
+
+/// Get the gender value from a PersonData, adapting Option<i32> (5.1) to i32 (5.2).
+#[cfg(not(feature = "schema-5-1"))]
+pub fn gender_value(gender: i32) -> i32 {
+    gender
+}
+
+/// Check if a source_handle field is empty, handling Option<String> (5.1) vs String (5.2).
+#[cfg(feature = "schema-5-1")]
+pub fn is_source_handle_empty(source_handle: &Option<String>) -> bool {
+    source_handle.as_ref().is_none_or(|s| s.is_empty())
+}
+
+/// Check if a source_handle field is empty, handling Option<String> (5.1) vs String (5.2).
+#[cfg(not(feature = "schema-5-1"))]
+pub fn is_source_handle_empty(source_handle: &str) -> bool {
+    source_handle.is_empty()
+}
+
+/// Get the source_handle as a String, unwrapping Option<String> (5.1) or cloning String (5.2).
+#[cfg(feature = "schema-5-1")]
+pub fn get_source_handle(source_handle: &Option<String>) -> String {
+    source_handle.clone().unwrap_or_default()
+}
+
+/// Get the source_handle as a String, unwrapping Option<String> (5.1) or cloning String (5.2).
+#[cfg(not(feature = "schema-5-1"))]
+pub fn get_source_handle(source_handle: &str) -> String {
+    source_handle.to_owned()
+}
+
+/// Set the source_handle on a CitationData, handling Option<String> (5.1) vs String (5.2).
+#[cfg(feature = "schema-5-1")]
+pub fn set_source_handle(citation: &mut crate::CitationData, handle: Handle) {
+    citation.source_handle = Some(handle);
+}
+
+/// Set the source_handle on a CitationData, handling Option<String> (5.1) vs String (5.2).
+#[cfg(not(feature = "schema-5-1"))]
+pub fn set_source_handle(citation: &mut crate::CitationData, handle: Handle) {
+    citation.source_handle = handle;
+}
+
+/// Set the gender on a PersonData, handling Option<i32> (5.1) vs i32 (5.2).
+#[cfg(feature = "schema-5-1")]
+pub fn set_gender(person: &mut crate::PersonData, gender: i32) {
+    person.gender = Some(gender);
+}
+
+/// Set the gender on a PersonData, handling Option<i32> (5.1) vs i32 (5.2).
+#[cfg(not(feature = "schema-5-1"))]
+pub fn set_gender(person: &mut crate::PersonData, gender: i32) {
+    person.gender = gender;
+}
+
+/// Check if gender is valid (0-3), handling Option<i32> (5.1) vs i32 (5.2).
+#[cfg(feature = "schema-5-1")]
+pub fn is_gender_valid(gender: &Option<i32>) -> bool {
+    matches!(gender, Some(0..=3))
+}
+
+/// Check if gender is valid (0-3), handling Option<i32> (5.1) vs i32 (5.2).
+#[cfg(not(feature = "schema-5-1"))]
+pub fn is_gender_valid(gender: &i32) -> bool {
+    matches!(gender, 0..=3)
+}
+
+/// Create a CitationData with appropriate fields for the current schema.
+#[cfg(feature = "schema-5-1")]
+pub fn make_citation(
+    handle: Handle,
+    source_handle: Handle,
+) -> crate::CitationData {
+    crate::CitationData {
+        handle,
+        source_handle: Some(source_handle),
+        ..crate::CitationData::default()
+    }
+}
+
+/// Create a CitationData with appropriate fields for the current schema.
+#[cfg(not(feature = "schema-5-1"))]
+pub fn make_citation(
+    handle: Handle,
+    source_handle: Handle,
+) -> crate::CitationData {
+    crate::CitationData {
+        handle,
+        source_handle,
+        ..crate::CitationData::default()
+    }
+}
+
+/// Return the gender value wrapped as needed for the current schema's PersonData type.
+#[cfg(feature = "schema-5-1")]
+pub fn into_gender_field(gender: i32) -> Option<i32> {
+    Some(gender)
+}
+
+/// Return the gender value wrapped as needed for the current schema's PersonData type.
+#[cfg(not(feature = "schema-5-1"))]
+pub fn into_gender_field(gender: i32) -> i32 {
+    gender
+}
+
+/// Return the event_type wrapped as needed for the current schema's EventData type.
+#[cfg(feature = "schema-5-1")]
+pub fn into_event_type_field(event_type: crate::EventType) -> Option<crate::EventType> {
+    Some(event_type)
+}
+
+/// Return the event_type wrapped as needed for the current schema's EventData type.
+#[cfg(not(feature = "schema-5-1"))]
+pub fn into_event_type_field(event_type: crate::EventType) -> crate::EventType {
+    event_type
+}
+
+/// Return the source_handle wrapped as needed for the current schema's CitationData type.
+#[cfg(feature = "schema-5-1")]
+pub fn into_source_handle_field(handle: Handle) -> Option<Handle> {
+    Some(handle)
+}
+
+/// Return the source_handle wrapped as needed for the current schema's CitationData type.
+#[cfg(not(feature = "schema-5-1"))]
+pub fn into_source_handle_field(handle: Handle) -> Handle {
+    handle
+}
+
+/// Compare event_type for equality, handling Option<EventType> (5.1) vs EventType (5.2).
+#[cfg(feature = "schema-5-1")]
+pub fn event_type_eq(
+    event_type: &Option<crate::EventType>,
+    target: crate::EventType,
+) -> bool {
+    *event_type == Some(target)
+}
+
+/// Compare event_type for equality, handling Option<EventType> (5.1) vs EventType (5.2).
+#[cfg(not(feature = "schema-5-1"))]
+pub fn event_type_eq(event_type: &crate::EventType, target: crate::EventType) -> bool {
+    *event_type == target
+}
+
+/// Get the gender from PersonData for comparison, handling Option<i32> (5.1) vs i32 (5.2).
+#[cfg(feature = "schema-5-1")]
+pub fn gender_cmp(gender: &Option<i32>) -> Option<i32> {
+    *gender
+}
+
+/// Get the gender from PersonData for comparison, handling Option<i32> (5.1) vs i32 (5.2).
+#[cfg(not(feature = "schema-5-1"))]
+pub fn gender_cmp(gender: &i32) -> i32 {
+    *gender
 }
 
 // ---------------------------------------------------------------------------

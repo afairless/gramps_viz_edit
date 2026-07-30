@@ -536,7 +536,7 @@ pub(crate) fn generate_random_person(
     // Build the person data
     let person = crate::PersonData {
         handle: handle.clone(),
-        gender,
+        gender: crate::into_gender_field(gender),
         primary_name: crate::Name {
             first_name: Some(given_name.clone()),
             surname_list: vec![crate::Surname {
@@ -569,7 +569,7 @@ pub(crate) fn generate_random_person(
         let event_handle = uuid::Uuid::new_v4().to_string();
         let birth_event = crate::EventData {
             handle: event_handle.clone(),
-            event_type: crate::EventType::Birth,
+            event_type: crate::into_event_type_field(crate::EventType::Birth),
             date: Some(birth_date),
             ..crate::EventData::default()
         };
@@ -584,19 +584,19 @@ pub(crate) fn generate_random_person(
             .add_edge(crate::Edge::PersonEventRef {
                 source: handle.clone(),
                 target: event_handle,
-                metadata: Box::new(crate::EventRef {
-                    ref_field: handle.clone(),
-                    role: Some(crate::EventRoleType::Primary),
-                }),
-            })
-            .expect("birth event target exists (just added)");
+                    metadata: Box::new(crate::make_event_ref(
+                        handle.clone(),
+                        Some(crate::EventRoleType::Primary),
+                    )),
+                })
+                .expect("birth event target exists (just added)");
 
         // Create death event if death date is set
         if let Some(death_date) = death_date {
             let death_event_handle = uuid::Uuid::new_v4().to_string();
             let death_event = crate::EventData {
                 handle: death_event_handle.clone(),
-                event_type: crate::EventType::Death,
+                event_type: crate::into_event_type_field(crate::EventType::Death),
                 date: Some(death_date),
                 ..crate::EventData::default()
             };
@@ -613,10 +613,10 @@ pub(crate) fn generate_random_person(
                 .add_edge(crate::Edge::PersonEventRef {
                     source: handle.clone(),
                     target: death_event_handle,
-                    metadata: Box::new(crate::EventRef {
-                        ref_field: handle.clone(),
-                        role: Some(crate::EventRoleType::Primary),
-                    }),
+                    metadata: Box::new(crate::make_event_ref(
+                        handle.clone(),
+                        Some(crate::EventRoleType::Primary),
+                    )),
                 })
                 .expect("death event target exists (just added)");
         }
@@ -1096,10 +1096,10 @@ pub(crate) fn assign_children(
         let edge = crate::Edge::FamilyChildRef {
             source: family_handle.clone(),
             target: child_handle.clone(),
-            metadata: Box::new(crate::ChildRef {
-                ref_field: child_handle.clone(),
-                relation: Some(crate::ChildRefType::Birth),
-            }),
+            metadata: Box::new(crate::make_child_ref(
+                child_handle.clone(),
+                Some(crate::ChildRefType::Birth),
+            )),
         };
         let _ = graph.add_edge(edge);
 
@@ -1175,7 +1175,7 @@ pub(crate) fn generate_events(
                         let event_handle = uuid::Uuid::new_v4().to_string();
                         let event = crate::EventData {
                             handle: event_handle.clone(),
-                            event_type: crate::EventType::Marriage,
+                            event_type: crate::into_event_type_field(crate::EventType::Marriage),
                             date: Some(marriage_date),
                             ..crate::EventData::default()
                         };
@@ -1194,10 +1194,10 @@ pub(crate) fn generate_events(
                             .add_edge(crate::Edge::FamilyEventRef {
                                 source: family_handle.clone(),
                                 target: event_handle,
-                                metadata: Box::new(crate::EventRef {
-                                    ref_field: family_handle.clone(),
-                                    role: Some(crate::EventRoleType::Family),
-                                }),
+                                metadata: Box::new(crate::make_event_ref(
+                                    family_handle.clone(),
+                                    Some(crate::EventRoleType::Family),
+                                )),
                             })
                             .expect("marriage event target exists (just added)");
                     }
@@ -1289,7 +1289,7 @@ pub(crate) fn generate_events(
                 let citation_handle = uuid::Uuid::new_v4().to_string();
                 let citation = crate::CitationData {
                     handle: citation_handle.clone(),
-                    source_handle: source_handle.clone(),
+                    source_handle: crate::into_source_handle_field(source_handle.clone()),
                     ..crate::CitationData::default()
                 };
 
@@ -1322,7 +1322,7 @@ fn get_person_birth_year(graph: &crate::Graph, person_handle: &crate::Handle) ->
     for edge in &edges {
         if let crate::Edge::PersonEventRef { target, .. } = edge {
             if let Some(crate::Node::Event(event)) = graph.get_node(target) {
-                if event.event_type == crate::EventType::Birth {
+                if crate::event_type_eq(&event.event_type, crate::EventType::Birth) {
                     if let Some(ref date) = event.date {
                         return Some(date.year);
                     }
@@ -1522,7 +1522,7 @@ pub fn generate_random(
 
             // Get gender from the person node
             let gender = match graph.get_node(&handle) {
-                Some(crate::Node::Person(p)) => p.gender,
+                Some(crate::Node::Person(p)) => crate::gender_value(p.gender),
                 _ => 0,
             };
 
@@ -2125,7 +2125,7 @@ mod tests {
         // Check that a birth event exists with a date in the expected range
         for (_, node) in graph.iter_nodes() {
             if let crate::Node::Event(event) = node {
-                if event.event_type == crate::EventType::Birth {
+                if crate::event_type_eq(&event.event_type, crate::EventType::Birth) {
                     if let Some(ref date) = event.date {
                         // Broad range check: birth year should be plausible
                         assert!(date.year >= 1900 && date.year <= 2000,);

@@ -239,7 +239,7 @@ fn check_required_field(handle: &Handle, node: &Node, field: &str) -> Option<Val
     let missing = match node {
         Node::Person(data) => match field {
             "handle" => data.handle.is_empty(),
-            "gender" => !matches!(data.gender, 0..=3),
+            "gender" => !crate::is_gender_valid(&data.gender),
             "primary_name" => {
                 data.primary_name.first_name.is_none() && data.primary_name.surname_list.is_empty()
             }
@@ -272,7 +272,7 @@ fn check_required_field(handle: &Handle, node: &Node, field: &str) -> Option<Val
         },
         Node::Citation(data) => match field {
             "handle" => data.handle.is_empty(),
-            "source_handle" => data.source_handle.is_empty(),
+            "source_handle" => crate::is_source_handle_empty(&data.source_handle),
             _ => false,
         },
         Node::Media(data) => match field {

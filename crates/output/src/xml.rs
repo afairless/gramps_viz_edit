@@ -778,7 +778,7 @@ impl GraphXmlWriter {
             Node::Person(p) => match field_name {
                 "handle" => Some(p.handle.clone()),
                 "gramps_id" => p.gramps_id.clone(),
-                "gender" => Some(p.gender.to_string()),
+                "gender" => Some(typed_graph::gender_value(p.gender).to_string()),
                 _ => None,
             },
             Node::Family(f) => match field_name {
