@@ -9,6 +9,7 @@ pub mod date;
 pub mod generate;
 pub mod graph;
 pub mod schema;
+pub mod schema_convert;
 pub mod validate;
 
 /// Re-export the schema module.
