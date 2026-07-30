@@ -3,6 +3,14 @@ name = "typed-graph"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["schema-5-2"]
+schema-5-0 = []
+schema-5-1 = []
+schema-5-2 = []
+schema-6-0 = []
+all-schemas = ["schema-5-0", "schema-5-1", "schema-5-2", "schema-6-0"]
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
