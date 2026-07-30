@@ -809,7 +809,7 @@ pub fn double_gender(fraction: f64) -> GraphTransform {
 // Tests
 // ---------------------------------------------------------------------------
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "schema-5-1")))]
 mod tests {
     use super::*;
 

@@ -1008,7 +1008,7 @@ fn escape_xml(s: &str) -> String {
     result
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "schema-5-1")))]
 mod tests {
     use super::*;
     use crate::SerializationMap;

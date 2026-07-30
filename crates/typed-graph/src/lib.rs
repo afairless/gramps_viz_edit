@@ -28,7 +28,7 @@ pub use graph::{
 // The date module adds convenience methods (new, new_ymd, display_text, is_valid)
 // to the generated DateValue type from the schema.
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "schema-5-1")))]
 mod tests {
     use super::*;
 

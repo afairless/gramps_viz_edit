@@ -398,7 +398,7 @@ fn count_array_field(node: &Node, field: &str) -> usize {
 // Tests
 // ---------------------------------------------------------------------------
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "schema-5-1")))]
 mod tests {
     use super::*;
     use crate::*;

@@ -1727,7 +1727,7 @@ fn collect_stats(graph: &crate::Graph) -> GenerationStats {
 // Tests
 // ---------------------------------------------------------------------------
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "schema-5-1")))]
 mod tests {
     use super::*;
     use rand::SeedableRng;

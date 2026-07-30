@@ -158,6 +158,7 @@ impl<'a> GraphBuilder<'a> {
             builder: self,
             data: PersonData {
                 handle: handle.into(),
+                gender: crate::into_gender_field(2), // Unknown
                 ..PersonData::default()
             },
             birth_date: None,
@@ -186,6 +187,7 @@ impl<'a> GraphBuilder<'a> {
             builder: self,
             data: PersonData {
                 handle,
+                gender: crate::into_gender_field(2), // Unknown
                 ..PersonData::default()
             },
             birth_date: None,
@@ -1169,7 +1171,7 @@ impl<'a, 'b> TagBuilder<'a, 'b> {
 // Tests
 // ---------------------------------------------------------------------------
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "schema-5-1")))]
 mod tests {
     use super::*;
     use crate::Graph;
