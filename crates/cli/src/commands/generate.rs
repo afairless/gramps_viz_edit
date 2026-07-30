@@ -97,33 +97,7 @@ pub fn run(args: GenerateArgs) -> Result<(), crate::error::CliError> {
         config.person_count, config.generations
     );
 
-    // Stage 1: Generate
-    let schema = Schema::new();
-    let mut result = generate_random(&config, &adversarial_config, &schema)?;
-    progress.finish();
-    eprintln!("Generated {} persons, {} families, {} events",
-        result.stats.person_count, result.stats.family_count, result.stats.event_count);
-
-    // Stage 2: Validation Gate 1
-    let errors = result.graph.validate(&schema);
-    check_validation_errors(&errors, args.strict)?;
-
-    // Stage 3: Adversarial Transform (Category B only)
-    if adversarial_config.enabled {
-        let adversarial_result = apply_adversarial_strategies(result.graph, &adversarial_config);
-        result.graph = adversarial_result.graph;
-        for err in &adversarial_result.errors {
-            eprintln!("Adversarial transform warning: {}", err);
-        }
-    }
-
-    // Stage 4: Validation Gate 2
-    let errors = result.graph.validate(&schema);
-    check_validation_errors(&errors, args.strict)?;
-
-    // Stage 5: Serialize
-    let map = SerializationMap::new();
-    // Resolve schema version: "default" → highest installed
+    // Stage 0: Resolve schema version
     let schema_version = if args.schema_version == "default" {
         Schema::default_version().to_string()
     } else {
@@ -138,6 +112,34 @@ pub fn run(args: GenerateArgs) -> Result<(), crate::error::CliError> {
         }
         args.schema_version.clone()
     };
+    let schema = Schema::for_version(&schema_version)
+        .expect("schema version was validated above");
+
+    // Stage 1: Generate
+    let mut result = generate_random(&config, &adversarial_config, schema)?;
+    progress.finish();
+    eprintln!("Generated {} persons, {} families, {} events",
+        result.stats.person_count, result.stats.family_count, result.stats.event_count);
+
+    // Stage 2: Validation Gate 1
+    let errors = result.graph.validate(schema);
+    check_validation_errors(&errors, args.strict)?;
+
+    // Stage 3: Adversarial Transform (Category B only)
+    if adversarial_config.enabled {
+        let adversarial_result = apply_adversarial_strategies(result.graph, &adversarial_config);
+        result.graph = adversarial_result.graph;
+        for err in &adversarial_result.errors {
+            eprintln!("Adversarial transform warning: {}", err);
+        }
+    }
+
+    // Stage 4: Validation Gate 2
+    let errors = result.graph.validate(schema);
+    check_validation_errors(&errors, args.strict)?;
+
+    // Stage 5: Serialize
+    let map = SerializationMap::new();
     let writer = GraphXmlWriter::new(map, &schema_version);
     let file = std::fs::File::create(&output_path).map_err(|e| crate::error::CliError::Io {
         path: output_path.clone(),
