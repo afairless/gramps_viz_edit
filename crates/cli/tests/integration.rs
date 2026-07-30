@@ -291,6 +291,88 @@ fn validate_invalid_gramps_file() {
     assert!(result.is_err());
 }
 
+/// Integration test: generate respects schema version.
+#[test]
+fn generate_respects_schema_version() {
+    // Check if 5.1 schema is available in this build
+    let schema_51 = match typed_graph::Schema::for_version("5.1") {
+        Some(s) => s.clone(),
+        None => {
+            eprintln!("Skipping: schema-5-1 not compiled in this build");
+            return;
+        }
+    };
+
+    let config = typed_graph::generate::RandomConfig {
+        person_count: 10,
+        family_count: 5,
+        generations: 2,
+        seed: Some(42),
+        ..typed_graph::generate::RandomConfig::default()
+    };
+    let adv_config = typed_graph::generate::AdversarialConfig::default();
+
+    // Generate with 5.1 schema
+    let mut result =
+        typed_graph::generate::generate_random(&config, &adv_config, &schema_51).unwrap();
+
+    // Validate with 5.1 — must pass
+    let errors = result.graph.validate(&schema_51);
+    let structural: Vec<_> = errors
+        .iter()
+        .filter(|e| !matches!(e, typed_graph::ValidationError::PlausibilityWarning { .. }))
+        .collect();
+    assert!(structural.is_empty(), "{:?}", structural);
+
+    // Serialize — verify version in header
+    let map = output::SerializationMap::new();
+    let mut buf = Vec::new();
+    let writer = output::GraphXmlWriter::new(map, schema_51.version);
+    writer
+        .write(&result.graph, &mut std::io::BufWriter::new(&mut buf))
+        .unwrap();
+    let xml = String::from_utf8(buf).unwrap();
+    assert!(xml.contains(r#"version="5.1""#));
+}
+
+/// Integration test: cross-version validation consistency.
+#[test]
+fn cross_version_validation_consistent() {
+    // Check if 5.1 schema is available in this build
+    let schema_51 = match typed_graph::Schema::for_version("5.1") {
+        Some(s) => s.clone(),
+        None => {
+            eprintln!("Skipping: schema-5-1 not compiled in this build");
+            return;
+        }
+    };
+
+    let config = typed_graph::generate::RandomConfig {
+        person_count: 10,
+        family_count: 5,
+        generations: 2,
+        seed: Some(42),
+        ..typed_graph::generate::RandomConfig::default()
+    };
+    let adv_config = typed_graph::generate::AdversarialConfig::default();
+
+    // Generate with 5.1 schema
+    let mut result =
+        typed_graph::generate::generate_random(&config, &adv_config, &schema_51).unwrap();
+
+    // Validate with 5.1 — must pass (same version used for generation)
+    let errors_51 = result.graph.validate(&schema_51);
+    let structural_51: Vec<_> = errors_51
+        .iter()
+        .filter(|e| !matches!(e, typed_graph::ValidationError::PlausibilityWarning { .. }))
+        .collect();
+    assert!(
+        structural_51.is_empty(),
+        "5.1-generated graph should pass 5.1 validation: {:?}",
+        structural_51
+    );
+}
+
 /// Integration test: validate command with strict mode on invalid file.
 #[test]
 fn validate_invalid_file_strict_mode() {

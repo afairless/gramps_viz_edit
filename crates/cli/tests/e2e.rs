@@ -294,6 +294,33 @@ fn e2e_generate_with_schema_version_52() {
 }
 
 #[test]
+fn e2e_generate_with_schema_version_51() {
+    // This test only works when schema-5-1 is compiled in.
+    // The binary is built with default features (schema-5-2), so this test
+    // requires: cargo test --all-features
+    let output = temp_output_path("schema_51");
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "generate",
+        "--count", "5",
+        "--seed", "42",
+        "--schema-version", "5.1",
+        "--output", &output,
+    ]);
+    if code != Some(0) {
+        // If 5.1 is not available, the command should fail with a clear error.
+        // This is expected when only schema-5-2 is compiled in.
+        assert!(stderr.contains("not available"), "Unexpected error: {}", stderr);
+        eprintln!("Skipping: schema-5-1 not compiled in this build");
+        return;
+    }
+
+    let content = std::fs::read_to_string(&output).unwrap();
+    assert!(content.contains(r#"version="5.1""#), "XML should have version 5.1");
+
+    let _ = std::fs::remove_file(&output);
+}
+
+#[test]
 fn e2e_generate_with_schema_version_unknown() {
     let output = temp_output_path("schema_unknown");
     let (_stdout, stderr, code) = gramps_gen(&[
