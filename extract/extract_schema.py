@@ -18,6 +18,8 @@ Options:
     --version VERSION   Override the schema version string (default: auto-detect
                         from Gramps source, or 5.2 if not available)
     --output PATH       Write output to PATH (default: schemas/schema-{version}.json)
+    --enum-names        Extract enum integer-to-name mappings instead of the full schema.
+    --gramps-path PATH  Path to Gramps source checkout (added to PYTHONPATH).
 """
 
 import argparse
@@ -469,6 +471,53 @@ def extract_schema(gramps_lib: Any) -> Dict[str, Any]:
     return schema
 
 
+def extract_enum_names(gramps_lib: Any) -> Dict[str, Dict[str, str]]:
+    """Extract enum integer-to-name mappings from Gramps lib.
+
+    Returns a dict like:
+    {
+        "EventType": {"0": "Custom", "1": "Marriage", ...},
+        "EventRoleType": {"0": "Primary", ...},
+        ...
+    }
+    """
+    result: Dict[str, Dict[str, str]] = {}
+
+    for cls_name in ENUM_TYPES:
+        cls = getattr(gramps_lib, cls_name, None)
+        if cls is None or not isinstance(cls, type):
+            continue
+
+        mapping: Dict[str, str] = {}
+
+        # Standard Python Enum
+        if issubclass(cls, enum.Enum):
+            for member in cls:
+                try:
+                    val = member.value
+                    name = member.name
+                    mapping[str(val)] = name
+                except Exception:
+                    pass
+        else:
+            # Gramps-style class with uppercase constants
+            for attr_name in dir(cls):
+                if attr_name.isupper() and not attr_name.startswith("_"):
+                    try:
+                        val = getattr(cls, attr_name)
+                        if not callable(val) and not isinstance(
+                            val, (staticmethod, classmethod, property)
+                        ):
+                            mapping[str(val)] = attr_name
+                    except Exception:
+                        pass
+
+        if mapping:
+            result[cls_name] = mapping
+
+    return result
+
+
 def main():
 
     output_path = Path.cwd() / "schemas"
@@ -495,8 +544,54 @@ def main():
         default=output_filepath,
         help="Output path for schema-{version}.json (default: schemas/schema-5.2.json)",
     )
+    parser.add_argument(
+        "--enum-names",
+        action="store_true",
+        help="Extract enum integer-to-name mappings instead of the full schema",
+    )
+    parser.add_argument(
+        "--gramps-path",
+        default=None,
+        help="Path to Gramps source checkout (added to PYTHONPATH)",
+    )
     args = parser.parse_args()
 
+    # Add Gramps source to path if provided
+    if args.gramps_path:
+        sys.path.insert(0, os.path.abspath(args.gramps_path))
+
+    # ---- Enum names mode ----
+    if args.enum_names:
+        if args.mock:
+            print("Error: --enum-names requires a real Gramps import, not --mock", file=sys.stderr)
+            sys.exit(1)
+
+        gramps_lib = try_import_gramps()
+        if gramps_lib is None:
+            print(
+                "Warning: gramps.gen.lib not found. "
+                "Use --gramps-path to point to a Gramps source checkout.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        enum_names = extract_enum_names(gramps_lib)
+
+        output_path = args.output
+        try:
+            with open(output_path, "w") as f:
+                json.dump(enum_names, f, indent=2, default=str)
+        except (IOError, OSError) as e:
+            print(f"Error: Cannot write to {output_path}: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        print(f"Enum names written to {output_path}", file=sys.stderr)
+        print(f"  Enum types: {len(enum_names)}", file=sys.stderr)
+        for enum_name, mapping in sorted(enum_names.items()):
+            print(f"    {enum_name}: {len(mapping)} values", file=sys.stderr)
+        return
+
+    # ---- Full schema extraction mode ----
     gramps_lib = None
     if not args.mock:
         gramps_lib = try_import_gramps()
