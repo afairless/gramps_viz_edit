@@ -182,9 +182,15 @@ echo "=========================================="
 if command -v gramps &> /dev/null; then
     echo "  gramps found at $(which gramps)"
 
+    # Remove stale Gramps lock file from a previous crash
+    rm -f "${GRAMPSHOME:-$HOME/.gramps}/lock"
+
     # Try importing the 5.1 file
     check_cmd_log_errors "Gramps 5.1 import succeeds" \
         gramps -C "gramps-gen-validate-5.1" -i "$OUTPUT_51" -f gramps -y
+
+    # Allow Gramps to release its singleton lock before next invocation
+    sleep 2
 
     # Determine Gramps version for the 5.2 gate
     GRAMPS_VERSION=$(gramps --version 2>/dev/null | grep "^ gramps " | sed 's/.*: //' | cut -d. -f1,2)
