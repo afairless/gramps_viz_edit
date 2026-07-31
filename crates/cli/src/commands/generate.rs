@@ -115,6 +115,18 @@ pub fn run(args: GenerateArgs) -> Result<(), crate::error::CliError> {
     let schema = Schema::for_version(&schema_version)
         .expect("schema version was validated above");
 
+    // Map schema version to full Gramps version for XML header
+    let gramps_version: String = match schema_version.as_str() {
+        "5.0" => "5.0.2".to_string(),
+        "5.1" => "5.1.6".to_string(),
+        "5.2" => "5.2.0".to_string(),
+        "6.0" => "6.0.0".to_string(),
+        _ => {
+            // For unknown versions, derive a full version
+            format!("{}.0", schema_version)
+        }
+    };
+
     // Stage 1: Generate
     let mut result = generate_random(&config, &adversarial_config, schema)?;
     progress.finish();
@@ -140,7 +152,7 @@ pub fn run(args: GenerateArgs) -> Result<(), crate::error::CliError> {
 
     // Stage 5: Serialize
     let map = SerializationMap::new();
-    let writer = GraphXmlWriter::new(map, &schema_version);
+    let writer = GraphXmlWriter::new(map, &gramps_version);
     let file = std::fs::File::create(&output_path).map_err(|e| crate::error::CliError::Io {
         path: output_path.clone(),
         source: e,

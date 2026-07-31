@@ -168,7 +168,7 @@ fn generate_serialize_and_validate_roundtrip() {
 
     // Serialize
     let map = output::SerializationMap::new();
-    let writer = output::GraphXmlWriter::new(map, schema.version);
+    let writer = output::GraphXmlWriter::new(map, "5.2.0");
     let mut buffer = Vec::new();
     writer.write(&result.graph, &mut std::io::BufWriter::new(&mut buffer)).unwrap();
     let xml = String::from_utf8(buffer).unwrap();
@@ -327,12 +327,12 @@ fn generate_respects_schema_version() {
     // Serialize — verify version in header
     let map = output::SerializationMap::new();
     let mut buf = Vec::new();
-    let writer = output::GraphXmlWriter::new(map, schema_51.version);
+    let writer = output::GraphXmlWriter::new(map, "5.1.6");
     writer
         .write(&result.graph, &mut std::io::BufWriter::new(&mut buf))
         .unwrap();
     let xml = String::from_utf8(buf).unwrap();
-    assert!(xml.contains(r#"version="5.1""#));
+    assert!(xml.contains(r#"version="5.1.6""#));
 }
 
 /// Integration test: cross-version validation consistency.

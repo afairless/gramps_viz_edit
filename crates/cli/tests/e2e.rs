@@ -250,7 +250,7 @@ fn e2e_validate_valid_file() {
     let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
 <database xmlns="http://gramps-project.org/xml/1.7.2/">
   <header>
-    <created date="2025-01-01" version="5.2"/>
+    <created date="2025-01-01" version="5.2.0"/>
     <researcher><resname>Test</resname></researcher>
   </header>
 </database>"#;
@@ -288,7 +288,7 @@ fn e2e_generate_with_schema_version_52() {
     let content = std::fs::read_to_string(&output).unwrap();
     // Note: this assertion assumes default features (schema-5-2).
     // Single-version builds (e.g. --features schema-5-1) need separate test jobs.
-    assert!(content.contains(r#"version="5.2""#), "XML should have version 5.2");
+    assert!(content.contains(r#"version="5.2.0""#), "XML should have version 5.2.0");
 
     let _ = std::fs::remove_file(&output);
 }
@@ -315,7 +315,7 @@ fn e2e_generate_with_schema_version_51() {
     }
 
     let content = std::fs::read_to_string(&output).unwrap();
-    assert!(content.contains(r#"version="5.1""#), "XML should have version 5.1");
+    assert!(content.contains(r#"version="5.1.6""#), "XML should have version 5.1.6");
 
     let _ = std::fs::remove_file(&output);
 }
