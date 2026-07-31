@@ -166,13 +166,10 @@ echo "=========================================="
 
 if command -v gramps &> /dev/null; then
     echo "  gramps found at $(which gramps)"
-    GRAMPS_IMPORT_DIR="$TEMP_DIR/gramps-import"
-    mkdir -p "$GRAMPS_IMPORT_DIR"
 
     # Try importing the 5.1 file
-    echo "  [import] gramps -i $OUTPUT_51 -a import -f gramps"
-    if gramps -i "$OUTPUT_51" -a import -f gramps \
-        -O "$GRAMPS_IMPORT_DIR/imported-51" \
+    echo "  [import] gramps -C gramps-gen-validate-5.1 -i $OUTPUT_51 -f gramps -y"
+    if gramps -C "gramps-gen-validate-5.1" -i "$OUTPUT_51" -f gramps -y \
         2>/dev/null; then
         green "Gramps 5.1 import succeeds"
         PASS=$((PASS + 1))
@@ -182,11 +179,8 @@ if command -v gramps &> /dev/null; then
     fi
 
     # Try importing the 5.2 file
-    rm -rf "$GRAMPS_IMPORT_DIR"
-    mkdir -p "$GRAMPS_IMPORT_DIR"
-    echo "  [import] gramps -i $OUTPUT_52 -a import -f gramps"
-    if gramps -i "$OUTPUT_52" -a import -f gramps \
-        -O "$GRAMPS_IMPORT_DIR/imported-52" \
+    echo "  [import] gramps -C gramps-gen-validate-5.2 -i $OUTPUT_52 -f gramps -y"
+    if gramps -C "gramps-gen-validate-5.2" -i "$OUTPUT_52" -f gramps -y \
         2>/dev/null; then
         green "Gramps 5.2 import succeeds"
         PASS=$((PASS + 1))
