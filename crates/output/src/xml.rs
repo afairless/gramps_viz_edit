@@ -2038,6 +2038,42 @@ mod tests {
     // -----------------------------------------------------------------------
     // 5.2-specific tests — depend on 5.2-specific type shapes
     // -----------------------------------------------------------------------
+    // Integration tests for namespace and version
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn xml_namespace_52() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map, "5.2.0");
+        let mut graph = Graph::new();
+        graph
+            .add_node("p1".to_string(), make_person("p1", None))
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains("http://gramps-project.org/xml/1.7.2/"));
+    }
+
+    #[test]
+    fn xml_namespace_51() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map, "5.1.6");
+        let mut graph = Graph::new();
+        graph
+            .add_node("p1".to_string(), make_person("p1", None))
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains("http://gramps-project.org/xml/1.7.1/"));
+    }
+
+    // -----------------------------------------------------------------------
 
     #[cfg(not(feature = "schema-5-1"))]
     mod schema_5_2_tests {
@@ -2115,8 +2151,55 @@ mod tests {
 
     #[cfg(feature = "schema-5-1")]
     mod schema_5_1_tests {
-        // Scaffold for 5.1-specific serialization tests.
-        // Will be populated in subsequent steps with event type,
-        // namespace, and version integration tests.
+        use super::*;
+
+        #[test]
+        fn serialize_event_type_renders_as_death_not_some_death() {
+            let map = SerializationMap::new();
+            let writer = GraphXmlWriter::new(map, "5.1.6");
+            let mut graph = Graph::new();
+            graph
+                .add_node("e1".to_string(), make_event("e1", EventType::Death))
+                .unwrap();
+
+            let mut output = Vec::new();
+            writer.write(&graph, &mut output).unwrap();
+            let xml = String::from_utf8(output).unwrap();
+
+            // Event type should render as "Death", not "Some(Death)"
+            assert!(xml.contains("<eventtype><type>Death</type></eventtype>"),
+                "Event type should render as Death, not Some(Death). Got: {}", xml);
+            assert!(!xml.contains("Some(Death)"),
+                "Event type should NOT contain 'Some(Death)'. Got: {}", xml);
+        }
+
+        #[test]
+        fn xml_header_version_51() {
+            let map = SerializationMap::new();
+            let writer = GraphXmlWriter::new(map, "5.1.6");
+            let graph = Graph::new();
+
+            let mut output = Vec::new();
+            writer.write(&graph, &mut output).unwrap();
+            let xml = String::from_utf8(output).unwrap();
+
+            assert!(xml.contains(r#"version="5.1.6""#));
+        }
+
+        #[test]
+        fn xml_namespace_51() {
+            let map = SerializationMap::new();
+            let writer = GraphXmlWriter::new(map, "5.1.6");
+            let mut graph = Graph::new();
+            graph
+                .add_node("p1".to_string(), make_person("p1", None))
+                .unwrap();
+
+            let mut output = Vec::new();
+            writer.write(&graph, &mut output).unwrap();
+            let xml = String::from_utf8(output).unwrap();
+
+            assert!(xml.contains("http://gramps-project.org/xml/1.7.1/"));
+        }
     }
 }
