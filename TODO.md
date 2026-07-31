@@ -1,101 +1,128 @@
-# Implementation Plan: Fix Gramps 5.1 Import Failure
+# Implementation Plan: Fix validate-gramps-roundtrip.sh Import Failures
 
-Source: `docs/research/gramps-import-fix.md`
+Source: `docs/research/fix-validate-script.md`
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `refactor: restructure serialization test gates for schema-5-1 coverage` | Test gate restructuring | `crates/output/src/xml.rs` | Unit |
-| 2 | `feat: add namespace derivation and full version parameter to GraphXmlWriter` | Unified namespace + version parameter | `crates/output/src/xml.rs` | Unit |
-| 3 | `feat: wire schema version to full Gramps version in CLI` | CLI version mapping | `crates/cli/src/commands/generate.rs` | Unit |
-| 4 | `fix: add event_type_display helper for correct event type rendering` | Event type rendering | `crates/typed-graph/src/graph.rs`, `crates/output/src/xml.rs`, `crates/typed-graph/src/lib.rs` | Unit |
-| 5 | `test: add edge role/relation serialization tests and audit Debug formatting` | Audit + edge role tests | `crates/output/src/xml.rs` | Unit |
-| 6 | `test: add integration tests for namespace, version, and event type` | Integration tests | `crates/output/src/xml.rs` | Unit |
-| 7 | `chore: add validate-gramps-roundtrip.sh script` | Validation script | `scripts/validate-gramps-roundtrip.sh` | — |
+| 1 | `chore: add external dependency check for xmllint in validation script` | External dependency guard | `scripts/validate-gramps-roundtrip.sh` | — |
+| 2 | `fix: correct Gramps 5.1 import command syntax and remove temp tree cleanup` | Fix 5.1 import command | `scripts/validate-gramps-roundtrip.sh` | — |
+| 3 | `fix: gate 5.2 import on Gramps version to avoid expected failure` | Gramps version gate | `scripts/validate-gramps-roundtrip.sh` | — |
+| 4 | `feat: add diagnostic error output on import failure` | Diagnostic error logging | `scripts/validate-gramps-roundtrip.sh` | — |
+| 5 | `fix: add sleep between Gramps invocations and handle stale lock files` | Race condition + stale lock fix | `scripts/validate-gramps-roundtrip.sh` | — |
+| 6 | `test: verify fix-validate-script changes with manual verification` | Verification | — | — |
 
 ## Step Details
 
-### 1 — Test gate restructuring
+### 1 — External dependency guard
 
-**What**: Move schema-independent tests (document structure, header, section order, escaping, well-formedness, element serialization for all 10 types, ref serialization) outside the `#[cfg(not(feature = "schema-5-1"))]` gate so they run under all feature combinations. Keep the existing gate only on tests that depend on 5.2-specific type shapes (e.g., `EventType::Birth` direct field access, hardcoded `"5.2"` version strings). Add an empty `#[cfg(feature = "schema-5-1")]` module scaffold for future 5.1-specific tests.
+**What**: Add a `command -v xmllint` check at the top of the script (after the `cd` to project root, before any build or test logic). Exit with a clear error message if `xmllint` is not found.
 
-**Helper functions** (`make_person`, `make_family`, `make_event`, etc.) must be moved to a shared location accessible to both gated modules (e.g., as private helpers in the outer scope of the test module, or duplicated minimally).
+**Rationale**: The script already uses `xmllint` for structural checks but fails silently (or with a cryptic error) if it's missing. A guard at the top gives a clear, actionable error message.
 
-**Tests**: All existing tests continue to pass under `cargo test -p output --features schema-5-2` (default). `cargo test -p output --features schema-5-1` now runs the schema-independent tests (previously it ran zero tests).
+**Location**: After the `cd "$PROJECT_DIR"` line, before the `TEMP_DIR` and `trap` setup.
 
-### 2 — Unified namespace + full version parameter
+**Tests**: — (manual verification: run without xmllint, confirm clear error message and exit code 1)
 
-**What**:
+### 2 — Fix 5.1 import command
 
-- Change `GraphXmlWriter::new(map, schema_version: &str)` → `GraphXmlWriter::new(map, gramps_version: &str)` where `gramps_version` is a full version like `"5.1.6"`.
-- Add private method `derive_namespace(gramps_version: &str) -> String` with a lookup table mapping major.minor prefix to XML namespace URI. For unknown versions, derive with pattern `http://gramps-project.org/xml/1.{major}.{minor}/` and emit a warning (via `eprintln!` or logging).
-- Add private method `schema_version_prefix(gramps_version: &str) -> String` that returns the `"X.Y"` prefix for the `<created version="..."/>` header attribute.
-- Replace the hardcoded `r#"<database xmlns="http://gramps-project.org/xml/1.7.2/">"#` with the derived namespace.
-- Update all call sites in tests to pass `"5.2.0"` instead of `"5.2"` (and `"5.1.6"` for 5.1 tests).
+**What**: Two changes in the Gramps import block:
 
-**Tests**: `xml_header_version_parameter` is updated to check `"5.1.6"` instead of `"5.1"`. A new test verifies the correct namespace is emitted for each version.
+**Problem 1a: `-a import` is invalid.** Replace the Gramps 5.1 import command:
 
-### 3 — CLI version mapping
+```bash
+# Before (wrong — -a import is not a recognized action, -O opens nonexistent tree)
+gramps -i "$OUTPUT_51" -a import -f gramps -O "$GRAMPS_IMPORT_DIR/imported-51"
+```
 
-**What**: In `crates/cli/src/commands/generate.rs`, add a mapping from `--schema-version` flag value to the representative full Gramps version:
+```bash
+# After (correct — -C creates a new tree, no -a import needed, -y for non-interactive)
+gramps -C "gramps-gen-validate-5.1" -i "$OUTPUT_51" -f gramps -y
+```
 
-| Schema | Full version |
-|---|---|
-| `"5.0"` | `"5.0.2"` |
-| `"5.1"` | `"5.1.6"` |
-| `"5.2"` | `"5.2.0"` |
-| `"6.0"` | `"6.0.0"` (TBC) |
+**Problem 1b: Dead code cleanup.** Remove `$GRAMPS_IMPORT_DIR` entirely:
 
-Pass the full version string to `GraphXmlWriter::new()` instead of the bare schema version. The `schema_version` variable used for schema lookups remains the short form.
+- Remove the `GRAMPS_IMPORT_DIR="$TEMP_DIR/gramps-import"` variable declaration
+- Remove the `mkdir -p "$GRAMPS_IMPORT_DIR"` before the 5.1 import
+- Remove the `rm -rf "$GRAMPS_IMPORT_DIR"` and second `mkdir -p "$GRAMPS_IMPORT_DIR"` between the 5.1 and 5.2 import blocks
 
-**Tests**: Update the CLI's `generate` command test (if any) or verify via `cargo build`.
+Apply the same fix pattern to the 5.2 import block, using the tree name `"gramps-gen-validate-5.2"`.
 
-### 4 — Event type rendering
+**Open question (GRAMPSHOME isolation)**: As documented in the plan, setting `GRAMPSHOME` to a temp directory is an optional enhancement. The initial implementation will NOT add `GRAMPSHOME` isolation; it can be added later if test pollution becomes a problem.
 
-**What**:
+**Tests**: — (manual: run the fixed script with Gramps 5.1.x, confirm 5.1 import passes, 5.2 import still fails with expected error)
 
-- Add `pub fn event_type_display(event_type: ...) -> String` in `crates/typed-graph/src/graph.rs` following the existing `#[cfg(feature = "schema-5-1")]` / `#[cfg(not(feature = "schema-5-1"))]` pattern:
-  - **5.1 (merged)**: takes `Option<EventType>`, returns `format!("{:?}", event_type.unwrap())` or similar
-  - **5.2 (default)**: takes `EventType`, returns `format!("{:?}", event_type)`
-- Export `event_type_display` from `crates/typed-graph/src/lib.rs`.
-- Replace `format!("{:?}", e.event_type)` in `crates/output/src/xml.rs` at line ~390 with `typed_graph::event_type_display(e.event_type)`.
+### 3 — Gramps version gate
 
-**Tests**: Under `#[cfg(feature = "schema-5-1")]`, verify `<type>Death</type>` (not `<type>Some(Death)</type>`) in serialized output. Under `#[cfg(not(feature = "schema-5-1"))]`, existing test `serialize_event_element` already asserts `<type>Birth</type>`.
+**What**: Add a version check before attempting the 5.2 import. Extract the installed Gramps version, compare it to 5.2, and skip the 5.2 import if the installed version is older.
 
-### 5 — Audit + edge role/relation tests
+```bash
+# Extract gramps version (expects output like: " gramps : 5.1.6")
+GRAMPS_VERSION=$(gramps --version 2>/dev/null | grep "^ gramps " | sed 's/.*: //' | cut -d. -f1,2)
 
-**What**:
+if [ -z "$GRAMPS_VERSION" ]; then
+    echo "  Could not determine Gramps version — skipping import checks"
+elif [ "$(printf '%s\n%s\n' "5.2" "$GRAMPS_VERSION" | awk -F. '{printf "%03d%03d\n", $1, $2}' | sort -n | head -n1)" = "$(printf '%s' "5.2" | awk -F. '{printf "%03d%03d\n", $1, $2}')" ]; then
+    # ... attempt 5.2 import ...
+else
+    echo "  gramps $GRAMPS_VERSION < 5.2 — skipping 5.2 import check (known limitation)"
+fi
+```
 
-- Audit all `{:?}` format calls in `xml.rs` (lines 390, 974, 984) to confirm none produce `Option<>` wrapping artifacts.
-- Line 974 (`get_edge_role`): `format!("{:?}", metadata.role.as_ref().unwrap_or(&EventRoleType::Primary))` — this is fine since `role` is always `Option<EventRoleType>` regardless of schema version, and the `unwrap_or` provides a default.
-- Line 984 (`get_edge_relation`): `format!("{:?}", metadata.relation.as_ref().unwrap_or(&ChildRefType::Birth))` — same reasoning, safe.
-- Add explicit unit tests for `get_edge_role()` and `get_edge_relation()` that construct edges with each `EventRoleType` and `ChildRefType` variant and assert the output string matches the expected value (e.g., `"Primary"`, `"Birth"`).
+**Portability**: Use `awk` zero-padding + numeric `sort` instead of GNU `sort -V` (not available on macOS/BSD).
 
-**Tests**: New tests exercise `get_edge_role` and `get_edge_relation` with all variants, running under `--all-features`.
+**Location**: The version check wraps the 5.2 import block. The existing `if command -v gramps` block is restructured to contain both the 5.1 import (always attempted if gramps is available) and the 5.2 import (gated on version ≥ 5.2).
 
-### 6 — Integration tests
+**Tests**: — (manual: run with Gramps 5.1.x, confirm 5.2 import is skipped with informational message; run with Gramps 5.2.x, confirm both imports are attempted)
 
-**What**: Add integration tests (in the restructured test modules from Step 1) that:
+### 4 — Diagnostic error output
 
-- Construct a minimal `Graph`, serialize with each schema version, and assert the correct namespace appears in the output.
-- Gate on `#[cfg(feature = "schema-5-1")]` to verify event type renders as `Death`, not `Some(Death)`.
-- Verify `<created version="5.1.6"/>` (or equivalent full version) appears in the header for 5.1 output, and `"5.2.0"` for 5.2 output.
+**What**: Add a new helper function `check_cmd_log_errors` that preserves error output on failure:
 
-**Tests**: These run with `cargo test --all-features -p output` and catch regressions without needing Gramps installed.
+```bash
+check_cmd_log_errors() {
+    local desc="$1"
+    shift
+    local logfile="$TEMP_DIR/$(echo "$desc" | tr ' ' '-' | tr -cd '[:alnum:]-').log"
+    if "$@" > "$logfile" 2>&1; then
+        green "$desc"
+        PASS=$((PASS + 1))
+    else
+        red "$desc"
+        echo "    Full log: $logfile" >&2
+        tail -n 20 "$logfile" | sed 's/^/    | /' >&2
+        FAIL=$((FAIL + 1))
+    fi
+}
+```
 
-### 7 — Validation script
+Replace the `gramps -C ...` invocation blocks with `check_cmd_log_errors` calls instead of the bare `if gramps ...` pattern. This preserves the full error output in a temporary log file and shows the last 20 lines inline for quick CI debugging.
 
-**What**: Create `scripts/validate-gramps-roundtrip.sh` that:
+**Tests**: — (manual: force an import failure, confirm the error log is captured and displayed)
 
-1. Builds: `cargo build --release --features schema-5-1`
-2. Generates: runs the exact command from the bug report
-3. Structural checks (no Gramps required):
-   - `xmllint --noout` — well-formed XML
-   - `grep` for namespace: must be `1.7.1` for 5.1, `1.7.2` for 5.2
-   - `grep` for `Some(` — must be absent (catches leftover `{:?}` artifacts)
-   - `grep` for `<created version="..."` — must contain a 3-part version string
-4. Gramps import check (optional, only if `gramps` is on `$PATH`): runs import and checks acceptance
-5. Exit code: non-zero on any failure, zero on success
+### 5 — Race condition + stale lock fix
 
-Also runs the same checks for schema-5-2 (default build) to verify no regression.
+**What**: Two reliability improvements:
 
-**Tests**: N/A (shell script, tested manually)
+1. **Stale lock cleanup**: Before the first `gramps -C` invocation (inside the `if command -v gramps` block), remove any stale lock file:
+
+   ```bash
+   rm -f "${GRAMPSHOME:-$HOME/.gramps}/lock"
+   ```
+
+2. **Sleep between invocations**: Add `sleep 2` between the 5.1 and 5.2 import blocks to prevent Gramps' singleton lock from causing an intermittent "Gramps is already running" error.
+
+**Location**: The lock cleanup goes just before the first `gramps -C ...` invocation. The `sleep 2` goes between the 5.1 and 5.2 import blocks (after the 5.1 `check_cmd_log_errors` call, before the 5.2 version gate).
+
+**Tests**: — (manual: run back-to-back, confirm no race condition; simulate stale lock, confirm cleanup and successful import)
+
+### 6 — Verification
+
+**What**: Manual verification following the verification plan in the source document:
+
+1. **Before-fix baseline**: Run the script as-is. Confirm 12 structural checks pass, 2 Gramps imports fail.
+2. **After-fix with Gramps 5.1.x**: Run the fixed script. Confirm 12 structural + 1 (5.1) import pass, and the 5.2 import is skipped. Overall exit code 0.
+3. **After-fix with Gramps 5.2.x** (if available): Run the fixed script. Confirm both imports pass. Exit code 0.
+4. **After-fix without Gramps on PATH**: Run the fixed script. Confirm 12 structural checks pass, all imports skipped, exit code 0.
+5. **Edge cases**: Test with `GRAMPSHOME` set and unset. Test with a stale lock file present. Test on both Linux (GNU coreutils) and macOS (BSD coreutils) if possible.
+
+**Tests**: — (manual verification only)
