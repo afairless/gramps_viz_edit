@@ -19,6 +19,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_DIR"
 
+# Check required external tools
+if ! command -v xmllint >/dev/null 2>&1; then
+    echo "ERROR: xmllint not found — install libxml2-utils (apt) or libxml2 (brew)" >&2
+    exit 1
+fi
+
 TEMP_DIR=$(mktemp -d /tmp/gramps-gen-validate-XXXXXX)
 trap 'rm -rf "$TEMP_DIR"' EXIT
 
