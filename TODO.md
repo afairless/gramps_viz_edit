@@ -1,193 +1,101 @@
-# Implementation Plan: Fix `schema-5.1.json` Format Incompatibility
+# Implementation Plan: Fix Gramps 5.1 Import Failure
 
-**Source documents:**
-
-- `docs/research/fix-schema-5.1-format.md`
-- `docs/research/schema-5.1-vs-5.2.md`
-- `docs/ARCHITECTURE.md`
-- `AGENTS.md`
-
-## Summary
-
-`cargo build --features schema-5-1` produces 220+ compilation errors because `schema-5.1.json` is in **JSON Schema format** while `build.rs` expects the **custom flat format** used by `schema-5.2.json`. This plan adds a build-time converter that detects and normalizes JSON Schema format to the custom flat format in memory before the merge and code generation stages.
+Source: `docs/research/gramps-import-fix.md`
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 0 | `feat: extract Gramps 5.1 enum constants` | Enum lookup tables | `extract/extract_schema.py` (add `--enum-names` flag), `crates/typed-graph/build/enum_constants_5_1.json` | Smoke |
-| 1 | `feat: add schema conversion module (JSON Schema → flat format)` | Conversion logic | `crates/typed-graph/src/schema_convert.rs`, `crates/typed-graph/src/lib.rs` (add `pub mod schema_convert`) | Unit, Property-based |
-| 2 | `feat: wire schema_convert into build.rs via #[path] include` | Build integration | `crates/typed-graph/build.rs`, `crates/typed-graph/tests/schema_convert_tests.rs` | Unit |
-| 3 | `fix: handle merged Option<T> fields in generate/random.rs` | Generator fixes | `crates/typed-graph/src/generate/random.rs` | Unit |
-| 4 | `fix: handle merged Option<T> fields in generate/builder.rs` | Builder fixes | `crates/typed-graph/src/generate/builder.rs` | Unit |
-| 5 | `fix: handle merged Option<T> fields in generate/adversarial.rs` | Adversarial fixes | `crates/typed-graph/src/generate/adversarial.rs` | Unit |
-| 6 | `test: add integration tests for merged schema (5.1+5.2)` | Integration tests | `crates/typed-graph/tests/merged_schema.rs` | Integration |
-| 7 | `feat: add --enum-names flag and JSON Schema warning to extract_schema.py` | Extractor future-proofing | `extract/extract_schema.py` | — |
-| 8 | `docs: document schema conversion process and merged schema` | Documentation | `docs/` (update ARCHITECTURE.md or AGENTS.md if needed) | — |
+| 1 | `refactor: restructure serialization test gates for schema-5-1 coverage` | Test gate restructuring | `crates/output/src/xml.rs` | Unit |
+| 2 | `feat: add namespace derivation and full version parameter to GraphXmlWriter` | Unified namespace + version parameter | `crates/output/src/xml.rs` | Unit |
+| 3 | `feat: wire schema version to full Gramps version in CLI` | CLI version mapping | `crates/cli/src/commands/generate.rs` | Unit |
+| 4 | `fix: add event_type_display helper for correct event type rendering` | Event type rendering | `crates/typed-graph/src/graph.rs`, `crates/output/src/xml.rs`, `crates/typed-graph/src/lib.rs` | Unit |
+| 5 | `test: add edge role/relation serialization tests and audit Debug formatting` | Audit + edge role tests | `crates/output/src/xml.rs` | Unit |
+| 6 | `test: add integration tests for namespace, version, and event type` | Integration tests | `crates/output/src/xml.rs` | Unit |
+| 7 | `chore: add validate-gramps-roundtrip.sh script` | Validation script | `scripts/validate-gramps-roundtrip.sh` | — |
 
----
+## Step Details
 
-## Detailed Steps
+### 1 — Test gate restructuring
 
-### Step 0 — Extract Gramps 5.1 enum constants
+**What**: Move schema-independent tests (document structure, header, section order, escaping, well-formedness, element serialization for all 10 types, ref serialization) outside the `#[cfg(not(feature = "schema-5-1"))]` gate so they run under all feature combinations. Keep the existing gate only on tests that depend on 5.2-specific type shapes (e.g., `EventType::Birth` direct field access, hardcoded `"5.2"` version strings). Add an empty `#[cfg(feature = "schema-5-1")]` module scaffold for future 5.1-specific tests.
 
-**Prerequisites:** Clone Gramps 5.1.6 source into a known location (e.g., `/tmp/gramps-5.1.6`) for enum member introspection.
+**Helper functions** (`make_person`, `make_family`, `make_event`, etc.) must be moved to a shared location accessible to both gated modules (e.g., as private helpers in the outer scope of the test module, or duplicated minimally).
 
-**Actions:**
+**Tests**: All existing tests continue to pass under `cargo test -p output --features schema-5-2` (default). `cargo test -p output --features schema-5-1` now runs the schema-independent tests (previously it ran zero tests).
 
-1. Clone Gramps 5.1.6 from `https://github.com/gramps-project/gramps.git` tag `v5.1.6`.
-2. Add a `--enum-names` flag to `extract/extract_schema.py` that:
-   - Imports `gramps.gen.lib` from the cloned checkout (using `PYTHONPATH`).
-   - Iterates over all enum classes (e.g., `EventType`, `EventRoleType`, `NameType`, `ChildRefType`, etc.).
-   - Extracts `(member.value, member.name)` pairs for each enum.
-   - Writes a JSON mapping: `{"EnumType": {"0": "Custom", "1": "Marriage", ...}}`.
-3. Run the extraction to generate `crates/typed-graph/build/enum_constants_5_1.json`.
-4. Commit the static artifact.
+### 2 — Unified namespace + full version parameter
 
-**Key deliverables:**
+**What**:
 
-- `extract/extract_schema.py` — extended with `--enum-names` flag
-- `crates/typed-graph/build/enum_constants_5_1.json` — enum lookup tables
+- Change `GraphXmlWriter::new(map, schema_version: &str)` → `GraphXmlWriter::new(map, gramps_version: &str)` where `gramps_version` is a full version like `"5.1.6"`.
+- Add private method `derive_namespace(gramps_version: &str) -> String` with a lookup table mapping major.minor prefix to XML namespace URI. For unknown versions, derive with pattern `http://gramps-project.org/xml/1.{major}.{minor}/` and emit a warning (via `eprintln!` or logging).
+- Add private method `schema_version_prefix(gramps_version: &str) -> String` that returns the `"X.Y"` prefix for the `<created version="..."/>` header attribute.
+- Replace the hardcoded `r#"<database xmlns="http://gramps-project.org/xml/1.7.2/">"#` with the derived namespace.
+- Update all call sites in tests to pass `"5.2.0"` instead of `"5.2"` (and `"5.1.6"` for 5.1 tests).
 
-**Decisions (from user):**
+**Tests**: `xml_header_version_parameter` is updated to check `"5.1.6"` instead of `"5.1"`. A new test verifies the correct namespace is emitted for each version.
 
-- Clone Gramps 5.1.6 source rather than using the installed package.
-- Skip manual required-field source audit; rely on structural heuristics.
-- Include Step 0 in the implementation plan.
+### 3 — CLI version mapping
 
----
+**What**: In `crates/cli/src/commands/generate.rs`, add a mapping from `--schema-version` flag value to the representative full Gramps version:
 
-### Step 1 — Create `schema_convert.rs` conversion module
+| Schema | Full version |
+|---|---|
+| `"5.0"` | `"5.0.2"` |
+| `"5.1"` | `"5.1.6"` |
+| `"5.2"` | `"5.2.0"` |
+| `"6.0"` | `"6.0.0"` (TBC) |
 
-**Actions:**
+Pass the full version string to `GraphXmlWriter::new()` instead of the bare schema version. The `schema_version` variable used for schema lookups remains the short form.
 
-1. Create `crates/typed-graph/src/schema_convert.rs` with three public functions:
-   - `is_json_schema_format(schema: &Value) -> bool` — detects JSON Schema format by checking for `"properties"` key inside `fields`.
-   - `convert(schema: Value, version: &str, enum_constants: &Value) -> Result<Value, String>` — converts JSON Schema format to custom flat format in memory.
-   - `validate_flat_format(schema: &Value) -> Result<(), Vec<String>>` — validates structural correctness after conversion.
-2. Add `pub mod schema_convert;` to `crates/typed-graph/src/lib.rs`.
-3. Implement conversion logic per Step 1a–1e of the plan:
-   - **Primary type conversion:** Extract `properties` → new `fields`, map types, determine `kind` (handle, handle_ref), infer `required` via `oneOf` null-wrapper heuristic with explicit overrides (`gramps_id`, `father_handle`, `mother_handle` = optional).
-   - **Secondary type conversion:** Same logic; skip `Tag` secondary type with warning, strip `_class`/`private`/`change`.
-   - **Enum type conversion:** Map integer values → string names using lookup tables from Step 0; warn on unknown integers.
-   - **Date normalization:** Convert 5.1's `Date` object (with `dateval` array) to 5.2-compatible `DateValue` with `year`/`month`/`day` scalars; map `modifier`/`quality` integers to enums.
-   - **Output validation:** `validate_flat_format()` checks for missing `type`, missing `target` on `handle_ref`, missing `schema` on `embedded`, missing `items` on `array`.
-4. **Unit tests** (minimum 20 tests covering all conversion paths — see plan Step 1f for the full list).
-5. **Property-based tests:** `property_convert_idempotent` (already-flat schema unchanged), `property_is_json_schema_false_after_convert`.
+**Tests**: Update the CLI's `generate` command test (if any) or verify via `cargo build`.
 
-**Key deliverables:**
+### 4 — Event type rendering
 
-- `crates/typed-graph/src/schema_convert.rs` (~500–600 lines including tests)
-- `crates/typed-graph/src/lib.rs` — add `pub mod schema_convert;`
+**What**:
 
----
+- Add `pub fn event_type_display(event_type: ...) -> String` in `crates/typed-graph/src/graph.rs` following the existing `#[cfg(feature = "schema-5-1")]` / `#[cfg(not(feature = "schema-5-1"))]` pattern:
+  - **5.1 (merged)**: takes `Option<EventType>`, returns `format!("{:?}", event_type.unwrap())` or similar
+  - **5.2 (default)**: takes `EventType`, returns `format!("{:?}", event_type)`
+- Export `event_type_display` from `crates/typed-graph/src/lib.rs`.
+- Replace `format!("{:?}", e.event_type)` in `crates/output/src/xml.rs` at line ~390 with `typed_graph::event_type_display(e.event_type)`.
 
-### Step 2 — Wire conversion into `build.rs`
+**Tests**: Under `#[cfg(feature = "schema-5-1")]`, verify `<type>Death</type>` (not `<type>Some(Death)</type>`) in serialized output. Under `#[cfg(not(feature = "schema-5-1"))]`, existing test `serialize_event_element` already asserts `<type>Birth</type>`.
 
-**Actions:**
+### 5 — Audit + edge role/relation tests
 
-1. Use `#[path = "src/schema_convert.rs"] mod schema_convert;` at the top of `build.rs` to inline the module (avoids circular build-dependency).
-2. Add enum constants loading in `main()` before `load_schemas()`:
+**What**:
 
-   ```rust
-   let enum_constants_path = crate_dir.join("build/enum_constants_5_1.json");
-   let enum_constants = if enum_constants_path.exists() { serde_json::from_str(&fs::read_to_string(&enum_constants_path)?)? } else { serde_json::Value::Null };
-   ```
+- Audit all `{:?}` format calls in `xml.rs` (lines 390, 974, 984) to confirm none produce `Option<>` wrapping artifacts.
+- Line 974 (`get_edge_role`): `format!("{:?}", metadata.role.as_ref().unwrap_or(&EventRoleType::Primary))` — this is fine since `role` is always `Option<EventRoleType>` regardless of schema version, and the `unwrap_or` provides a default.
+- Line 984 (`get_edge_relation`): `format!("{:?}", metadata.relation.as_ref().unwrap_or(&ChildRefType::Birth))` — same reasoning, safe.
+- Add explicit unit tests for `get_edge_role()` and `get_edge_relation()` that construct edges with each `EventRoleType` and `ChildRefType` variant and assert the output string matches the expected value (e.g., `"Primary"`, `"Birth"`).
 
-3. Wire format detection + conversion into `load_schemas()` after each schema is parsed from JSON.
-4. Add flat-format validation after conversion, with `panic!` on failure.
-5. Create `crates/typed-graph/tests/schema_convert_tests.rs` that also includes the module via `#[path]` for integration-level testing (since `#[cfg(test)]` in `build.rs` won't run via `cargo test`).
+**Tests**: New tests exercise `get_edge_role` and `get_edge_relation` with all variants, running under `--all-features`.
 
-**Key deliverables:**
+### 6 — Integration tests
 
-- `crates/typed-graph/build.rs` — enum constants loading, format detection, conversion wiring, validation
-- `crates/typed-graph/tests/schema_convert_tests.rs` — integration tests for the build path
+**What**: Add integration tests (in the restructured test modules from Step 1) that:
 
----
+- Construct a minimal `Graph`, serialize with each schema version, and assert the correct namespace appears in the output.
+- Gate on `#[cfg(feature = "schema-5-1")]` to verify event type renders as `Death`, not `Some(Death)`.
+- Verify `<created version="5.1.6"/>` (or equivalent full version) appears in the header for 5.1 output, and `"5.2.0"` for 5.2 output.
 
-### Step 3 — Fix `generate/random.rs` for merged `Option<T>` fields
+**Tests**: These run with `cargo test --all-features -p output` and catch regressions without needing Gramps installed.
 
-**Actions:**
+### 7 — Validation script
 
-1. Identify struct literal constructions in `generate/random.rs` that reference fields which become `Option<T>` under the merged schema.
-2. Wrap values in `Some()` for optional fields.
-3. Use `Schema::field_availability` (or `field_exists_for_version` helper) to conditionally populate version-specific fields.
-4. Run `cargo test -p typed-graph` to verify.
+**What**: Create `scripts/validate-gramps-roundtrip.sh` that:
 
-**Key deliverables:**
+1. Builds: `cargo build --release --features schema-5-1`
+2. Generates: runs the exact command from the bug report
+3. Structural checks (no Gramps required):
+   - `xmllint --noout` — well-formed XML
+   - `grep` for namespace: must be `1.7.1` for 5.1, `1.7.2` for 5.2
+   - `grep` for `Some(` — must be absent (catches leftover `{:?}` artifacts)
+   - `grep` for `<created version="..."` — must contain a 3-part version string
+4. Gramps import check (optional, only if `gramps` is on `$PATH`): runs import and checks acceptance
+5. Exit code: non-zero on any failure, zero on success
 
-- `crates/typed-graph/src/generate/random.rs` — fixes for `Option<T>` handling
+Also runs the same checks for schema-5-2 (default build) to verify no regression.
 
----
-
-### Step 4 — Fix `generate/builder.rs` for merged `Option<T>` fields
-
-**Actions:**
-
-1. Verify builder `build()` methods correctly handle `Option<T>` fields from the merged schema.
-2. Ensure `Some()` / `None` wrapping is correct for fields that may or may not exist in each version.
-3. Run `cargo test -p typed-graph` to verify.
-
-**Key deliverables:**
-
-- `crates/typed-graph/src/generate/builder.rs` — fixes for `Option<T>` handling
-
----
-
-### Step 5 — Fix `generate/adversarial.rs` for merged `Option<T>` fields
-
-**Actions:**
-
-1. Update adversarial strategies to use `if let Some(ref mut val) = data.optional_field { ... }` patterns where fields are now `Option<T>`.
-2. Run `cargo test -p typed-graph` to verify.
-
-**Key deliverables:**
-
-- `crates/typed-graph/src/generate/adversarial.rs` — fixes for `Option<T>` handling
-
----
-
-### Step 6 — Add integration tests for merged schema
-
-**Actions:**
-
-1. Create `crates/typed-graph/tests/merged_schema.rs` with tests covering:
-   - **Shape test:** Construct `PersonData` under merged schema; verify fields accessible and 5.1-only fields (e.g., `birth_ref_index`) are `Option<i32>`.
-   - **Generation test:** Run `generate_random()` with `Schema::for_version("5.1")` and verify `graph.validate()` passes. Repeat with merged schema.
-   - **Enum values test:** Verify `Schema::valid_enum_values` for `EventType` contains both 5.1 and 5.2 values with no duplicate variant names.
-   - **DateValue test:** Construct `DateValue` via `DateValue::new(1870)`; verify `is_valid()` and `display_text()` work.
-   - **XML round-trip:** Generate a small graph (10 persons, 2 families), serialize to `.gramps` XML, verify well-formed `<database>` root.
-
-**Key deliverables:**
-
-- `crates/typed-graph/tests/merged_schema.rs` — merged schema integration tests
-
----
-
-### Step 7 — Update `extract_schema.py` (future-proofing)
-
-**Actions:**
-
-1. Ensure the `--enum-names` flag from Step 0 is merged and functional.
-2. Add a detection check: if `cls.get_schema()` returns JSON Schema format (after the fact), print a warning directing users that the build system handles format conversion automatically at compile time.
-3. Optionally add a `--convert-to-flat` flag that outputs the custom flat format directly (for use outside the build system).
-
-**Key deliverables:**
-
-- `extract/extract_schema.py` — `--enum-names` flag, JSON Schema format warning
-
----
-
-### Step 8 — Documentation updates
-
-**Actions:**
-
-1. Update `docs/ARCHITECTURE.md` (or create a new section) documenting:
-   - The two schema formats (JSON Schema vs. custom flat).
-   - The build-time conversion pipeline.
-   - How the merge algorithm handles version-specific fields.
-   - How to update schemas in the future.
-2. If `AGENTS.md` needs updates to reflect the new module (`schema_convert.rs`) and new build pipeline, apply them.
-
-**Key deliverables:**
-
-- `docs/ARCHITECTURE.md` — updated schema documentation
-- `AGENTS.md` — updated if needed
+**Tests**: N/A (shell script, tested manually)
