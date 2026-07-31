@@ -1008,7 +1008,7 @@ fn escape_xml(s: &str) -> String {
     result
 }
 
-#[cfg(all(test, not(feature = "schema-5-1")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::SerializationMap;
@@ -1020,7 +1020,7 @@ mod tests {
         Node::Person(PersonData {
             handle: handle.to_string(),
             gramps_id: gramps_id.map(|s| s.to_string()),
-            gender: 0,
+            gender: typed_graph::graph::into_gender_field(0),
             primary_name: Name {
                 first_name: Some("John".to_string()),
                 surname_list: vec![Surname {
@@ -1042,6 +1042,7 @@ mod tests {
             address_list: vec![],
             url_list: vec![],
             lds_ord_list: vec![],
+            ..Default::default()
         })
     }
 
@@ -1059,6 +1060,7 @@ mod tests {
             media_list: vec![],
             tag_list: vec![],
             attribute_list: vec![],
+            ..Default::default()
         })
     }
 
@@ -1067,7 +1069,7 @@ mod tests {
         Node::Event(EventData {
             handle: handle.to_string(),
             gramps_id: None,
-            event_type,
+            event_type: typed_graph::graph::into_event_type_field(event_type),
             date: None,
             place_handle: None,
             description: None,
@@ -1076,6 +1078,7 @@ mod tests {
             media_list: vec![],
             tag_list: vec![],
             attribute_list: vec![],
+            ..Default::default()
         })
     }
 
@@ -1092,6 +1095,7 @@ mod tests {
             media_list: vec![],
             attribute_list: vec![],
             tag_list: vec![],
+            ..Default::default()
         })
     }
 
@@ -1100,12 +1104,13 @@ mod tests {
         Node::Citation(CitationData {
             handle: handle.to_string(),
             gramps_id: None,
-            source_handle: "s1".to_string(),
+            source_handle: typed_graph::graph::into_source_handle_field("s1".to_string()),
             confidence: None,
             page: None,
             note_list: vec![],
             media_list: vec![],
             tag_list: vec![],
+            ..Default::default()
         })
     }
 
@@ -1124,6 +1129,7 @@ mod tests {
             media_list: vec![],
             tag_list: vec![],
             attribute_list: vec![],
+            ..Default::default()
         })
     }
 
@@ -1155,6 +1161,7 @@ mod tests {
             note_list: vec![],
             tag_list: vec![],
             attribute_list: vec![],
+            ..Default::default()
         })
     }
 
@@ -1238,24 +1245,6 @@ mod tests {
         let xml = String::from_utf8(output).unwrap();
 
         assert!(xml.contains(r#"<family handle="f1""#));
-    }
-
-    #[test]
-    fn serialize_event_element() {
-        let map = SerializationMap::new();
-        let writer = GraphXmlWriter::new(map, "5.2");
-        let mut graph = Graph::new();
-        graph
-            .add_node("e1".to_string(), make_event("e1", EventType::Birth))
-            .unwrap();
-
-        let mut output = Vec::new();
-        writer.write(&graph, &mut output).unwrap();
-        let xml = String::from_utf8(output).unwrap();
-
-        assert!(xml.contains(r#"<event handle="e1""#));
-        // Event should have eventtype with type child
-        assert!(xml.contains("<eventtype><type>Birth</type></eventtype>"));
     }
 
     #[test]
@@ -1403,24 +1392,6 @@ mod tests {
     }
 
     #[test]
-    fn serialize_event_with_date() {
-        let map = SerializationMap::new();
-        let writer = GraphXmlWriter::new(map, "5.2");
-        let mut graph = Graph::new();
-        let mut event = make_event("e1", EventType::Birth);
-        if let Node::Event(ref mut e) = event {
-            e.date = Some(DateValue::new_ymd(1890, 6, 15));
-        }
-        graph.add_node("e1".to_string(), event).unwrap();
-
-        let mut output = Vec::new();
-        writer.write(&graph, &mut output).unwrap();
-        let xml = String::from_utf8(output).unwrap();
-
-        assert!(xml.contains(r#"val="1890-06-15""#));
-    }
-
-    #[test]
     fn serialize_tag_minimal_fields() {
         let map = SerializationMap::new();
         let writer = GraphXmlWriter::new(map, "5.2");
@@ -1475,10 +1446,10 @@ mod tests {
             .add_edge(Edge::PersonEventRef {
                 source: "p1".to_string(),
                 target: "e1".to_string(),
-                metadata: Box::new(EventRef {
-                    ref_field: "e1".to_string(),
-                    role: Some(EventRoleType::Primary),
-                }),
+                metadata: Box::new(typed_graph::graph::make_event_ref(
+                    "e1".to_string(),
+                    Some(EventRoleType::Primary),
+                )),
             })
             .unwrap();
 
@@ -1501,10 +1472,10 @@ mod tests {
             .add_edge(Edge::FamilyChildRef {
                 source: "f1".to_string(),
                 target: "p1".to_string(),
-                metadata: Box::new(ChildRef {
-                    ref_field: "p1".to_string(),
-                    relation: Some(ChildRefType::Birth),
-                }),
+                metadata: Box::new(typed_graph::graph::make_child_ref(
+                    "p1".to_string(),
+                    Some(ChildRefType::Birth),
+                )),
             })
             .unwrap();
 
@@ -1529,6 +1500,7 @@ mod tests {
                 metadata: Box::new(PersonRef {
                     ref_field: "p2".to_string(),
                     relation: Some(FamilyRelType::Married),
+                    ..Default::default()
                 }),
             })
             .unwrap();
@@ -1559,6 +1531,7 @@ mod tests {
                     ref_field: "r1".to_string(),
                     call_number: None,
                     media_type: None,
+                    ..Default::default()
                 }),
             })
             .unwrap();
@@ -1614,27 +1587,32 @@ mod tests {
         assert!(xml.contains(r#"<noteref hlink="n1""#));
     }
 
-    #[test]
-    fn serialize_mediaref() {
-        let map = SerializationMap::new();
-        let writer = GraphXmlWriter::new(map, "5.2");
-        let mut graph = Graph::new();
-        graph.add_node("p1".to_string(), make_person("p1", None)).unwrap();
-        graph
-            .add_node("m1".to_string(), make_media("m1", "file.jpg", None))
-            .unwrap();
-        graph
-            .add_edge(Edge::PersonMediaRef {
-                source: "p1".to_string(),
-                target: "m1".to_string(),
-            })
-            .unwrap();
+    #[cfg(not(feature = "schema-5-1"))]
+    mod schema_5_2_edge_tests {
+        use super::*;
 
-        let mut output = Vec::new();
-        writer.write(&graph, &mut output).unwrap();
-        let xml = String::from_utf8(output).unwrap();
+        #[test]
+        fn serialize_mediaref() {
+            let map = SerializationMap::new();
+            let writer = GraphXmlWriter::new(map, "5.2");
+            let mut graph = Graph::new();
+            graph.add_node("p1".to_string(), make_person("p1", None)).unwrap();
+            graph
+                .add_node("m1".to_string(), make_media("m1", "file.jpg", None))
+                .unwrap();
+            graph
+                .add_edge(Edge::PersonMediaRef {
+                    source: "p1".to_string(),
+                    target: "m1".to_string(),
+                })
+                .unwrap();
 
-        assert!(xml.contains(r#"<mediaref hlink="m1""#));
+            let mut output = Vec::new();
+            writer.write(&graph, &mut output).unwrap();
+            let xml = String::from_utf8(output).unwrap();
+
+            assert!(xml.contains(r#"<mediaref hlink="m1""#));
+        }
     }
 
     #[test]
@@ -1884,5 +1862,90 @@ mod tests {
             }
         }
         assert!(ran_ok, "XML should parse successfully");
+    }
+
+    // -----------------------------------------------------------------------
+    // 5.2-specific tests — depend on 5.2-specific type shapes
+    // -----------------------------------------------------------------------
+
+    #[cfg(not(feature = "schema-5-1"))]
+    mod schema_5_2_tests {
+        use super::*;
+
+        #[test]
+        fn serialize_event_element() {
+            let map = SerializationMap::new();
+            let writer = GraphXmlWriter::new(map, "5.2");
+            let mut graph = Graph::new();
+            graph
+                .add_node("e1".to_string(), make_event("e1", EventType::Birth))
+                .unwrap();
+
+            let mut output = Vec::new();
+            writer.write(&graph, &mut output).unwrap();
+            let xml = String::from_utf8(output).unwrap();
+
+            assert!(xml.contains(r#"<event handle="e1""#));
+            // Event should have eventtype with type child
+            assert!(xml.contains("<eventtype><type>Birth</type></eventtype>"));
+        }
+
+        #[test]
+        fn serialize_event_with_date() {
+            let map = SerializationMap::new();
+            let writer = GraphXmlWriter::new(map, "5.2");
+            let mut graph = Graph::new();
+            let mut event = make_event("e1", EventType::Birth);
+            if let Node::Event(ref mut e) = event {
+                e.date = Some(DateValue::new_ymd(1890, 6, 15));
+            }
+            graph.add_node("e1".to_string(), event).unwrap();
+
+            let mut output = Vec::new();
+            writer.write(&graph, &mut output).unwrap();
+            let xml = String::from_utf8(output).unwrap();
+
+            assert!(xml.contains(r#"val="1890-06-15""#));
+        }
+
+        #[test]
+        fn xml_header_content() {
+            let map = SerializationMap::new();
+            let writer = GraphXmlWriter::new(map, "5.2");
+            let graph = Graph::new();
+
+            let mut output = Vec::new();
+            writer.write(&graph, &mut output).unwrap();
+            let xml = String::from_utf8(output).unwrap();
+
+            assert!(xml.contains("<created date="));
+            assert!(xml.contains(r#"version="5.2""#));
+            assert!(xml.contains("<resname>Generated by gramps-gen</resname>"));
+        }
+
+        #[test]
+        fn xml_header_version_parameter() {
+            let map = SerializationMap::new();
+            let writer = GraphXmlWriter::new(map, "5.1");
+            let graph = Graph::new();
+
+            let mut output = Vec::new();
+            writer.write(&graph, &mut output).unwrap();
+            let xml = String::from_utf8(output).unwrap();
+
+            assert!(xml.contains(r#"version="5.1""#));
+            assert!(!xml.contains(r#"version="5.2""#));
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // 5.1-specific test scaffold (to be filled in Steps 4-6)
+    // -----------------------------------------------------------------------
+
+    #[cfg(feature = "schema-5-1")]
+    mod schema_5_1_tests {
+        // Scaffold for 5.1-specific serialization tests.
+        // Will be populated in subsequent steps with event type,
+        // namespace, and version integration tests.
     }
 }
