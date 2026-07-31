@@ -72,6 +72,21 @@ check_not_in_output() {
     fi
 }
 
+check_cmd_log_errors() {
+    local desc="$1"
+    shift
+    local logfile="$TEMP_DIR/$(echo "$desc" | tr ' ' '-' | tr -cd '[:alnum:]-').log"
+    if "$@" > "$logfile" 2>&1; then
+        green "$desc"
+        PASS=$((PASS + 1))
+    else
+        red "$desc"
+        echo "    Full log: $logfile" >&2
+        tail -n 20 "$logfile" | sed 's/^/    | /' >&2
+        FAIL=$((FAIL + 1))
+    fi
+}
+
 # ────────────────────────────────────────────────────────────────────
 # Test with schema-5-1
 # ────────────────────────────────────────────────────────────────────
@@ -168,15 +183,8 @@ if command -v gramps &> /dev/null; then
     echo "  gramps found at $(which gramps)"
 
     # Try importing the 5.1 file
-    echo "  [import] gramps -C gramps-gen-validate-5.1 -i $OUTPUT_51 -f gramps -y"
-    if gramps -C "gramps-gen-validate-5.1" -i "$OUTPUT_51" -f gramps -y \
-        2>/dev/null; then
-        green "Gramps 5.1 import succeeds"
-        PASS=$((PASS + 1))
-    else
-        red "Gramps 5.1 import fails"
-        FAIL=$((FAIL + 1))
-    fi
+    check_cmd_log_errors "Gramps 5.1 import succeeds" \
+        gramps -C "gramps-gen-validate-5.1" -i "$OUTPUT_51" -f gramps -y
 
     # Determine Gramps version for the 5.2 gate
     GRAMPS_VERSION=$(gramps --version 2>/dev/null | grep "^ gramps " | sed 's/.*: //' | cut -d. -f1,2)
@@ -185,15 +193,8 @@ if command -v gramps &> /dev/null; then
         echo "  Could not determine Gramps version — skipping 5.2 import check"
     elif [ "$(printf '%s\n%s\n' "5.2" "$GRAMPS_VERSION" | awk -F. '{printf "%03d%03d\n", $1, $2}' | sort -n | head -n1)" = "$(printf '%s' "5.2" | awk -F. '{printf "%03d%03d\n", $1, $2}')" ]; then
         # Try importing the 5.2 file
-        echo "  [import] gramps -C gramps-gen-validate-5.2 -i $OUTPUT_52 -f gramps -y"
-        if gramps -C "gramps-gen-validate-5.2" -i "$OUTPUT_52" -f gramps -y \
-            2>/dev/null; then
-            green "Gramps 5.2 import succeeds"
-            PASS=$((PASS + 1))
-        else
-            red "Gramps 5.2 import fails"
-            FAIL=$((FAIL + 1))
-        fi
+        check_cmd_log_errors "Gramps 5.2 import succeeds" \
+            gramps -C "gramps-gen-validate-5.2" -i "$OUTPUT_52" -f gramps -y
     else
         echo "  gramps $GRAMPS_VERSION < 5.2 — skipping 5.2 import check (known limitation)"
     fi
