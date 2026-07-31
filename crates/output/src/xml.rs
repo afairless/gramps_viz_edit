@@ -431,7 +431,7 @@ impl GraphXmlWriter {
             // Event: event_type is an EventType enum
             "event_type" => {
                 if let Node::Event(e) = node {
-                    let type_str = format!("{:?}", e.event_type);
+                    let type_str = typed_graph::event_type_display(&e.event_type);
                     writeln!(
                         writer,
                         "      <{}><type>{}</type></{}>",

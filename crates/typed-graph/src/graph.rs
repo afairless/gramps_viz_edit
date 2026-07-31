@@ -606,6 +606,24 @@ pub fn gender_cmp(gender: &i32) -> i32 {
     *gender
 }
 
+/// Display an event type as a string, handling Option<EventType> (5.1) vs EventType (5.2).
+///
+/// Returns the enum variant name (e.g. "Birth", "Death", "Marriage") without
+/// any `Option` wrapping artifacts.
+#[cfg(feature = "schema-5-1")]
+pub fn event_type_display(event_type: &Option<crate::EventType>) -> String {
+    format!("{:?}", event_type.unwrap_or(crate::EventType::Birth))
+}
+
+/// Display an event type as a string, handling Option<EventType> (5.1) vs EventType (5.2).
+///
+/// Returns the enum variant name (e.g. "Birth", "Death", "Marriage") without
+/// any `Option` wrapping artifacts.
+#[cfg(not(feature = "schema-5-1"))]
+pub fn event_type_display(event_type: &crate::EventType) -> String {
+    format!("{:?}", event_type)
+}
+
 // ---------------------------------------------------------------------------
 // ValidationError (placeholder for Phase 2, Step 4)
 // ---------------------------------------------------------------------------

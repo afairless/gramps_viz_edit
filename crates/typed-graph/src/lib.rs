@@ -19,7 +19,7 @@ pub use schema::*;
 /// Re-export graph module key types at the crate root.
 pub use graph::{Graph, GraphError, NodeKind, ValidationError, ValidationState};
 pub use graph::{
-    edge_place_place_ref, event_type_eq, gender_cmp, gender_value, get_source_handle,
+    edge_place_place_ref, event_type_display, event_type_eq, gender_cmp, gender_value, get_source_handle,
     into_event_type_field, into_gender_field, into_source_handle_field, is_gender_valid,
     is_source_handle_empty, make_child_ref, make_event_ref, set_gender,
     set_source_handle,
