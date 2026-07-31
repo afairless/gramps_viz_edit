@@ -1909,6 +1909,133 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // Tests for edge role and relation serialization
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn get_edge_role_primary() {
+        let edge = Edge::PersonEventRef {
+            source: "p1".to_string(),
+            target: "e1".to_string(),
+            metadata: Box::new(typed_graph::graph::make_event_ref(
+                "e1".to_string(),
+                Some(EventRoleType::Primary),
+            )),
+        };
+        assert_eq!(get_edge_role(&edge), "Primary");
+    }
+
+    #[test]
+    fn get_edge_role_witness() {
+        let edge = Edge::PersonEventRef {
+            source: "p1".to_string(),
+            target: "e1".to_string(),
+            metadata: Box::new(typed_graph::graph::make_event_ref(
+                "e1".to_string(),
+                Some(EventRoleType::Witness),
+            )),
+        };
+        assert_eq!(get_edge_role(&edge), "Witness");
+    }
+
+    #[test]
+    fn get_edge_role_none_falls_back_to_primary() {
+        // When role is None, get_edge_role should fall back to "Primary"
+        let edge = Edge::PersonEventRef {
+            source: "p1".to_string(),
+            target: "e1".to_string(),
+            metadata: Box::new(typed_graph::graph::make_event_ref(
+                "e1".to_string(),
+                None,
+            )),
+        };
+        assert_eq!(get_edge_role(&edge), "Primary");
+    }
+
+    #[test]
+    fn get_edge_role_family_event() {
+        let edge = Edge::FamilyEventRef {
+            source: "f1".to_string(),
+            target: "e1".to_string(),
+            metadata: Box::new(typed_graph::graph::make_event_ref(
+                "e1".to_string(),
+                Some(EventRoleType::Family),
+            )),
+        };
+        assert_eq!(get_edge_role(&edge), "Family");
+    }
+
+    #[test]
+    fn get_edge_role_unknown_edge_returns_primary() {
+        let edge = Edge::FamilyFather {
+            source: "f1".to_string(),
+            target: "p1".to_string(),
+        };
+        assert_eq!(get_edge_role(&edge), "Primary");
+    }
+
+    #[test]
+    fn get_edge_relation_birth() {
+        let edge = Edge::FamilyChildRef {
+            source: "f1".to_string(),
+            target: "p1".to_string(),
+            metadata: Box::new(typed_graph::graph::make_child_ref(
+                "p1".to_string(),
+                Some(ChildRefType::Birth),
+            )),
+        };
+        assert_eq!(get_edge_relation(&edge), "Birth");
+    }
+
+    #[test]
+    fn get_edge_relation_adopted() {
+        let edge = Edge::FamilyChildRef {
+            source: "f1".to_string(),
+            target: "p1".to_string(),
+            metadata: Box::new(typed_graph::graph::make_child_ref(
+                "p1".to_string(),
+                Some(ChildRefType::Adopted),
+            )),
+        };
+        assert_eq!(get_edge_relation(&edge), "Adopted");
+    }
+
+    #[test]
+    fn get_edge_relation_stepchild() {
+        let edge = Edge::FamilyChildRef {
+            source: "f1".to_string(),
+            target: "p1".to_string(),
+            metadata: Box::new(typed_graph::graph::make_child_ref(
+                "p1".to_string(),
+                Some(ChildRefType::Stepchild),
+            )),
+        };
+        assert_eq!(get_edge_relation(&edge), "Stepchild");
+    }
+
+    #[test]
+    fn get_edge_relation_none_falls_back_to_birth() {
+        let edge = Edge::FamilyChildRef {
+            source: "f1".to_string(),
+            target: "p1".to_string(),
+            metadata: Box::new(typed_graph::graph::make_child_ref(
+                "p1".to_string(),
+                None,
+            )),
+        };
+        assert_eq!(get_edge_relation(&edge), "Birth");
+    }
+
+    #[test]
+    fn get_edge_relation_unknown_edge_returns_birth() {
+        let edge = Edge::FamilyFather {
+            source: "f1".to_string(),
+            target: "p1".to_string(),
+        };
+        assert_eq!(get_edge_relation(&edge), "Birth");
+    }
+
+    // -----------------------------------------------------------------------
     // 5.2-specific tests — depend on 5.2-specific type shapes
     // -----------------------------------------------------------------------
 
