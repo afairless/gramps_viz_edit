@@ -185,9 +185,12 @@ if command -v gramps &> /dev/null; then
     # Remove stale Gramps lock file from a previous crash
     rm -f "${GRAMPSHOME:-$HOME/.gramps}/lock"
 
+    # Use a unique tree suffix to avoid conflicts with previous runs
+    GRAMPS_TREE_SUFFIX=$(date +%s)
+
     # Try importing the 5.1 file
     check_cmd_log_errors "Gramps 5.1 import succeeds" \
-        gramps -C "gramps-gen-validate-5.1" -i "$OUTPUT_51" -f gramps -y
+        gramps -C "gramps-gen-validate-5.1-$GRAMPS_TREE_SUFFIX" -i "$OUTPUT_51" -f gramps -y
 
     # Allow Gramps to release its singleton lock before next invocation
     sleep 2
@@ -200,7 +203,7 @@ if command -v gramps &> /dev/null; then
     elif [ "$(printf '%s\n%s\n' "5.2" "$GRAMPS_VERSION" | awk -F. '{printf "%03d%03d\n", $1, $2}' | sort -n | head -n1)" = "$(printf '%s' "5.2" | awk -F. '{printf "%03d%03d\n", $1, $2}')" ]; then
         # Try importing the 5.2 file
         check_cmd_log_errors "Gramps 5.2 import succeeds" \
-            gramps -C "gramps-gen-validate-5.2" -i "$OUTPUT_52" -f gramps -y
+            gramps -C "gramps-gen-validate-5.2-$GRAMPS_TREE_SUFFIX" -i "$OUTPUT_52" -f gramps -y
     else
         echo "  gramps $GRAMPS_VERSION < 5.2 — skipping 5.2 import check (known limitation)"
     fi
