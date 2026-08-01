@@ -188,11 +188,30 @@
     "-1": "UNKNOWN",
     "16": "VILLAGE"
   },
+  "DateModifier": {
+    "0": "NONE",
+    "1": "BEFORE",
+    "2": "AFTER",
+    "3": "ABOUT",
+    "4": "RANGE",
+    "5": "SPAN",
+    "6": "TEXTUAL"
+  },
+  "DateQuality": {
+    "0": "NONE",
+    "1": "ESTIMATED",
+    "2": "CALCULATED"
+  },
   "FamilyRelType": {
     "2": "CIVIL_UNION",
     "4": "CUSTOM",
     "0": "POS_VALUE",
     "1": "UNMARRIED",
     "3": "UNKNOWN"
+  },
+  "Gender": {
+    "0": "Male",
+    "1": "Female",
+    "2": "Unknown"
   }
 }
