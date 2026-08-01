@@ -1007,11 +1007,31 @@ fn create_single_parent_family(
         }
     }
 
-    // Create family node
+    // Determine the parent's gender to set the correct parent handle and edge
+    let parent_gender: i32 = persons
+        .iter()
+        .find(|(h, _)| *h == parent_handle)
+        .map(|(_, s)| s.gender)
+        .unwrap_or(0); // Default to male if not found
+
+    // Create family node with the correct parent handle set
     let family_handle = uuid::Uuid::new_v4().to_string();
-    let family = crate::FamilyData {
-        handle: family_handle.clone(),
-        ..crate::FamilyData::default()
+    let is_female = parent_gender == 1;
+
+    let family = if is_female {
+        crate::FamilyData {
+            handle: family_handle.clone(),
+            mother_handle: Some(parent_handle.clone()),
+            father_handle: None,
+            ..crate::FamilyData::default()
+        }
+    } else {
+        crate::FamilyData {
+            handle: family_handle.clone(),
+            father_handle: Some(parent_handle.clone()),
+            mother_handle: None,
+            ..crate::FamilyData::default()
+        }
     };
 
     graph
@@ -1019,6 +1039,23 @@ fn create_single_parent_family(
         .map_err(|_| {
             GenerationError::InvalidConfig(format!("duplicate family handle: {}", family_handle))
         })?;
+
+    // Add the corresponding parent edge
+    if is_female {
+        graph
+            .add_edge(crate::Edge::FamilyMother {
+                source: family_handle.clone(),
+                target: parent_handle.clone(),
+            })
+            .expect("parent node exists (was just selected)");
+    } else {
+        graph
+            .add_edge(crate::Edge::FamilyFather {
+                source: family_handle.clone(),
+                target: parent_handle.clone(),
+            })
+            .expect("parent node exists (was just selected)");
+    }
 
     // Update person family list
     if let Some(crate::Node::Person(ref mut person)) = graph.get_node_mut(&parent_handle) {
@@ -4464,6 +4501,265 @@ mod tests {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // ---- create_single_parent_family tests ----
+
+    #[test]
+    fn single_parent_family_female_parent() {
+        // Create a graph with a single female person, then call
+        // create_single_parent_family. The resulting family should have
+        // mother_handle set and a FamilyMother edge.
+        let mut graph = crate::Graph::new();
+
+        let person_handle = "test-female-person".to_string();
+        let person = crate::PersonData {
+            handle: person_handle.clone(),
+            gender: crate::into_gender_field(1), // Female
+            primary_name: crate::Name {
+                first_name: Some("Alice".to_string()),
+                surname_list: vec![crate::Surname {
+                    surname: Some("Smith".to_string()),
+                    ..crate::Surname::default()
+                }],
+                ..crate::Name::default()
+            },
+            ..crate::PersonData::default()
+        };
+        graph
+            .add_node(person_handle.clone(), crate::Node::Person(person))
+            .expect("should add person");
+
+        let mut persons = vec![(
+            person_handle.clone(),
+            PersonSummary {
+                handle: person_handle.clone(),
+                birth_year: 1980,
+                gender: 1, // Female
+                layer: 0,
+                is_parent: false,
+                is_child: false,
+            },
+        )];
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let family_handle = create_single_parent_family(&mut graph, &mut persons, 0, &mut rng)
+            .expect("should create single-parent family");
+
+        // Verify the family has mother_handle set and father_handle is None
+        if let Some(crate::Node::Family(family)) = graph.get_node(&family_handle) {
+            assert_eq!(
+                family.mother_handle,
+                Some(person_handle.clone()),
+                "Mother handle should be set"
+            );
+            assert_eq!(
+                family.father_handle, None,
+                "Father handle should be None for female parent"
+            );
+        } else {
+            panic!("Family node should exist");
+        }
+
+        // Verify a FamilyMother edge exists
+        let edges = graph.edges_from(&family_handle);
+        let has_mother_edge = edges.iter().any(|e| {
+            matches!(e, crate::Edge::FamilyMother { target, .. } if *target == person_handle)
+        });
+        assert!(has_mother_edge, "FamilyMother edge should exist");
+
+        // Verify no FamilyFather edge exists
+        let has_father_edge = edges.iter().any(|e| {
+            matches!(e, crate::Edge::FamilyFather { .. })
+        });
+        assert!(!has_father_edge, "FamilyFather edge should not exist");
+
+        // Verify the person's family_list contains the family handle
+        if let Some(crate::Node::Person(person)) = graph.get_node(&person_handle) {
+            assert!(
+                person.family_list.contains(&family_handle),
+                "Person's family_list should contain the family handle"
+            );
+        } else {
+            panic!("Person node should exist");
+        }
+
+        // Verify the person is marked as parent
+        assert!(
+            persons.iter().any(|(h, s)| *h == person_handle && s.is_parent),
+            "Person should be marked as parent"
+        );
+    }
+
+    #[test]
+    fn single_parent_family_male_parent() {
+        // Same as above but with a male parent.
+        let mut graph = crate::Graph::new();
+
+        let person_handle = "test-male-person".to_string();
+        let person = crate::PersonData {
+            handle: person_handle.clone(),
+            gender: crate::into_gender_field(0), // Male
+            primary_name: crate::Name {
+                first_name: Some("Bob".to_string()),
+                surname_list: vec![crate::Surname {
+                    surname: Some("Jones".to_string()),
+                    ..crate::Surname::default()
+                }],
+                ..crate::Name::default()
+            },
+            ..crate::PersonData::default()
+        };
+        graph
+            .add_node(person_handle.clone(), crate::Node::Person(person))
+            .expect("should add person");
+
+        let mut persons = vec![(
+            person_handle.clone(),
+            PersonSummary {
+                handle: person_handle.clone(),
+                birth_year: 1975,
+                gender: 0, // Male
+                layer: 0,
+                is_parent: false,
+                is_child: false,
+            },
+        )];
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let family_handle = create_single_parent_family(&mut graph, &mut persons, 0, &mut rng)
+            .expect("should create single-parent family");
+
+        // Verify the family has father_handle set and mother_handle is None
+        if let Some(crate::Node::Family(family)) = graph.get_node(&family_handle) {
+            assert_eq!(
+                family.father_handle,
+                Some(person_handle.clone()),
+                "Father handle should be set"
+            );
+            assert_eq!(
+                family.mother_handle, None,
+                "Mother handle should be None for male parent"
+            );
+        } else {
+            panic!("Family node should exist");
+        }
+
+        // Verify a FamilyFather edge exists
+        let edges = graph.edges_from(&family_handle);
+        let has_father_edge = edges.iter().any(|e| {
+            matches!(e, crate::Edge::FamilyFather { target, .. } if *target == person_handle)
+        });
+        assert!(has_father_edge, "FamilyFather edge should exist");
+
+        // Verify no FamilyMother edge exists
+        let has_mother_edge = edges.iter().any(|e| {
+            matches!(e, crate::Edge::FamilyMother { .. })
+        });
+        assert!(!has_mother_edge, "FamilyMother edge should not exist");
+
+        // Verify the person's family_list contains the family handle
+        if let Some(crate::Node::Person(person)) = graph.get_node(&person_handle) {
+            assert!(
+                person.family_list.contains(&family_handle),
+                "Person's family_list should contain the family handle"
+            );
+        } else {
+            panic!("Person node should exist");
+        }
+
+        // Verify the person is marked as parent
+        assert!(
+            persons.iter().any(|(h, s)| *h == person_handle && s.is_parent),
+            "Person should be marked as parent"
+        );
+    }
+
+    #[test]
+    fn single_parent_family_unknown_gender_defaults_to_father() {
+        // Unknown gender (2) should default to FamilyFather edge.
+        let mut graph = crate::Graph::new();
+
+        let person_handle = "test-unknown-person".to_string();
+        let person = crate::PersonData {
+            handle: person_handle.clone(),
+            gender: crate::into_gender_field(2), // Unknown
+            primary_name: crate::Name {
+                first_name: Some("Jordan".to_string()),
+                surname_list: vec![crate::Surname {
+                    surname: Some("Doe".to_string()),
+                    ..crate::Surname::default()
+                }],
+                ..crate::Name::default()
+            },
+            ..crate::PersonData::default()
+        };
+        graph
+            .add_node(person_handle.clone(), crate::Node::Person(person))
+            .expect("should add person");
+
+        let mut persons = vec![(
+            person_handle.clone(),
+            PersonSummary {
+                handle: person_handle.clone(),
+                birth_year: 1990,
+                gender: 2, // Unknown
+                layer: 0,
+                is_parent: false,
+                is_child: false,
+            },
+        )];
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let family_handle = create_single_parent_family(&mut graph, &mut persons, 0, &mut rng)
+            .expect("should create single-parent family");
+
+        // Verify FamilyFather edge (default for unknown gender)
+        if let Some(crate::Node::Family(family)) = graph.get_node(&family_handle) {
+            assert_eq!(
+                family.father_handle,
+                Some(person_handle.clone()),
+                "Father handle should be set for unknown gender"
+            );
+            assert_eq!(family.mother_handle, None);
+        }
+
+        let edges = graph.edges_from(&family_handle);
+        let has_father_edge = edges.iter().any(|e| {
+            matches!(e, crate::Edge::FamilyFather { target, .. } if *target == person_handle)
+        });
+        assert!(has_father_edge, "FamilyFather edge should exist for unknown gender");
+    }
+
+    /// Strengthen the existing property test: assert that families actually
+    /// have at least one parent edge, not just check that generation doesn't crash.
+    #[test]
+    fn property_families_have_parent_edges() {
+        let schema = crate::Schema::default();
+        for seed in 0..30 {
+            let config = RandomConfig {
+                person_count: 20,
+                seed: Some(seed),
+                ..RandomConfig::default()
+            };
+            let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+                .unwrap_or_else(|e| {
+                    panic!("Seed {}: generation failed: {:?}", seed, e);
+                });
+            for family_handle in result.graph.nodes_by_kind(crate::NodeKind::Family) {
+                let has_parent = result.graph.edges_from(family_handle).iter().any(|e| {
+                    matches!(
+                        e,
+                        crate::Edge::FamilyFather { .. } | crate::Edge::FamilyMother { .. }
+                    )
+                });
+                assert!(
+                    has_parent,
+                    "Seed {}: Family {} has no parent edges (no father or mother)",
+                    seed, family_handle
+                );
             }
         }
     }
