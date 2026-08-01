@@ -142,6 +142,12 @@ pub fn convert(
         }
     }
 
+    // Synthesize missing enum types that are referenced by enum_ref fields but
+    // not present in the source schema's enum_types (e.g., Gender, DateModifier,
+    // DateQuality in Gramps 5.1). This must run after all enum_types and synthetic
+    // secondary types are already in the result.
+    synthesize_missing_enum_types(&mut result, &schema);
+
     Ok(Value::Object(result))
 }
 
@@ -705,6 +711,268 @@ fn build_styled_text_secondary_type() -> Value {
     let mut result = Map::new();
     result.insert("fields".to_string(), Value::Object(fields));
     Value::Object(result)
+}
+
+/// Synthesize missing enum types that are referenced by `enum_ref` fields but
+/// not present in the source schema's `enum_types`.
+///
+/// Some Gramps schema versions (e.g., 5.1) define certain enum fields as plain
+/// integers with `minimum`/`maximum` bounds rather than formal enum types.
+/// The converter creates `enum_ref` entries for these fields (via `detect_enum_ref`),
+/// but the target enum type doesn't exist in the converted output. This function
+/// fills in those missing enum types by extracting the integer range from the
+/// original source field definitions.
+///
+/// # Strategy
+///
+/// 1. Scan all converted `primary_types` and `secondary_types` fields for `enum_ref` entries.
+/// 2. For each target not already in `enum_types`, find the source field definition
+///    in the original JSON Schema and extract `minimum`/`maximum`.
+/// 3. Build a synthetic entry with `values: [min, min+1, …, max]`.
+///
+/// If no `minimum`/`maximum` is found on the source field, a warning is emitted
+/// and the synthesis is skipped (the field stays as an orphan `enum_ref`).
+fn synthesize_missing_enum_types(result: &mut Map<String, Value>, source_schema: &Value) {
+    // Collect all enum_ref targets from converted primary and secondary types
+    let mut missing_targets: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+
+    if let Some(primary_types) = result
+        .get("primary_types")
+        .and_then(|v| v.as_object())
+    {
+        for type_info in primary_types.values() {
+            collect_enum_ref_targets(type_info, &mut missing_targets);
+        }
+    }
+
+    if let Some(secondary_types) = result
+        .get("secondary_types")
+        .and_then(|v| v.as_object())
+    {
+        for type_info in secondary_types.values() {
+            collect_enum_ref_targets(type_info, &mut missing_targets);
+        }
+    }
+
+    // Remove any targets that already exist in the converted enum_types
+    let existing_enums: std::collections::HashSet<String> = result
+        .get("enum_types")
+        .and_then(|v| v.as_object())
+        .map(|obj| obj.keys().cloned().collect())
+        .unwrap_or_default();
+
+    missing_targets.retain(|t| !existing_enums.contains(t));
+
+    if missing_targets.is_empty() {
+        return;
+    }
+
+    // Determine the integer range for each missing target
+    let mut synthesized = Map::new();
+
+    for target in &missing_targets {
+        match find_enum_range(source_schema, target) {
+            Some((min, max)) => {
+                let values: Vec<Value> = (min..=max)
+                    .map(|v| Value::Number(serde_json::Number::from(v)))
+                    .collect();
+
+                let mut entry = Map::new();
+                entry.insert("values".to_string(), Value::Array(values));
+                synthesized.insert(target.clone(), Value::Object(entry));
+
+                eprintln!(
+                    "cargo::note=Synthesized missing enum type '{}' from integer range {}..={}",
+                    target, min, max
+                );
+            }
+            None => {
+                eprintln!(
+                    "cargo::warning=Could not synthesize enum type '{}': no source field with minimum/maximum found",
+                    target
+                );
+            }
+        }
+    }
+
+    // Merge synthesized enums into the result
+    if let Some(enum_types) = result
+        .get_mut("enum_types")
+        .and_then(|v| v.as_object_mut())
+    {
+        for (name, entry) in synthesized {
+            enum_types.entry(name).or_insert(entry);
+        }
+    }
+}
+
+/// Collect all `enum_ref` target names from a single type's fields.
+fn collect_enum_ref_targets(type_info: &Value, targets: &mut std::collections::BTreeSet<String>) {
+    if let Some(fields) = type_info.get("fields").and_then(|v| v.as_object()) {
+        for field_info in fields.values() {
+            if field_info
+                .get("type")
+                .and_then(|v| v.as_str())
+                == Some("enum_ref")
+            {
+                if let Some(target) = field_info.get("target").and_then(|v| v.as_str()) {
+                    targets.insert(target.to_string());
+                }
+            }
+        }
+    }
+}
+
+/// Find the integer range for a missing enum target by searching the source
+/// JSON Schema for a field whose `detect_enum_ref` returns the target name.
+///
+/// Returns `(min, max)` if a suitable field with `minimum`/`maximum` is found.
+fn find_enum_range(source_schema: &Value, target: &str) -> Option<(i64, i64)> {
+    // Search primary_types' properties
+    if let Some(primary_types) = source_schema
+        .get("primary_types")
+        .and_then(|v| v.as_object())
+    {
+        for type_info in primary_types.values() {
+            if let Some(properties) = type_info
+                .get("fields")
+                .and_then(|v| v.as_object())
+                .and_then(|f| f.get("properties"))
+                .and_then(|v| v.as_object())
+            {
+                for (field_name, field_schema) in properties {
+                    if detect_enum_ref(field_name).as_deref() == Some(target) {
+                        if let (Some(min), Some(max)) = (
+                            field_schema.get("minimum").and_then(|v| v.as_i64()),
+                            field_schema.get("maximum").and_then(|v| v.as_i64()),
+                        ) {
+                            return Some((min, max));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Search secondary_types' properties
+    if let Some(secondary_types) = source_schema
+        .get("secondary_types")
+        .and_then(|v| v.as_object())
+    {
+        for type_info in secondary_types.values() {
+            if let Some(properties) = type_info
+                .get("fields")
+                .and_then(|v| v.as_object())
+                .and_then(|f| f.get("properties"))
+                .and_then(|v| v.as_object())
+            {
+                for (field_name, field_schema) in properties {
+                    if detect_enum_ref(field_name).as_deref() == Some(target) {
+                        if let (Some(min), Some(max)) = (
+                            field_schema.get("minimum").and_then(|v| v.as_i64()),
+                            field_schema.get("maximum").and_then(|v| v.as_i64()),
+                        ) {
+                            return Some((min, max));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Also search inside embedded object properties (e.g., Date object has
+    // modifier and quality fields inside its own properties).
+    // Search primary_types' nested properties (embedded objects)
+    if let Some(primary_types) = source_schema
+        .get("primary_types")
+        .and_then(|v| v.as_object())
+    {
+        for type_info in primary_types.values() {
+            if let Some(nested) = find_enum_in_nested_properties(type_info, target) {
+                return Some(nested);
+            }
+        }
+    }
+
+    // Search secondary_types' nested properties (embedded objects)
+    if let Some(secondary_types) = source_schema
+        .get("secondary_types")
+        .and_then(|v| v.as_object())
+    {
+        for type_info in secondary_types.values() {
+            if let Some(nested) = find_enum_in_nested_properties(type_info, target) {
+                return Some(nested);
+            }
+        }
+    }
+
+    None
+}
+
+/// Search inside embedded object properties for a field matching the enum target.
+///
+/// This handles cases like the Date object, where `modifier` and `quality` fields
+/// are nested inside the object's `properties` rather than at the top level.
+fn find_enum_in_nested_properties(
+    type_info: &Value,
+    target: &str,
+) -> Option<(i64, i64)> {
+    if let Some(properties) = type_info
+        .get("fields")
+        .and_then(|v| v.as_object())
+        .and_then(|f| f.get("properties"))
+        .and_then(|v| v.as_object())
+    {
+        for field_schema in properties.values() {
+            // Check if this field is an object with its own properties (direct)
+            if let Some(nested_props) = field_schema
+                .get("properties")
+                .and_then(|v| v.as_object())
+            {
+                if let Some(range) = search_properties_for_enum(nested_props, target) {
+                    return Some(range);
+                }
+            }
+
+            // Check if this field has a oneOf wrapper (e.g., Date field with
+            // oneOf [null, {type: "object", properties: {...}}])
+            if let Some(one_of) = field_schema
+                .get("oneOf")
+                .and_then(|v| v.as_array())
+            {
+                for alt in one_of {
+                    if let Some(nested_props) = alt
+                        .get("properties")
+                        .and_then(|v| v.as_object())
+                    {
+                        if let Some(range) = search_properties_for_enum(nested_props, target) {
+                            return Some(range);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Search a properties map for a field whose `detect_enum_ref` matches the target.
+fn search_properties_for_enum(
+    properties: &Map<String, Value>,
+    target: &str,
+) -> Option<(i64, i64)> {
+    for (nested_name, nested_schema) in properties {
+        if detect_enum_ref(nested_name).as_deref() == Some(target) {
+            if let (Some(min), Some(max)) = (
+                nested_schema.get("minimum").and_then(|v| v.as_i64()),
+                nested_schema.get("maximum").and_then(|v| v.as_i64()),
+            ) {
+                return Some((min, max));
+            }
+        }
+    }
+    None
 }
 
 /// Validate that a flat-format schema has all required keys and valid structure.
@@ -1350,5 +1618,156 @@ mod tests {
 
         let result = convert(schema, "5.1", &Value::Null).unwrap();
         assert!(!is_json_schema_format(&result));
+    }
+
+    // ---- Enum synthesis tests ----
+
+    #[test]
+    fn synthesize_gender_enum_from_min_max() {
+        // A minimal fixture with Person.gender as integer (min=0, max=2)
+        // and no Gender in enum_types. The converter should synthesize it.
+        let schema = json!({
+            "version": "5.1",
+            "primary_types": {
+                "Person": {
+                    "fields": {
+                        "type": "object",
+                        "title": "Person",
+                        "properties": {
+                            "handle": {"type": "string", "maxLength": 50, "title": "Handle"},
+                            "gender": {"type": "integer", "minimum": 0, "maximum": 2, "title": "Gender"}
+                        }
+                    },
+                    "inherit_mixins": []
+                }
+            },
+            "enum_types": {},
+            "secondary_types": {}
+        });
+
+        let result = convert(schema, "5.1", &Value::Null).unwrap();
+        let enum_types = result.get("enum_types").and_then(|v| v.as_object()).unwrap();
+
+        let gender = enum_types.get("Gender").expect("Gender should be synthesized");
+        let values = gender.get("values").and_then(|v| v.as_array()).unwrap();
+        let nums: Vec<i64> = values.iter().filter_map(|v| v.as_i64()).collect();
+        assert_eq!(nums, vec![0, 1, 2], "Gender should have values 0, 1, 2");
+    }
+
+    #[test]
+    fn synthesize_date_modifier_enum() {
+        // Date.modifier is an integer field inside the Date object (min=0, max=6).
+        // Since Date is an embedded object, the modifier field is nested inside
+        // the Date object's properties.
+        let schema = json!({
+            "version": "5.1",
+            "primary_types": {
+                "Event": {
+                    "fields": {
+                        "type": "object",
+                        "title": "Event",
+                        "properties": {
+                            "handle": {"type": "string", "maxLength": 50, "title": "Handle"},
+                            "date": {
+                                "oneOf": [
+                                    {"type": "null"},
+                                    {
+                                        "type": "object",
+                                        "title": "Date",
+                                        "properties": {
+                                            "dateval": {"type": "array"},
+                                            "modifier": {"type": "integer", "minimum": 0, "maximum": 6},
+                                            "quality": {"type": "integer", "minimum": 0, "maximum": 2},
+                                            "text": {"type": "string"}
+                                        }
+                                    }
+                                ],
+                                "title": "Date"
+                            }
+                        }
+                    },
+                    "inherit_mixins": []
+                }
+            },
+            "enum_types": {},
+            "secondary_types": {}
+        });
+
+        let result = convert(schema, "5.1", &Value::Null).unwrap();
+        let enum_types = result.get("enum_types").and_then(|v| v.as_object()).unwrap();
+
+        let modifier = enum_types.get("DateModifier").expect("DateModifier should be synthesized");
+        let values = modifier.get("values").and_then(|v| v.as_array()).unwrap();
+        let nums: Vec<i64> = values.iter().filter_map(|v| v.as_i64()).collect();
+        assert_eq!(nums, vec![0, 1, 2, 3, 4, 5, 6], "DateModifier should have values 0..=6");
+
+        let quality = enum_types.get("DateQuality").expect("DateQuality should be synthesized");
+        let values = quality.get("values").and_then(|v| v.as_array()).unwrap();
+        let nums: Vec<i64> = values.iter().filter_map(|v| v.as_i64()).collect();
+        assert_eq!(nums, vec![0, 1, 2], "DateQuality should have values 0, 1, 2");
+    }
+
+    #[test]
+    fn synthesize_existing_enum_not_overwritten() {
+        // If the enum type already exists in the source, it should not be overwritten.
+        let schema = json!({
+            "version": "5.1",
+            "primary_types": {
+                "Person": {
+                    "fields": {
+                        "type": "object",
+                        "title": "Person",
+                        "properties": {
+                            "handle": {"type": "string", "maxLength": 50, "title": "Handle"},
+                            "gender": {"type": "integer", "minimum": 0, "maximum": 2, "title": "Gender"}
+                        }
+                    },
+                    "inherit_mixins": []
+                }
+            },
+            "enum_types": {
+                "Gender": {
+                    "values": ["Male", "Female", "Unknown"]
+                }
+            },
+            "secondary_types": {}
+        });
+
+        let result = convert(schema, "5.1", &Value::Null).unwrap();
+        let enum_types = result.get("enum_types").and_then(|v| v.as_object()).unwrap();
+
+        let gender = enum_types.get("Gender").expect("Gender should exist");
+        let values = gender.get("values").and_then(|v| v.as_array()).unwrap();
+        // Should be the string values from the source, not the synthesized integers
+        let strings: Vec<&str> = values.iter().filter_map(|v| v.as_str()).collect();
+        assert_eq!(strings, vec!["Male", "Female", "Unknown"], "Existing enum should not be overwritten");
+    }
+
+    #[test]
+    fn synthesize_no_min_max_skipped() {
+        // If the source field has no minimum/maximum, the enum should not be synthesized.
+        let schema = json!({
+            "version": "5.1",
+            "primary_types": {
+                "Person": {
+                    "fields": {
+                        "type": "object",
+                        "title": "Person",
+                        "properties": {
+                            "handle": {"type": "string", "maxLength": 50, "title": "Handle"},
+                            "gender": {"type": "integer", "title": "Gender"}
+                        }
+                    },
+                    "inherit_mixins": []
+                }
+            },
+            "enum_types": {},
+            "secondary_types": {}
+        });
+
+        let result = convert(schema, "5.1", &Value::Null).unwrap();
+        let enum_types = result.get("enum_types").and_then(|v| v.as_object()).unwrap();
+        // Gender should NOT be synthesized because there's no min/max
+        assert!(!enum_types.contains_key("Gender"), "Gender should not be synthesized without min/max");
     }
 }
