@@ -16,14 +16,14 @@ pub mod validate;
 /// The schema module is populated by build.rs codegen at compile time.
 pub use schema::*;
 
-/// Re-export graph module key types at the crate root.
-pub use graph::{Graph, GraphError, NodeKind, ValidationError, ValidationState};
 pub use graph::{
-    edge_place_place_ref, event_type_display, event_type_eq, gender_cmp, gender_value, get_source_handle,
-    into_event_type_field, into_gender_field, into_source_handle_field, is_gender_valid,
-    is_source_handle_empty, make_child_ref, make_event_ref, set_gender,
+    edge_place_place_ref, event_type_display, event_type_eq, gender_cmp, gender_value,
+    get_source_handle, into_event_type_field, into_gender_field, into_source_handle_field,
+    is_gender_valid, is_source_handle_empty, make_child_ref, make_event_ref, set_gender,
     set_source_handle,
 };
+/// Re-export graph module key types at the crate root.
+pub use graph::{Graph, GraphError, NodeKind, ValidationError, ValidationState};
 
 // The date module adds convenience methods (new, new_ymd, display_text, is_valid)
 // to the generated DateValue type from the schema.
@@ -359,7 +359,10 @@ mod tests {
 
     #[test]
     fn test_schema_for_version_unknown() {
-        assert!(Schema::for_version("99.99").is_none(), "unknown version should return None");
+        assert!(
+            Schema::for_version("99.99").is_none(),
+            "unknown version should return None"
+        );
     }
 
     #[test]
@@ -372,7 +375,10 @@ mod tests {
             .clone();
         assert_eq!(default.version, explicit.version);
         assert_eq!(default.required_fields, explicit.required_fields);
-        assert_eq!(default.cardinality_constraints, explicit.cardinality_constraints);
+        assert_eq!(
+            default.cardinality_constraints,
+            explicit.cardinality_constraints
+        );
     }
 
     // -----------------------------------------------------------------------

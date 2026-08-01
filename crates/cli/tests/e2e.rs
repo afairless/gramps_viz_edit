@@ -424,7 +424,9 @@ fn e2e_51_gender_distribution() {
     assert!(
         female_pct >= 5.0,
         "Female proportion too low: {:.1}% ({}/{}). Expected at least 5%.",
-        female_pct, female_count, total_count
+        female_pct,
+        female_count,
+        total_count
     );
 
     eprintln!(

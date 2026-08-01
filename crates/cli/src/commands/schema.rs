@@ -100,8 +100,13 @@ fn cmd_list() -> Result<(), crate::CliError> {
         let (ver, tag) = *version;
         let is_local = local.contains(&ver.to_string());
         let marker = if is_local { "✓" } else { " " };
-        println!("  {} {} (latest: {}){}", marker, ver, tag,
-            if is_local { "" } else { " — not downloaded" });
+        println!(
+            "  {} {} (latest: {}){}",
+            marker,
+            ver,
+            tag,
+            if is_local { "" } else { " — not downloaded" }
+        );
     }
 
     // Try to fetch remote tags from GitHub API
@@ -112,8 +117,13 @@ fn cmd_list() -> Result<(), crate::CliError> {
             for (ver, tag) in &remote_tags {
                 let is_local = local.contains(ver);
                 let marker = if is_local { "✓" } else { "•" };
-                println!("  {} {} (latest: {}){}", marker, ver, tag,
-                    if is_local { "" } else { " — not downloaded" });
+                println!(
+                    "  {} {} (latest: {}){}",
+                    marker,
+                    ver,
+                    tag,
+                    if is_local { "" } else { " — not downloaded" }
+                );
             }
         }
         Err(e) => {
@@ -159,10 +169,12 @@ fn download_single_version(version: &str) -> Result<(), crate::CliError> {
         .iter()
         .find(|(v, _)| *v == version)
         .map(|(_, tag)| *tag)
-        .ok_or_else(|| crate::CliError::SchemaDownloadError(format!(
+        .ok_or_else(|| {
+            crate::CliError::SchemaDownloadError(format!(
             "No tag found for version {}. Run `gramps-gen schema list` to see available versions.",
             version
-        )))?;
+        ))
+        })?;
 
     // Check that Python is available
     let python_check = std::process::Command::new("python3")
@@ -197,15 +209,19 @@ fn download_single_version(version: &str) -> Result<(), crate::CliError> {
         ])
         .arg(temp_dir.to_str().unwrap())
         .output()
-        .map_err(|e| crate::CliError::GitCloneFailed(format!(
-            "Failed to run git clone: {}. Is git installed?", e
-        )))?;
+        .map_err(|e| {
+            crate::CliError::GitCloneFailed(format!(
+                "Failed to run git clone: {}. Is git installed?",
+                e
+            ))
+        })?;
 
     if !clone_result.status.success() {
         let stderr = String::from_utf8_lossy(&clone_result.stderr);
         return Err(crate::CliError::GitCloneFailed(format!(
             "Git clone failed for tag {}: {}",
-            tag, stderr.trim()
+            tag,
+            stderr.trim()
         )));
     }
 
@@ -222,32 +238,43 @@ fn download_single_version(version: &str) -> Result<(), crate::CliError> {
         ])
         .env("PYTHONPATH", temp_dir.to_str().unwrap())
         .output()
-        .map_err(|e| crate::CliError::SchemaExtractionFailed(format!(
-            "Failed to run Python extractor: {}", e
-        )))?;
+        .map_err(|e| {
+            crate::CliError::SchemaExtractionFailed(format!(
+                "Failed to run Python extractor: {}",
+                e
+            ))
+        })?;
 
     if !extractor_output.status.success() {
         let stderr = String::from_utf8_lossy(&extractor_output.stderr);
         let _ = std::fs::remove_file(&output_path);
         return Err(crate::CliError::SchemaExtractionFailed(format!(
-            "Extractor failed: {}", stderr.trim()
+            "Extractor failed: {}",
+            stderr.trim()
         )));
     }
 
     // Validate the output
-    let output_content = std::fs::read_to_string(&output_path)
-        .map_err(|e| crate::CliError::SchemaExtractionFailed(format!(
-            "Cannot read output file: {}", e
-        )))?;
-    let parsed: serde_json::Value = serde_json::from_str(&output_content)
-        .map_err(|e| crate::CliError::SchemaExtractionFailed(format!(
-            "Output is not valid JSON: {}", e
-        )))?;
+    let output_content = std::fs::read_to_string(&output_path).map_err(|e| {
+        crate::CliError::SchemaExtractionFailed(format!("Cannot read output file: {}", e))
+    })?;
+    let parsed: serde_json::Value = serde_json::from_str(&output_content).map_err(|e| {
+        crate::CliError::SchemaExtractionFailed(format!("Output is not valid JSON: {}", e))
+    })?;
 
     // Verify required fields
-    let has_primary = parsed.get("primary_types").and_then(|v| v.as_object()).is_some();
-    let has_secondary = parsed.get("secondary_types").and_then(|v| v.as_object()).is_some();
-    let has_enum = parsed.get("enum_types").and_then(|v| v.as_object()).is_some();
+    let has_primary = parsed
+        .get("primary_types")
+        .and_then(|v| v.as_object())
+        .is_some();
+    let has_secondary = parsed
+        .get("secondary_types")
+        .and_then(|v| v.as_object())
+        .is_some();
+    let has_enum = parsed
+        .get("enum_types")
+        .and_then(|v| v.as_object())
+        .is_some();
     let output_version = parsed.get("version").and_then(|v| v.as_str()).unwrap_or("");
 
     if !has_primary || !has_secondary || !has_enum {
@@ -258,18 +285,35 @@ fn download_single_version(version: &str) -> Result<(), crate::CliError> {
     }
 
     if output_version != version {
-        eprintln!("Note: extracted version is {} (expected {})", output_version, version);
+        eprintln!(
+            "Note: extracted version is {} (expected {})",
+            output_version, version
+        );
     }
 
     // Clean up temp dir
     let _ = std::fs::remove_dir_all(&temp_dir);
 
-    let primary_count = parsed["primary_types"].as_object().map(|o| o.len()).unwrap_or(0);
-    let secondary_count = parsed["secondary_types"].as_object().map(|o| o.len()).unwrap_or(0);
-    let enum_count = parsed["enum_types"].as_object().map(|o| o.len()).unwrap_or(0);
+    let primary_count = parsed["primary_types"]
+        .as_object()
+        .map(|o| o.len())
+        .unwrap_or(0);
+    let secondary_count = parsed["secondary_types"]
+        .as_object()
+        .map(|o| o.len())
+        .unwrap_or(0);
+    let enum_count = parsed["enum_types"]
+        .as_object()
+        .map(|o| o.len())
+        .unwrap_or(0);
 
-    eprintln!("Schema written to {} ({} primary types, {} secondary types, {} enum types)",
-        output_path.display(), primary_count, secondary_count, enum_count);
+    eprintln!(
+        "Schema written to {} ({} primary types, {} secondary types, {} enum types)",
+        output_path.display(),
+        primary_count,
+        secondary_count,
+        enum_count
+    );
 
     Ok(())
 }
@@ -293,14 +337,17 @@ fn fetch_remote_tags() -> Result<Vec<(String, String)>, String> {
         .call()
         .map_err(|e| format!("HTTP request failed: {}", e))?;
 
-    let body = response.body_mut().read_to_string()
+    let body = response
+        .body_mut()
+        .read_to_string()
         .map_err(|e| format!("Failed to read response body: {}", e))?;
 
-    let tags: Vec<serde_json::Value> = serde_json::from_str(&body)
-        .map_err(|e| format!("Failed to parse JSON: {}", e))?;
+    let tags: Vec<serde_json::Value> =
+        serde_json::from_str(&body).map_err(|e| format!("Failed to parse JSON: {}", e))?;
 
     // Process tags: extract major.minor from vX.Y.Z, keep latest patch per major.minor
-    let mut version_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut version_map: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
 
     for tag in &tags {
         let name = tag.get("name").and_then(|v| v.as_str()).unwrap_or("");
@@ -312,15 +359,18 @@ fn fetch_remote_tags() -> Result<Vec<(String, String)>, String> {
             let minor: u32 = parts[1].parse().unwrap_or(0);
             let patch: u32 = parts[2].parse().unwrap_or(0);
             let key = format!("{}.{}", major, minor);
-            let latest_patch = version_map.get(&key).map(|existing| {
-                let existing_stripped = existing.strip_prefix('v').unwrap_or(existing);
-                let existing_parts: Vec<&str> = existing_stripped.split('.').collect();
-                if existing_parts.len() == 3 {
-                    existing_parts[2].parse().unwrap_or(0)
-                } else {
-                    0
-                }
-            }).unwrap_or(0);
+            let latest_patch = version_map
+                .get(&key)
+                .map(|existing| {
+                    let existing_stripped = existing.strip_prefix('v').unwrap_or(existing);
+                    let existing_parts: Vec<&str> = existing_stripped.split('.').collect();
+                    if existing_parts.len() == 3 {
+                        existing_parts[2].parse().unwrap_or(0)
+                    } else {
+                        0
+                    }
+                })
+                .unwrap_or(0);
             if patch > latest_patch {
                 version_map.insert(key, name.to_string());
             }

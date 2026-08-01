@@ -66,7 +66,10 @@ impl fmt::Display for CliError {
                 write!(f, "schema download error: {}", msg)
             }
             CliError::PythonNotFound => {
-                write!(f, "Python 3 not found. Install Python 3 or manually place a schema file.")
+                write!(
+                    f,
+                    "Python 3 not found. Install Python 3 or manually place a schema file."
+                )
             }
         }
     }

@@ -217,18 +217,9 @@ fn gender_enum_synthesized_for_51() {
         .get("Gender")
         .expect("Gender should be in valid_enum_values for 5.1");
 
-    assert!(
-        genders.contains(&"0"),
-        "Gender 0 (Male) should be valid"
-    );
-    assert!(
-        genders.contains(&"1"),
-        "Gender 1 (Female) should be valid"
-    );
-    assert!(
-        genders.contains(&"2"),
-        "Gender 2 (Unknown) should be valid"
-    );
+    assert!(genders.contains(&"0"), "Gender 0 (Male) should be valid");
+    assert!(genders.contains(&"1"), "Gender 1 (Female) should be valid");
+    assert!(genders.contains(&"2"), "Gender 2 (Unknown) should be valid");
 
     // Generate with 5.1 schema and verify gender distribution
     let config = generate::RandomConfig {
@@ -294,12 +285,11 @@ fn families_have_at_least_one_parent_51() {
             .expect("generation should succeed");
 
     for family_handle in result.graph.nodes_by_kind(NodeKind::Family) {
-        let has_parent = result.graph.edges_from(family_handle).iter().any(|e| {
-            matches!(
-                e,
-                Edge::FamilyFather { .. } | Edge::FamilyMother { .. }
-            )
-        });
+        let has_parent = result
+            .graph
+            .edges_from(family_handle)
+            .iter()
+            .any(|e| matches!(e, Edge::FamilyFather { .. } | Edge::FamilyMother { .. }));
         assert!(
             has_parent,
             "Family {} has no parent edges (no father or mother)",

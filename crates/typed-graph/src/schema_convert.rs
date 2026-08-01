@@ -50,11 +50,7 @@ pub fn is_json_schema_format(schema: &Value) -> bool {
 ///
 /// The `enum_constants` parameter is a parsed `enum_constants_5_1.json`
 /// file mapping enum type names to `{integer_string: name}` pairs.
-pub fn convert(
-    schema: Value,
-    _version: &str,
-    enum_constants: &Value,
-) -> Result<Value, String> {
+pub fn convert(schema: Value, _version: &str, enum_constants: &Value) -> Result<Value, String> {
     let mut result = Map::new();
 
     // Copy top-level metadata (version, etc.)
@@ -73,12 +69,12 @@ pub fn convert(
                 Err(e) => return Err(format!("primary_type {}: {}", type_name, e)),
             }
         }
-        result.insert("primary_types".to_string(), Value::Object(converted_primary));
-    } else {
         result.insert(
             "primary_types".to_string(),
-            Value::Object(Map::new()),
+            Value::Object(converted_primary),
         );
+    } else {
+        result.insert("primary_types".to_string(), Value::Object(Map::new()));
     }
 
     // Convert secondary_types
@@ -102,10 +98,7 @@ pub fn convert(
             Value::Object(converted_secondary),
         );
     } else {
-        result.insert(
-            "secondary_types".to_string(),
-            Value::Object(Map::new()),
-        );
+        result.insert("secondary_types".to_string(), Value::Object(Map::new()));
     }
 
     // Convert enum_types: map integer values → string names
@@ -135,10 +128,7 @@ pub fn convert(
             st.insert("PlaceName".to_string(), build_place_name_secondary_type());
         }
         if !st.contains_key("StyledText") {
-            st.insert(
-                "StyledText".to_string(),
-                build_styled_text_secondary_type(),
-            );
+            st.insert("StyledText".to_string(), build_styled_text_secondary_type());
         }
     }
 
@@ -152,10 +142,7 @@ pub fn convert(
 }
 
 /// Convert fields and mixins for a single type from JSON Schema → flat format.
-fn convert_type_fields(
-    type_info: &Value,
-    enum_constants: &Value,
-) -> Result<Value, String> {
+fn convert_type_fields(type_info: &Value, enum_constants: &Value) -> Result<Value, String> {
     let mut result = Map::new();
     let mut converted_fields = Map::new();
 
@@ -210,11 +197,7 @@ fn convert_type_fields(
 }
 
 /// Convert a single field from JSON Schema format to flat format.
-fn convert_field(
-    field_schema: &Value,
-    field_name: &str,
-    enum_constants: &Value,
-) -> Value {
+fn convert_field(field_schema: &Value, field_name: &str, enum_constants: &Value) -> Value {
     let mut flat = Map::new();
 
     // Map JSON Schema type
@@ -236,7 +219,9 @@ fn convert_field(
             // Recursively convert the non-null alternative
             let mut inner = convert_field(actual_schema, field_name, enum_constants);
             // Replace the required field (default true) with false for optional
-            if let Some(obj) = inner.as_object_mut() { obj.insert("required".to_string(), Value::Bool(false)); }
+            if let Some(obj) = inner.as_object_mut() {
+                obj.insert("required".to_string(), Value::Bool(false));
+            }
             return inner;
         }
     }
@@ -252,10 +237,7 @@ fn convert_field(
             } else if field_name.ends_with("_handle") {
                 let target = resolve_handle_target(field_name);
                 if let Some(t) = target {
-                    flat.insert(
-                        "kind".to_string(),
-                        Value::String("handle_ref".to_string()),
-                    );
+                    flat.insert("kind".to_string(), Value::String("handle_ref".to_string()));
                     flat.insert("target".to_string(), Value::String(t));
                 }
                 // Handle ref fields are optional by default (father_handle, mother_handle, etc.)
@@ -273,14 +255,8 @@ fn convert_field(
 
             // Detect enum_ref fields by name (modifier, quality, gender, type)
             if let Some(enum_ref_target) = detect_enum_ref(field_name) {
-                flat.insert(
-                    "type".to_string(),
-                    Value::String("enum_ref".to_string()),
-                );
-                flat.insert(
-                    "target".to_string(),
-                    Value::String(enum_ref_target),
-                );
+                flat.insert("type".to_string(), Value::String("enum_ref".to_string()));
+                flat.insert("target".to_string(), Value::String(enum_ref_target));
             }
 
             // Integer fields are optional unless they're handle refs (never required)
@@ -297,7 +273,10 @@ fn convert_field(
                 "cardinality".to_string(),
                 Value::Object(
                     vec![
-                        ("min".to_string(), Value::Number(serde_json::Number::from(0))),
+                        (
+                            "min".to_string(),
+                            Value::Number(serde_json::Number::from(0)),
+                        ),
                         ("max".to_string(), Value::Null),
                     ]
                     .into_iter()
@@ -320,14 +299,8 @@ fn convert_field(
 
             if title == "Date" {
                 // Convert Date object → DateValue embedded reference
-                flat.insert(
-                    "type".to_string(),
-                    Value::String("embedded".to_string()),
-                );
-                flat.insert(
-                    "schema".to_string(),
-                    Value::String("DateValue".to_string()),
-                );
+                flat.insert("type".to_string(), Value::String("embedded".to_string()));
+                flat.insert("schema".to_string(), Value::String("DateValue".to_string()));
                 flat.insert("required".to_string(), Value::Bool(false));
             } else if title == "Type" {
                 // Fields like frel/mrel with title "Type" are actually enum refs
@@ -352,17 +325,11 @@ fn convert_field(
                         }
                     });
                 if let Some(target) = enum_target {
-                    flat.insert(
-                        "type".to_string(),
-                        Value::String("enum_ref".to_string()),
-                    );
+                    flat.insert("type".to_string(), Value::String("enum_ref".to_string()));
                     flat.insert("target".to_string(), Value::String(target.to_string()));
                     flat.insert("required".to_string(), Value::Bool(true));
                 } else {
-                    flat.insert(
-                        "type".to_string(),
-                        Value::String("embedded".to_string()),
-                    );
+                    flat.insert("type".to_string(), Value::String("embedded".to_string()));
                     flat.insert(
                         "schema".to_string(),
                         Value::String(normalize_type_title(title)),
@@ -371,10 +338,7 @@ fn convert_field(
                 }
             } else {
                 // Use normalized title for the schema name
-                flat.insert(
-                    "type".to_string(),
-                    Value::String("embedded".to_string()),
-                );
+                flat.insert("type".to_string(), Value::String("embedded".to_string()));
                 flat.insert(
                     "schema".to_string(),
                     Value::String(normalize_type_title(title)),
@@ -456,9 +420,7 @@ fn normalize_type_title(title: &str) -> String {
                         let mut chars = part.chars();
                         match chars.next() {
                             None => String::new(),
-                            Some(f) => {
-                                f.to_uppercase().to_string() + chars.as_str()
-                            }
+                            Some(f) => f.to_uppercase().to_string() + chars.as_str(),
                         }
                     })
                     .collect()
@@ -470,11 +432,7 @@ fn normalize_type_title(title: &str) -> String {
 }
 
 /// Convert array `items` from JSON Schema format to flat format.
-fn convert_array_items(
-    items: &Value,
-    field_name: &str,
-    _enum_constants: &Value,
-) -> Value {
+fn convert_array_items(items: &Value, field_name: &str, _enum_constants: &Value) -> Value {
     let mut result = Map::new();
 
     if let Some(items_obj) = items.as_object() {
@@ -488,10 +446,7 @@ fn convert_array_items(
                 // Array of strings with maxLength: 50 → handle_ref list
                 let target = resolve_list_target(field_name);
                 if let Some(t) = target {
-                    result.insert(
-                        "kind".to_string(),
-                        Value::String("handle_ref".to_string()),
-                    );
+                    result.insert("kind".to_string(), Value::String("handle_ref".to_string()));
                     result.insert("target".to_string(), Value::String(t));
                 } else {
                     result.insert("kind".to_string(), Value::String("handle_ref".to_string()));
@@ -584,11 +539,7 @@ fn build_edges_for_ref(embedded_name: &str, _field_name: &str) -> Vec<Value> {
 }
 
 /// Convert an enum type from integer values to string names.
-fn convert_enum_type(
-    enum_info: &Value,
-    enum_name: &str,
-    lookup_table: Option<&Value>,
-) -> Value {
+fn convert_enum_type(enum_info: &Value, enum_name: &str, lookup_table: Option<&Value>) -> Value {
     let values = enum_info
         .get("values")
         .and_then(|v| v.as_array())
@@ -644,20 +595,20 @@ fn build_date_value_secondary_type() -> Value {
     fields.insert("day".to_string(), Value::Object(day));
 
     let mut modifier = Map::new();
+    modifier.insert("type".to_string(), Value::String("enum_ref".to_string()));
     modifier.insert(
-        "type".to_string(),
-        Value::String("enum_ref".to_string()),
+        "target".to_string(),
+        Value::String("DateModifier".to_string()),
     );
-    modifier.insert("target".to_string(), Value::String("DateModifier".to_string()));
     modifier.insert("required".to_string(), Value::Bool(true));
     fields.insert("modifier".to_string(), Value::Object(modifier));
 
     let mut quality = Map::new();
+    quality.insert("type".to_string(), Value::String("enum_ref".to_string()));
     quality.insert(
-        "type".to_string(),
-        Value::String("enum_ref".to_string()),
+        "target".to_string(),
+        Value::String("DateQuality".to_string()),
     );
-    quality.insert("target".to_string(), Value::String("DateQuality".to_string()));
     quality.insert("required".to_string(), Value::Bool(true));
     fields.insert("quality".to_string(), Value::Object(quality));
 
@@ -681,10 +632,7 @@ fn build_place_name_secondary_type() -> Value {
     fields.insert("value".to_string(), Value::Object(value));
 
     let mut date = Map::new();
-    date.insert(
-        "type".to_string(),
-        Value::String("embedded".to_string()),
-    );
+    date.insert("type".to_string(), Value::String("embedded".to_string()));
     date.insert("schema".to_string(), Value::String("DateValue".to_string()));
     date.insert("required".to_string(), Value::Bool(false));
     fields.insert("date".to_string(), Value::Object(date));
@@ -736,19 +684,13 @@ fn synthesize_missing_enum_types(result: &mut Map<String, Value>, source_schema:
     // Collect all enum_ref targets from converted primary and secondary types
     let mut missing_targets: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
-    if let Some(primary_types) = result
-        .get("primary_types")
-        .and_then(|v| v.as_object())
-    {
+    if let Some(primary_types) = result.get("primary_types").and_then(|v| v.as_object()) {
         for type_info in primary_types.values() {
             collect_enum_ref_targets(type_info, &mut missing_targets);
         }
     }
 
-    if let Some(secondary_types) = result
-        .get("secondary_types")
-        .and_then(|v| v.as_object())
-    {
+    if let Some(secondary_types) = result.get("secondary_types").and_then(|v| v.as_object()) {
         for type_info in secondary_types.values() {
             collect_enum_ref_targets(type_info, &mut missing_targets);
         }
@@ -796,10 +738,7 @@ fn synthesize_missing_enum_types(result: &mut Map<String, Value>, source_schema:
     }
 
     // Merge synthesized enums into the result
-    if let Some(enum_types) = result
-        .get_mut("enum_types")
-        .and_then(|v| v.as_object_mut())
-    {
+    if let Some(enum_types) = result.get_mut("enum_types").and_then(|v| v.as_object_mut()) {
         for (name, entry) in synthesized {
             enum_types.entry(name).or_insert(entry);
         }
@@ -810,11 +749,7 @@ fn synthesize_missing_enum_types(result: &mut Map<String, Value>, source_schema:
 fn collect_enum_ref_targets(type_info: &Value, targets: &mut std::collections::BTreeSet<String>) {
     if let Some(fields) = type_info.get("fields").and_then(|v| v.as_object()) {
         for field_info in fields.values() {
-            if field_info
-                .get("type")
-                .and_then(|v| v.as_str())
-                == Some("enum_ref")
-            {
+            if field_info.get("type").and_then(|v| v.as_str()) == Some("enum_ref") {
                 if let Some(target) = field_info.get("target").and_then(|v| v.as_str()) {
                     targets.insert(target.to_string());
                 }
@@ -913,10 +848,7 @@ fn find_enum_range(source_schema: &Value, target: &str) -> Option<(i64, i64)> {
 ///
 /// This handles cases like the Date object, where `modifier` and `quality` fields
 /// are nested inside the object's `properties` rather than at the top level.
-fn find_enum_in_nested_properties(
-    type_info: &Value,
-    target: &str,
-) -> Option<(i64, i64)> {
+fn find_enum_in_nested_properties(type_info: &Value, target: &str) -> Option<(i64, i64)> {
     if let Some(properties) = type_info
         .get("fields")
         .and_then(|v| v.as_object())
@@ -925,10 +857,7 @@ fn find_enum_in_nested_properties(
     {
         for field_schema in properties.values() {
             // Check if this field is an object with its own properties (direct)
-            if let Some(nested_props) = field_schema
-                .get("properties")
-                .and_then(|v| v.as_object())
-            {
+            if let Some(nested_props) = field_schema.get("properties").and_then(|v| v.as_object()) {
                 if let Some(range) = search_properties_for_enum(nested_props, target) {
                     return Some(range);
                 }
@@ -936,15 +865,9 @@ fn find_enum_in_nested_properties(
 
             // Check if this field has a oneOf wrapper (e.g., Date field with
             // oneOf [null, {type: "object", properties: {...}}])
-            if let Some(one_of) = field_schema
-                .get("oneOf")
-                .and_then(|v| v.as_array())
-            {
+            if let Some(one_of) = field_schema.get("oneOf").and_then(|v| v.as_array()) {
                 for alt in one_of {
-                    if let Some(nested_props) = alt
-                        .get("properties")
-                        .and_then(|v| v.as_object())
-                    {
+                    if let Some(nested_props) = alt.get("properties").and_then(|v| v.as_object()) {
                         if let Some(range) = search_properties_for_enum(nested_props, target) {
                             return Some(range);
                         }
@@ -958,10 +881,7 @@ fn find_enum_in_nested_properties(
 }
 
 /// Search a properties map for a field whose `detect_enum_ref` matches the target.
-fn search_properties_for_enum(
-    properties: &Map<String, Value>,
-    target: &str,
-) -> Option<(i64, i64)> {
+fn search_properties_for_enum(properties: &Map<String, Value>, target: &str) -> Option<(i64, i64)> {
     for (nested_name, nested_schema) in properties {
         if detect_enum_ref(nested_name).as_deref() == Some(target) {
             if let (Some(min), Some(max)) = (
@@ -980,29 +900,17 @@ pub fn validate_flat_format(schema: &Value) -> Result<(), Vec<String>> {
     let mut errors = Vec::new();
 
     for category_label in &["primary_types", "secondary_types"] {
-        if let Some(obj) = schema
-            .get(*category_label)
-            .and_then(|v| v.as_object())
-        {
+        if let Some(obj) = schema.get(*category_label).and_then(|v| v.as_object()) {
             for (type_name, type_info) in obj {
-                if let Some(fields) = type_info
-                    .get("fields")
-                    .and_then(|v| v.as_object())
-                {
+                if let Some(fields) = type_info.get("fields").and_then(|v| v.as_object()) {
                     for (field_name, field_info) in fields {
                         // Every field must have a "type" key
                         if field_info.get("type").is_none() {
-                            errors.push(format!(
-                                "{}.{}: missing 'type'",
-                                type_name, field_name
-                            ));
+                            errors.push(format!("{}.{}: missing 'type'", type_name, field_name));
                         }
 
                         // handle_ref must have target
-                        if field_info
-                            .get("kind")
-                            .and_then(|v| v.as_str())
-                            == Some("handle_ref")
+                        if field_info.get("kind").and_then(|v| v.as_str()) == Some("handle_ref")
                             && field_info.get("target").is_none()
                         {
                             errors.push(format!(
@@ -1012,10 +920,7 @@ pub fn validate_flat_format(schema: &Value) -> Result<(), Vec<String>> {
                         }
 
                         // embedded must have schema
-                        if field_info
-                            .get("type")
-                            .and_then(|v| v.as_str())
-                            == Some("embedded")
+                        if field_info.get("type").and_then(|v| v.as_str()) == Some("embedded")
                             && field_info.get("schema").is_none()
                         {
                             errors.push(format!(
@@ -1025,10 +930,7 @@ pub fn validate_flat_format(schema: &Value) -> Result<(), Vec<String>> {
                         }
 
                         // array must have items
-                        if field_info
-                            .get("type")
-                            .and_then(|v| v.as_str())
-                            == Some("array")
+                        if field_info.get("type").and_then(|v| v.as_str()) == Some("array")
                             && field_info.get("items").is_none()
                         {
                             errors.push(format!(
@@ -1132,10 +1034,7 @@ mod tests {
         let field = json!({"type": "boolean", "title": "Private"});
         let result = convert_field(&field, "private", &Value::Null);
         // private is skipped (line 138-140), but test the type conversion
-        assert_eq!(
-            result.get("type").and_then(|v| v.as_str()),
-            Some("boolean")
-        );
+        assert_eq!(result.get("type").and_then(|v| v.as_str()), Some("boolean"));
     }
 
     #[test]
@@ -1153,14 +1052,8 @@ mod tests {
             result.get("type").and_then(|v| v.as_str()),
             Some("embedded")
         );
-        assert_eq!(
-            result.get("schema").and_then(|v| v.as_str()),
-            Some("Name")
-        );
-        assert_eq!(
-            result.get("required").and_then(|v| v.as_bool()),
-            Some(true)
-        );
+        assert_eq!(result.get("schema").and_then(|v| v.as_str()), Some("Name"));
+        assert_eq!(result.get("required").and_then(|v| v.as_bool()), Some(true));
     }
 
     #[test]
@@ -1185,19 +1078,13 @@ mod tests {
             "title": "Families"
         });
         let result = convert_field(&field, "family_list", &Value::Null);
-        assert_eq!(
-            result.get("type").and_then(|v| v.as_str()),
-            Some("array")
-        );
+        assert_eq!(result.get("type").and_then(|v| v.as_str()), Some("array"));
         let items = result.get("items").and_then(|v| v.as_object()).unwrap();
         assert_eq!(
             items.get("kind").and_then(|v| v.as_str()),
             Some("handle_ref")
         );
-        assert_eq!(
-            items.get("target").and_then(|v| v.as_str()),
-            Some("Family")
-        );
+        assert_eq!(items.get("target").and_then(|v| v.as_str()), Some("Family"));
     }
 
     #[test]
@@ -1215,10 +1102,7 @@ mod tests {
             "title": "Events"
         });
         let result = convert_field(&field, "event_ref_list", &Value::Null);
-        assert_eq!(
-            result.get("type").and_then(|v| v.as_str()),
-            Some("array")
-        );
+        assert_eq!(result.get("type").and_then(|v| v.as_str()), Some("array"));
         let items = result.get("items").and_then(|v| v.as_object()).unwrap();
         assert_eq!(
             items.get("embedded").and_then(|v| v.as_str()),
@@ -1244,7 +1128,10 @@ mod tests {
         let result = convert_type_fields(&type_info, &Value::Null).unwrap();
         let fields = result.get("fields").and_then(|v| v.as_object()).unwrap();
         assert!(!fields.contains_key("_class"), "_class should be stripped");
-        assert!(!fields.contains_key("private"), "private should be stripped");
+        assert!(
+            !fields.contains_key("private"),
+            "private should be stripped"
+        );
         assert!(fields.contains_key("ref"), "ref should be preserved");
         assert!(fields.contains_key("role"), "role should be preserved");
     }
@@ -1335,10 +1222,7 @@ mod tests {
         // Fields without oneOf null wrapper → required: true
         let field = json!({"type": "string", "maxLength": 50, "title": "Handle"});
         let result = convert_field(&field, "handle", &Value::Null);
-        assert_eq!(
-            result.get("required").and_then(|v| v.as_bool()),
-            Some(true)
-        );
+        assert_eq!(result.get("required").and_then(|v| v.as_bool()), Some(true));
     }
 
     #[test]
@@ -1412,10 +1296,7 @@ mod tests {
             "title": "Multi"
         });
         let result = convert_field(&field, "multi", &Value::Null);
-        assert_eq!(
-            result.get("type").and_then(|v| v.as_str()),
-            Some("string")
-        );
+        assert_eq!(result.get("type").and_then(|v| v.as_str()), Some("string"));
         assert_eq!(
             result.get("required").and_then(|v| v.as_bool()),
             Some(false)
@@ -1505,7 +1386,9 @@ mod tests {
         let result = validate_flat_format(&schema);
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert!(errors.iter().any(|e| e.contains("embedded missing 'schema'")));
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("embedded missing 'schema'")));
     }
 
     #[test]
@@ -1542,10 +1425,7 @@ mod tests {
 
         // year is required
         let year = fields.get("year").unwrap();
-        assert_eq!(
-            year.get("required").and_then(|v| v.as_bool()),
-            Some(true)
-        );
+        assert_eq!(year.get("required").and_then(|v| v.as_bool()), Some(true));
         // modifiers are required
         let modifier = fields.get("modifier").unwrap();
         assert_eq!(
@@ -1581,13 +1461,13 @@ mod tests {
         let result = convert(flat.clone(), "5.2", &Value::Null).unwrap();
         // The converter always adds DateValue secondary type (for 5.1-only builds)
         assert_eq!(result.get("version"), flat.get("version"));
-        assert_eq!(
-            result.get("primary_types"),
-            flat.get("primary_types")
-        );
+        assert_eq!(result.get("primary_types"), flat.get("primary_types"));
         assert_eq!(result.get("enum_types"), flat.get("enum_types"));
         // DateValue should be present
-        let secondary = result.get("secondary_types").and_then(|v| v.as_object()).unwrap();
+        let secondary = result
+            .get("secondary_types")
+            .and_then(|v| v.as_object())
+            .unwrap();
         assert!(
             secondary.contains_key("DateValue"),
             "DateValue should be added"
@@ -1646,9 +1526,14 @@ mod tests {
         });
 
         let result = convert(schema, "5.1", &Value::Null).unwrap();
-        let enum_types = result.get("enum_types").and_then(|v| v.as_object()).unwrap();
+        let enum_types = result
+            .get("enum_types")
+            .and_then(|v| v.as_object())
+            .unwrap();
 
-        let gender = enum_types.get("Gender").expect("Gender should be synthesized");
+        let gender = enum_types
+            .get("Gender")
+            .expect("Gender should be synthesized");
         let values = gender.get("values").and_then(|v| v.as_array()).unwrap();
         let nums: Vec<i64> = values.iter().filter_map(|v| v.as_i64()).collect();
         assert_eq!(nums, vec![0, 1, 2], "Gender should have values 0, 1, 2");
@@ -1694,17 +1579,32 @@ mod tests {
         });
 
         let result = convert(schema, "5.1", &Value::Null).unwrap();
-        let enum_types = result.get("enum_types").and_then(|v| v.as_object()).unwrap();
+        let enum_types = result
+            .get("enum_types")
+            .and_then(|v| v.as_object())
+            .unwrap();
 
-        let modifier = enum_types.get("DateModifier").expect("DateModifier should be synthesized");
+        let modifier = enum_types
+            .get("DateModifier")
+            .expect("DateModifier should be synthesized");
         let values = modifier.get("values").and_then(|v| v.as_array()).unwrap();
         let nums: Vec<i64> = values.iter().filter_map(|v| v.as_i64()).collect();
-        assert_eq!(nums, vec![0, 1, 2, 3, 4, 5, 6], "DateModifier should have values 0..=6");
+        assert_eq!(
+            nums,
+            vec![0, 1, 2, 3, 4, 5, 6],
+            "DateModifier should have values 0..=6"
+        );
 
-        let quality = enum_types.get("DateQuality").expect("DateQuality should be synthesized");
+        let quality = enum_types
+            .get("DateQuality")
+            .expect("DateQuality should be synthesized");
         let values = quality.get("values").and_then(|v| v.as_array()).unwrap();
         let nums: Vec<i64> = values.iter().filter_map(|v| v.as_i64()).collect();
-        assert_eq!(nums, vec![0, 1, 2], "DateQuality should have values 0, 1, 2");
+        assert_eq!(
+            nums,
+            vec![0, 1, 2],
+            "DateQuality should have values 0, 1, 2"
+        );
     }
 
     #[test]
@@ -1734,13 +1634,20 @@ mod tests {
         });
 
         let result = convert(schema, "5.1", &Value::Null).unwrap();
-        let enum_types = result.get("enum_types").and_then(|v| v.as_object()).unwrap();
+        let enum_types = result
+            .get("enum_types")
+            .and_then(|v| v.as_object())
+            .unwrap();
 
         let gender = enum_types.get("Gender").expect("Gender should exist");
         let values = gender.get("values").and_then(|v| v.as_array()).unwrap();
         // Should be the string values from the source, not the synthesized integers
         let strings: Vec<&str> = values.iter().filter_map(|v| v.as_str()).collect();
-        assert_eq!(strings, vec!["Male", "Female", "Unknown"], "Existing enum should not be overwritten");
+        assert_eq!(
+            strings,
+            vec!["Male", "Female", "Unknown"],
+            "Existing enum should not be overwritten"
+        );
     }
 
     #[test]
@@ -1766,8 +1673,14 @@ mod tests {
         });
 
         let result = convert(schema, "5.1", &Value::Null).unwrap();
-        let enum_types = result.get("enum_types").and_then(|v| v.as_object()).unwrap();
+        let enum_types = result
+            .get("enum_types")
+            .and_then(|v| v.as_object())
+            .unwrap();
         // Gender should NOT be synthesized because there's no min/max
-        assert!(!enum_types.contains_key("Gender"), "Gender should not be synthesized without min/max");
+        assert!(
+            !enum_types.contains_key("Gender"),
+            "Gender should not be synthesized without min/max"
+        );
     }
 }

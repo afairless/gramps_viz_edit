@@ -646,10 +646,9 @@ impl<'a, 'b> FamilyBuilder<'a, 'b> {
     ///
     /// Adds to `child_ref_list` and records a `FamilyChildRef` edge.
     pub fn add_child(mut self, child_handle: &Handle, relation: ChildRefType) -> Self {
-        self.data.child_ref_list.push(crate::make_child_ref(
-            child_handle.clone(),
-            Some(relation),
-        ));
+        self.data
+            .child_ref_list
+            .push(crate::make_child_ref(child_handle.clone(), Some(relation)));
         self
     }
 
@@ -768,10 +767,7 @@ impl<'a, 'b> FamilyBuilder<'a, 'b> {
             let edge = Edge::FamilyChildRef {
                 source: family_handle.clone(),
                 target: child_handle.clone(),
-                metadata: Box::new(crate::make_child_ref(
-                    child_handle.clone(),
-                    None,
-                )),
+                metadata: Box::new(crate::make_child_ref(child_handle.clone(), None)),
             };
             let _ = self.builder.graph.add_edge(edge);
         }
@@ -994,7 +990,11 @@ impl<'a, 'b> CitationBuilder<'a, 'b> {
                 field: "source_handle",
             });
         }
-        if !self.builder.graph.contains_node(&crate::get_source_handle(&self.data.source_handle)) {
+        if !self
+            .builder
+            .graph
+            .contains_node(&crate::get_source_handle(&self.data.source_handle))
+        {
             return Err(BuilderError::InvalidHandle {
                 builder_type: "Citation",
                 handle: crate::get_source_handle(&self.data.source_handle),

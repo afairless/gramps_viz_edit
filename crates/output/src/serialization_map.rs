@@ -186,12 +186,12 @@ impl SerializationMap {
                         field: "gramps_id".to_string(),
                         attr_name: "id".to_string(),
                     },
-                    XmlAttribute {
-                        field: "gender".to_string(),
-                        attr_name: "gender".to_string(),
-                    },
                 ],
                 children: vec![
+                    XmlChild {
+                        element_name: "gender".to_string(),
+                        source: XmlChildSource::InlineStruct("gender".to_string()),
+                    },
                     XmlChild {
                         element_name: "name".to_string(),
                         source: XmlChildSource::InlineStruct("primary_name".to_string()),
@@ -566,9 +566,7 @@ impl SerializationMap {
             XmlEdgeInfo {
                 parent_element: "person".to_string(),
                 element_name: "personref".to_string(),
-                attributes: vec![
-                    ("hlink".to_string(), "hlink".to_string()),
-                ],
+                attributes: vec![("hlink".to_string(), "hlink".to_string())],
             },
         );
         edge_map.insert(
@@ -576,9 +574,7 @@ impl SerializationMap {
             XmlEdgeInfo {
                 parent_element: "source".to_string(),
                 element_name: "reporef".to_string(),
-                attributes: vec![
-                    ("hlink".to_string(), "hlink".to_string()),
-                ],
+                attributes: vec![("hlink".to_string(), "hlink".to_string())],
             },
         );
 
@@ -749,8 +745,16 @@ mod tests {
     fn serialization_map_new_has_all_primary_types() {
         let map = SerializationMap::new();
         let expected_types = [
-            "Tag", "Event", "Person", "Family", "Citation", "Source", "Place", "Media",
-            "Repository", "Note",
+            "Tag",
+            "Event",
+            "Person",
+            "Family",
+            "Citation",
+            "Source",
+            "Place",
+            "Media",
+            "Repository",
+            "Note",
         ];
         for type_name in &expected_types {
             assert!(
@@ -783,8 +787,16 @@ mod tests {
     fn serialization_map_section_order() {
         let map = SerializationMap::new();
         let expected = vec![
-            "tags", "events", "people", "families", "citations", "sources", "places", "objects",
-            "repositories", "notes",
+            "tags",
+            "events",
+            "people",
+            "families",
+            "citations",
+            "sources",
+            "places",
+            "objects",
+            "repositories",
+            "notes",
         ];
         assert_eq!(map.section_order, expected);
     }

@@ -90,11 +90,10 @@ impl std::error::Error for ScenarioError {
 
 /// Load a scenario from a YAML file path.
 pub fn load_scenario(path: &str) -> Result<Scenario, ScenarioError> {
-    let file = std::fs::File::open(path)
-        .map_err(|e| ScenarioError::Io {
-            path: path.to_string(),
-            source: e,
-        })?;
+    let file = std::fs::File::open(path).map_err(|e| ScenarioError::Io {
+        path: path.to_string(),
+        source: e,
+    })?;
     let reader = std::io::BufReader::new(file);
     serde_yaml::from_reader(reader).map_err(|e| ScenarioError::ParseError {
         path: path.to_string(),
@@ -108,9 +107,9 @@ fn strategy_from_name(name: &str) -> Option<typed_graph::generate::AdversarialSt
         "one_parent" | "one-parent" | "one_parent_families" => {
             Some(typed_graph::generate::AdversarialStrategy::OneParentFamilies(0.5))
         }
-        "missing_events" | "missing-events" => {
-            Some(typed_graph::generate::AdversarialStrategy::MissingEvents(0.3))
-        }
+        "missing_events" | "missing-events" => Some(
+            typed_graph::generate::AdversarialStrategy::MissingEvents(0.3),
+        ),
         "solo" | "solo_persons" | "solo-persons" => {
             Some(typed_graph::generate::AdversarialStrategy::SoloPersons(0.2))
         }
@@ -129,9 +128,9 @@ fn strategy_from_name(name: &str) -> Option<typed_graph::generate::AdversarialSt
         "orphaned" | "orphaned_references" | "orphaned-references" => {
             Some(typed_graph::generate::AdversarialStrategy::OrphanedReferences)
         }
-        "double_gender" | "double-gender" => {
-            Some(typed_graph::generate::AdversarialStrategy::DoubleGender(0.2))
-        }
+        "double_gender" | "double-gender" => Some(
+            typed_graph::generate::AdversarialStrategy::DoubleGender(0.2),
+        ),
         _ => None,
     }
 }

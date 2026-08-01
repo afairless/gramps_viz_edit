@@ -127,7 +127,8 @@ fn generate_with_adversarial_all_preserves_validity() {
     let result = typed_graph::generate::generate_random(&config, &adv_config, &schema).unwrap();
 
     // Apply Category B transforms
-    let mut graph = typed_graph::generate::apply_adversarial_strategies(result.graph, &adv_config).graph;
+    let mut graph =
+        typed_graph::generate::apply_adversarial_strategies(result.graph, &adv_config).graph;
 
     // Validate — should still be valid after adversarial transforms
     let errors = graph.validate(&schema);
@@ -170,13 +171,15 @@ fn generate_serialize_and_validate_roundtrip() {
     let map = output::SerializationMap::new();
     let writer = output::GraphXmlWriter::new(map, "5.2.0");
     let mut buffer = Vec::new();
-    writer.write(&result.graph, &mut std::io::BufWriter::new(&mut buffer)).unwrap();
+    writer
+        .write(&result.graph, &mut std::io::BufWriter::new(&mut buffer))
+        .unwrap();
     let xml = String::from_utf8(buffer).unwrap();
 
     // Validate the XML structure
     // Use quick_xml to check basic structure
-    use quick_xml::Reader;
     use quick_xml::events::Event;
+    use quick_xml::Reader;
 
     let mut reader = Reader::from_str(&xml);
     reader.config_mut().trim_text(true);
@@ -210,7 +213,10 @@ fn scenario_file_with_minimal_fields() {
     let config = scenario.to_random_config();
     assert_eq!(config.person_count, 5);
     // Other fields should use defaults
-    assert_eq!(config.generations, typed_graph::generate::RandomConfig::default().generations);
+    assert_eq!(
+        config.generations,
+        typed_graph::generate::RandomConfig::default().generations
+    );
 }
 
 /// Integration test: scenario YAML file with all fields.

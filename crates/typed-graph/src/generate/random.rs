@@ -584,12 +584,12 @@ pub(crate) fn generate_random_person(
             .add_edge(crate::Edge::PersonEventRef {
                 source: handle.clone(),
                 target: event_handle,
-                    metadata: Box::new(crate::make_event_ref(
-                        handle.clone(),
-                        Some(crate::EventRoleType::Primary),
-                    )),
-                })
-                .expect("birth event target exists (just added)");
+                metadata: Box::new(crate::make_event_ref(
+                    handle.clone(),
+                    Some(crate::EventRoleType::Primary),
+                )),
+            })
+            .expect("birth event target exists (just added)");
 
         // Create death event if death date is set
         if let Some(death_date) = death_date {
@@ -2093,9 +2093,16 @@ mod tests {
         let mut used_names = std::collections::HashSet::new();
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
-        let (handle, _person_warning) =
-            generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0, 0.0, &crate::Schema::default())
-                .expect("person generation should succeed");
+        let (handle, _person_warning) = generate_random_person(
+            &mut graph,
+            &config,
+            &mut used_names,
+            &mut rng,
+            0,
+            0.0,
+            &crate::Schema::default(),
+        )
+        .expect("person generation should succeed");
 
         assert!(graph.contains_node(&handle));
         assert_eq!(graph.node_count(), 2); // Person + birth event
@@ -2108,9 +2115,16 @@ mod tests {
         let mut used_names = std::collections::HashSet::new();
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
-        let (handle, _person_warning) =
-            generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0, 0.0, &crate::Schema::default())
-                .expect("person generation should succeed");
+        let (handle, _person_warning) = generate_random_person(
+            &mut graph,
+            &config,
+            &mut used_names,
+            &mut rng,
+            0,
+            0.0,
+            &crate::Schema::default(),
+        )
+        .expect("person generation should succeed");
 
         match graph.get_node(&handle).unwrap() {
             crate::Node::Person(person) => {
@@ -2127,9 +2141,16 @@ mod tests {
         let mut used_names = std::collections::HashSet::new();
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
-        let (handle, _person_warning) =
-            generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0, 0.0, &crate::Schema::default())
-                .expect("person generation should succeed");
+        let (handle, _person_warning) = generate_random_person(
+            &mut graph,
+            &config,
+            &mut used_names,
+            &mut rng,
+            0,
+            0.0,
+            &crate::Schema::default(),
+        )
+        .expect("person generation should succeed");
 
         match graph.get_node(&handle).unwrap() {
             crate::Node::Person(person) => {
@@ -2154,9 +2175,16 @@ mod tests {
         let mut used_names = std::collections::HashSet::new();
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
-        let (_handle, _person_warning) =
-            generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 1, 0.0, &crate::Schema::default())
-                .expect("person generation should succeed");
+        let (_handle, _person_warning) = generate_random_person(
+            &mut graph,
+            &config,
+            &mut used_names,
+            &mut rng,
+            1,
+            0.0,
+            &crate::Schema::default(),
+        )
+        .expect("person generation should succeed");
 
         // Layer 1: end_year-85 to end_year-55 = 1915 to 1945
         // Check that a birth event exists with a date in the expected range
@@ -2184,9 +2212,16 @@ mod tests {
         let mut used_names = std::collections::HashSet::new();
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
-        let (handle, _person_warning) =
-            generate_random_person(&mut graph, &config, &mut used_names, &mut rng, 0, 0.0, &crate::Schema::default())
-                .expect("person generation should succeed");
+        let (handle, _person_warning) = generate_random_person(
+            &mut graph,
+            &config,
+            &mut used_names,
+            &mut rng,
+            0,
+            0.0,
+            &crate::Schema::default(),
+        )
+        .expect("person generation should succeed");
 
         // Check that if death event exists, its date is after birth
         let mut birth_year = 0i32;
@@ -2233,10 +2268,26 @@ mod tests {
         let mut rng1 = rand::rngs::StdRng::seed_from_u64(42);
         let mut rng2 = rand::rngs::StdRng::seed_from_u64(42);
 
-        let (h1, _pw) = generate_random_person(&mut graph1, &config, &mut used1, &mut rng1, 0, 0.0, &crate::Schema::default())
-            .expect("person gen should succeed");
-        let (h2, _pw) = generate_random_person(&mut graph2, &config, &mut used2, &mut rng2, 0, 0.0, &crate::Schema::default())
-            .expect("person gen should succeed");
+        let (h1, _pw) = generate_random_person(
+            &mut graph1,
+            &config,
+            &mut used1,
+            &mut rng1,
+            0,
+            0.0,
+            &crate::Schema::default(),
+        )
+        .expect("person gen should succeed");
+        let (h2, _pw) = generate_random_person(
+            &mut graph2,
+            &config,
+            &mut used2,
+            &mut rng2,
+            0,
+            0.0,
+            &crate::Schema::default(),
+        )
+        .expect("person gen should succeed");
 
         // Same seed should produce the same person data (excluding UUID handle)
         if let (crate::Node::Person(p1), crate::Node::Person(p2)) =
@@ -4567,15 +4618,15 @@ mod tests {
 
         // Verify a FamilyMother edge exists
         let edges = graph.edges_from(&family_handle);
-        let has_mother_edge = edges.iter().any(|e| {
-            matches!(e, crate::Edge::FamilyMother { target, .. } if *target == person_handle)
-        });
+        let has_mother_edge = edges.iter().any(
+            |e| matches!(e, crate::Edge::FamilyMother { target, .. } if *target == person_handle),
+        );
         assert!(has_mother_edge, "FamilyMother edge should exist");
 
         // Verify no FamilyFather edge exists
-        let has_father_edge = edges.iter().any(|e| {
-            matches!(e, crate::Edge::FamilyFather { .. })
-        });
+        let has_father_edge = edges
+            .iter()
+            .any(|e| matches!(e, crate::Edge::FamilyFather { .. }));
         assert!(!has_father_edge, "FamilyFather edge should not exist");
 
         // Verify the person's family_list contains the family handle
@@ -4590,7 +4641,9 @@ mod tests {
 
         // Verify the person is marked as parent
         assert!(
-            persons.iter().any(|(h, s)| *h == person_handle && s.is_parent),
+            persons
+                .iter()
+                .any(|(h, s)| *h == person_handle && s.is_parent),
             "Person should be marked as parent"
         );
     }
@@ -4651,15 +4704,15 @@ mod tests {
 
         // Verify a FamilyFather edge exists
         let edges = graph.edges_from(&family_handle);
-        let has_father_edge = edges.iter().any(|e| {
-            matches!(e, crate::Edge::FamilyFather { target, .. } if *target == person_handle)
-        });
+        let has_father_edge = edges.iter().any(
+            |e| matches!(e, crate::Edge::FamilyFather { target, .. } if *target == person_handle),
+        );
         assert!(has_father_edge, "FamilyFather edge should exist");
 
         // Verify no FamilyMother edge exists
-        let has_mother_edge = edges.iter().any(|e| {
-            matches!(e, crate::Edge::FamilyMother { .. })
-        });
+        let has_mother_edge = edges
+            .iter()
+            .any(|e| matches!(e, crate::Edge::FamilyMother { .. }));
         assert!(!has_mother_edge, "FamilyMother edge should not exist");
 
         // Verify the person's family_list contains the family handle
@@ -4674,7 +4727,9 @@ mod tests {
 
         // Verify the person is marked as parent
         assert!(
-            persons.iter().any(|(h, s)| *h == person_handle && s.is_parent),
+            persons
+                .iter()
+                .any(|(h, s)| *h == person_handle && s.is_parent),
             "Person should be marked as parent"
         );
     }
@@ -4729,10 +4784,13 @@ mod tests {
         }
 
         let edges = graph.edges_from(&family_handle);
-        let has_father_edge = edges.iter().any(|e| {
-            matches!(e, crate::Edge::FamilyFather { target, .. } if *target == person_handle)
-        });
-        assert!(has_father_edge, "FamilyFather edge should exist for unknown gender");
+        let has_father_edge = edges.iter().any(
+            |e| matches!(e, crate::Edge::FamilyFather { target, .. } if *target == person_handle),
+        );
+        assert!(
+            has_father_edge,
+            "FamilyFather edge should exist for unknown gender"
+        );
     }
 
     /// Strengthen the existing property test: assert that families actually

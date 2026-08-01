@@ -154,10 +154,7 @@ fn load_schemas(
         let schema_path = schemas_dir.join(&filename);
 
         if !schema_path.exists() {
-            eprintln!(
-                "error: {} not found.",
-                schema_path.display()
-            );
+            eprintln!("error: {} not found.", schema_path.display());
             eprintln!(
                 "  hint: Run `gramps-gen schema download {}` to download it,",
                 version
@@ -189,9 +186,8 @@ fn load_schemas(
                 "cargo::warning=schema-{}.json is in JSON Schema format; converting to flat format",
                 version
             );
-            let converted =
-                schema_convert::convert(schema, version, enum_constants)
-                    .expect("schema conversion should succeed for valid Gramps JSON Schema");
+            let converted = schema_convert::convert(schema, version, enum_constants)
+                .expect("schema conversion should succeed for valid Gramps JSON Schema");
 
             // Validate the converted output before it reaches the merge algorithm
             if let Err(errs) = schema_convert::validate_flat_format(&converted) {
@@ -261,7 +257,13 @@ fn generate_code(schemas: &[(String, serde_json::Value)]) -> String {
     generate_edge_enum(&mut code, primary_types, schemas);
 
     // 6. Generate per-version Schema instances and new API
-    generate_schema_metadata(&mut code, primary_types, schemas, &versions, default_version);
+    generate_schema_metadata(
+        &mut code,
+        primary_types,
+        schemas,
+        &versions,
+        default_version,
+    );
 
     code
 }
@@ -406,9 +408,7 @@ fn merge_schemas(schemas: &[(String, serde_json::Value)]) -> MergedSchema {
             // Optionality rule: field is Option<T> if ANY version doesn't require it
             // or if ANY version doesn't define it at all
             let versions_that_define_it = requireds.map(|v| v.len()).unwrap_or(0);
-            let all_required = requireds
-                .map(|v| v.iter().all(|r| *r))
-                .unwrap_or(false);
+            let all_required = requireds.map(|v| v.iter().all(|r| *r)).unwrap_or(false);
 
             // If the field is defined in all schemas and always required,
             // it's non-optional. Otherwise it's optional.
@@ -479,9 +479,7 @@ fn merge_schemas(schemas: &[(String, serde_json::Value)]) -> MergedSchema {
         for field_name in &all_fields {
             let requireds = field_required_map.get(field_name);
             let versions_that_define_it = requireds.map(|v| v.len()).unwrap_or(0);
-            let all_required = requireds
-                .map(|v| v.iter().all(|r| *r))
-                .unwrap_or(false);
+            let all_required = requireds.map(|v| v.iter().all(|r| *r)).unwrap_or(false);
             let is_optional = !all_required || versions_that_define_it < schemas.len();
 
             let field_info = field_info_map
@@ -796,7 +794,9 @@ fn generate_schema_metadata(
     );
     code.push_str("    /// Valid enum values for each enum type (version-specific).\n");
     code.push_str("    pub valid_enum_values: HashMap<&'static str, Vec<&'static str>>,\n");
-    code.push_str("    /// Maps \"Type.field_name\" to list of versions where that field exists.\n");
+    code.push_str(
+        "    /// Maps \"Type.field_name\" to list of versions where that field exists.\n",
+    );
     code.push_str("    pub field_availability: HashMap<&'static str, Vec<&'static str>>,\n");
     code.push_str("}\n\n");
 
@@ -806,10 +806,7 @@ fn generate_schema_metadata(
 
     for (version, schema) in schemas {
         let static_name = version_to_static_name(version);
-        code.push_str(&format!(
-            "/// Schema metadata for Gramps {}.\n",
-            version
-        ));
+        code.push_str(&format!("/// Schema metadata for Gramps {}.\n", version));
         code.push_str(&format!(
             "pub static {}: LazyLock<Schema> = LazyLock::new(|| {});\n\n",
             static_name,
@@ -840,7 +837,10 @@ fn generate_schema_metadata(
     code.push_str("        match version {\n");
     for version in versions {
         let static_name = version_to_static_name(version);
-        code.push_str(&format!("            \"{}\" => Some(&*{}),\n", version, static_name));
+        code.push_str(&format!(
+            "            \"{}\" => Some(&*{}),\n",
+            version, static_name
+        ));
     }
     code.push_str("            _ => None,\n");
     code.push_str("        }\n");
@@ -912,7 +912,9 @@ fn generate_schema_instance(
                     let required: Vec<&str> = fields
                         .iter()
                         .filter(|(_, fi)| {
-                            fi.get("required").and_then(|v| v.as_bool()).unwrap_or(false)
+                            fi.get("required")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false)
                         })
                         .map(|(name, _)| name.as_str())
                         .collect();
@@ -931,7 +933,9 @@ fn generate_schema_instance(
 
     // cardinality_constraints
     s.push_str("    cardinality_constraints: {\n");
-    s.push_str("        let mut m: HashMap<&'static str, (Option<u32>, Option<u32>)> = HashMap::new();\n");
+    s.push_str(
+        "        let mut m: HashMap<&'static str, (Option<u32>, Option<u32>)> = HashMap::new();\n",
+    );
     if let Some(primary) = schema.get("primary_types").and_then(|v| v.as_object()) {
         let mut type_names: Vec<&str> = primary.keys().map(|k| k.as_str()).collect();
         type_names.sort();
@@ -942,10 +946,19 @@ fn generate_schema_instance(
                     field_names.sort();
                     for field_name in field_names {
                         let field_info = &fields[field_name];
-                        if let Some(cardinality) = field_info.get("cardinality").and_then(|v| v.as_object()) {
-                            let min = cardinality.get("min").and_then(|v| v.as_i64()).map(|v| v as u32);
+                        if let Some(cardinality) =
+                            field_info.get("cardinality").and_then(|v| v.as_object())
+                        {
+                            let min = cardinality
+                                .get("min")
+                                .and_then(|v| v.as_i64())
+                                .map(|v| v as u32);
                             let max = cardinality.get("max").and_then(|v| {
-                                if v.is_null() { None } else { v.as_i64().map(|v| v as u32) }
+                                if v.is_null() {
+                                    None
+                                } else {
+                                    v.as_i64().map(|v| v as u32)
+                                }
                             });
                             s.push_str(&format!(
                                 "        m.insert(\"{}.{}\", ({:?}, {:?}));\n",
@@ -972,7 +985,8 @@ fn generate_schema_instance(
                     let val_strs: Vec<String> = values
                         .iter()
                         .filter_map(|v| {
-                            v.as_str().map(|s| format!("\"{}\"", s))
+                            v.as_str()
+                                .map(|s| format!("\"{}\"", s))
                                 .or_else(|| v.as_i64().map(|n| format!("\"{}\"", n)))
                         })
                         .collect();

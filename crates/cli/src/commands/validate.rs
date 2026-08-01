@@ -33,11 +33,9 @@ pub fn run(args: ValidateArgs) -> Result<(), crate::error::CliError> {
     let file_path = &args.file;
 
     // Read the file
-    let content = std::fs::read_to_string(file_path).map_err(|e| {
-        crate::error::CliError::Io {
-            path: file_path.clone(),
-            source: e,
-        }
+    let content = std::fs::read_to_string(file_path).map_err(|e| crate::error::CliError::Io {
+        path: file_path.clone(),
+        source: e,
     })?;
 
     // Validate XML structure
@@ -80,8 +78,8 @@ struct ValidationFinding {
 /// Checks well-formedness and expected elements without full
 /// graph reconstruction.
 fn validate_gramps_xml_structure(content: &str) -> Result<(), Vec<ValidationFinding>> {
-    use quick_xml::Reader;
     use quick_xml::events::Event;
+    use quick_xml::Reader;
 
     let mut reader = Reader::from_str(content);
     reader.config_mut().trim_text(true);
@@ -98,17 +96,14 @@ fn validate_gramps_xml_structure(content: &str) -> Result<(), Vec<ValidationFind
                     "database" => {
                         has_database = true;
                         // Check for namespace
-                        let has_namespace = e
-                            .attributes()
-                            .filter_map(|a| a.ok())
-                            .any(|attr| {
-                                let key = String::from_utf8_lossy(attr.key.as_ref());
-                                let val = String::from_utf8_lossy(&attr.value);
-                                key.as_ref() == "xmlns"
-                                    && val.as_ref() == "http://gramps-project.org/xml/1.7.2/"
-                            });
+                        let has_namespace = e.attributes().filter_map(|a| a.ok()).any(|attr| {
+                            let key = String::from_utf8_lossy(attr.key.as_ref());
+                            let val = String::from_utf8_lossy(&attr.value);
+                            key.as_ref() == "xmlns"
+                                && val.as_ref() == "http://gramps-project.org/xml/1.7.2/"
+                        });
                         if !has_namespace {
-errors.push(ValidationFinding {
+                            errors.push(ValidationFinding {
                                     severity: "warning",
                                     message: "<database> element missing expected namespace 'http://gramps-project.org/xml/1.7.2/'".to_string(),
                             });

@@ -377,10 +377,7 @@ pub(crate) fn edge_source_target(edge: &Edge) -> (Handle, Handle) {
 
 /// Create a PlacePlaceRef edge with appropriate fields for the current schema.
 #[cfg(feature = "schema-5-1")]
-pub fn edge_place_place_ref(
-    source: Handle,
-    target: Handle,
-) -> Edge {
+pub fn edge_place_place_ref(source: Handle, target: Handle) -> Edge {
     Edge::PlacePlaceRef {
         source,
         target: target.clone(),
@@ -399,10 +396,7 @@ pub fn edge_place_place_ref(source: Handle, target: Handle) -> Edge {
 
 /// Create an EventRef with appropriate fields for the current schema.
 #[cfg(feature = "schema-5-1")]
-pub fn make_event_ref(
-    ref_field: Handle,
-    role: Option<crate::EventRoleType>,
-) -> crate::EventRef {
+pub fn make_event_ref(ref_field: Handle, role: Option<crate::EventRoleType>) -> crate::EventRef {
     crate::EventRef {
         ref_field,
         role,
@@ -413,19 +407,13 @@ pub fn make_event_ref(
 
 /// Create an EventRef with appropriate fields for the current schema.
 #[cfg(not(feature = "schema-5-1"))]
-pub fn make_event_ref(
-    ref_field: Handle,
-    role: Option<crate::EventRoleType>,
-) -> crate::EventRef {
+pub fn make_event_ref(ref_field: Handle, role: Option<crate::EventRoleType>) -> crate::EventRef {
     crate::EventRef { ref_field, role }
 }
 
 /// Create a ChildRef with appropriate fields for the current schema.
 #[cfg(feature = "schema-5-1")]
-pub fn make_child_ref(
-    ref_field: Handle,
-    relation: Option<crate::ChildRefType>,
-) -> crate::ChildRef {
+pub fn make_child_ref(ref_field: Handle, relation: Option<crate::ChildRefType>) -> crate::ChildRef {
     crate::ChildRef {
         ref_field,
         relation,
@@ -438,11 +426,11 @@ pub fn make_child_ref(
 
 /// Create a ChildRef with appropriate fields for the current schema.
 #[cfg(not(feature = "schema-5-1"))]
-pub fn make_child_ref(
-    ref_field: Handle,
-    relation: Option<crate::ChildRefType>,
-) -> crate::ChildRef {
-    crate::ChildRef { ref_field, relation }
+pub fn make_child_ref(ref_field: Handle, relation: Option<crate::ChildRefType>) -> crate::ChildRef {
+    crate::ChildRef {
+        ref_field,
+        relation,
+    }
 }
 
 /// Get the gender value from a PersonData, adapting Option<i32> (5.1) to i32 (5.2).
@@ -519,10 +507,7 @@ pub fn is_gender_valid(gender: &i32) -> bool {
 
 /// Create a CitationData with appropriate fields for the current schema.
 #[cfg(feature = "schema-5-1")]
-pub fn make_citation(
-    handle: Handle,
-    source_handle: Handle,
-) -> crate::CitationData {
+pub fn make_citation(handle: Handle, source_handle: Handle) -> crate::CitationData {
     crate::CitationData {
         handle,
         source_handle: Some(source_handle),
@@ -532,10 +517,7 @@ pub fn make_citation(
 
 /// Create a CitationData with appropriate fields for the current schema.
 #[cfg(not(feature = "schema-5-1"))]
-pub fn make_citation(
-    handle: Handle,
-    source_handle: Handle,
-) -> crate::CitationData {
+pub fn make_citation(handle: Handle, source_handle: Handle) -> crate::CitationData {
     crate::CitationData {
         handle,
         source_handle,
@@ -581,10 +563,7 @@ pub fn into_source_handle_field(handle: Handle) -> Handle {
 
 /// Compare event_type for equality, handling Option<EventType> (5.1) vs EventType (5.2).
 #[cfg(feature = "schema-5-1")]
-pub fn event_type_eq(
-    event_type: &Option<crate::EventType>,
-    target: crate::EventType,
-) -> bool {
+pub fn event_type_eq(event_type: &Option<crate::EventType>, target: crate::EventType) -> bool {
     *event_type == Some(target)
 }
 

@@ -38,11 +38,7 @@ impl std::fmt::Display for SerializationError {
                 write!(f, "unsupported node type: {}", t)
             }
             SerializationError::MissingRequiredField { handle, field } => {
-                write!(
-                    f,
-                    "missing required field '{}' on node '{}'",
-                    field, handle
-                )
+                write!(f, "missing required field '{}' on node '{}'", field, handle)
             }
         }
     }
@@ -173,11 +169,7 @@ impl GraphXmlWriter {
     ) -> Result<(), SerializationError> {
         // Write XML declaration
         writeln!(writer, r#"<?xml version="1.0" encoding="UTF-8"?>"#)?;
-        writeln!(
-            writer,
-            r#"<database xmlns="{}">"#,
-            self.namespace
-        )?;
+        writeln!(writer, r#"<database xmlns="{}">"#, self.namespace)?;
 
         // Write header
         self.write_header(writer)?;
@@ -323,51 +315,88 @@ impl GraphXmlWriter {
     /// Check if an inline struct field has a value.
     fn has_inline_struct_value(&self, node: &Node, field_name: &str) -> bool {
         match field_name {
+            "gender" => matches!(node, Node::Person(_)),
             "primary_name" => true, // Always present on Person
             "event_type" => true,   // Always present on Event
             "date" => {
                 matches!(node, Node::Event(_)) && {
-                    if let Node::Event(e) = node { e.date.is_some() } else { false }
+                    if let Node::Event(e) = node {
+                        e.date.is_some()
+                    } else {
+                        false
+                    }
                 }
             }
             "description" => {
                 (matches!(node, Node::Event(_)) && {
-                    if let Node::Event(e) = node { e.description.is_some() } else { false }
+                    if let Node::Event(e) = node {
+                        e.description.is_some()
+                    } else {
+                        false
+                    }
                 }) || (matches!(node, Node::Media(_)) && {
-                    if let Node::Media(m) = node { m.desc.is_some() } else { false }
+                    if let Node::Media(m) = node {
+                        m.desc.is_some()
+                    } else {
+                        false
+                    }
                 })
             }
             "name" => matches!(node, Node::Tag(_) | Node::Repository(_)),
             "color" => {
                 matches!(node, Node::Tag(_)) && {
-                    if let Node::Tag(t) = node { t.color.is_some() } else { false }
+                    if let Node::Tag(t) = node {
+                        t.color.is_some()
+                    } else {
+                        false
+                    }
                 }
             }
             "priority" => {
                 matches!(node, Node::Tag(_)) && {
-                    if let Node::Tag(t) = node { t.priority.is_some() } else { false }
+                    if let Node::Tag(t) = node {
+                        t.priority.is_some()
+                    } else {
+                        false
+                    }
                 }
             }
             "confidence" => {
                 matches!(node, Node::Citation(_)) && {
-                    if let Node::Citation(c) = node { c.confidence.is_some() } else { false }
+                    if let Node::Citation(c) = node {
+                        c.confidence.is_some()
+                    } else {
+                        false
+                    }
                 }
             }
             "title" => matches!(node, Node::Source(_) | Node::Place(_)),
             "abbrev" => {
                 matches!(node, Node::Source(_)) && {
-                    if let Node::Source(s) = node { s.author.is_some() || s.pubinfo.is_some() } else { false }
+                    if let Node::Source(s) = node {
+                        s.author.is_some() || s.pubinfo.is_some()
+                    } else {
+                        false
+                    }
                 }
             }
             "file" => {
                 matches!(node, Node::Media(_)) && {
-                    if let Node::Media(m) = node { m.path.is_some() } else { false }
+                    if let Node::Media(m) = node {
+                        m.path.is_some()
+                    } else {
+                        false
+                    }
                 }
             }
             "text" => matches!(node, Node::Note(_)),
             "format" => {
                 matches!(node, Node::Note(_)) && {
-                    if let Node::Note(n) = node { n.format.is_some() } else { false }
+                    if let Node::Note(n) = node {
+                        n.format.is_some()
+                    } else {
+                        false
+                    }
                 }
             }
             _ => false,
@@ -379,7 +408,11 @@ impl GraphXmlWriter {
         match field_name {
             "alternate_names" => {
                 matches!(node, Node::Person(_)) && {
-                    if let Node::Person(p) = node { !p.alternate_names.is_empty() } else { false }
+                    if let Node::Person(p) = node {
+                        !p.alternate_names.is_empty()
+                    } else {
+                        false
+                    }
                 }
             }
             _ => false,
@@ -422,6 +455,21 @@ impl GraphXmlWriter {
         field_name: &str,
     ) -> Result<(), SerializationError> {
         match field_name {
+            // Person: gender (integer → M/F/U)
+            "gender" => {
+                if let Node::Person(p) = node {
+                    let gender_str = match typed_graph::gender_value(p.gender) {
+                        1 => "F",
+                        2 | 3 => "U",
+                        _ => "M",
+                    };
+                    writeln!(
+                        writer,
+                        "      <{}>{}</{}>",
+                        child.element_name, gender_str, child.element_name
+                    )?;
+                }
+            }
             // Person: primary_name is a Name struct
             "primary_name" => {
                 if let Node::Person(p) = node {
@@ -515,9 +563,7 @@ impl GraphXmlWriter {
                         writeln!(
                             writer,
                             "      <{}>{}</{}>",
-                            child.element_name,
-                            priority,
-                            child.element_name
+                            child.element_name, priority, child.element_name
                         )?;
                     }
                 }
@@ -529,9 +575,7 @@ impl GraphXmlWriter {
                         writeln!(
                             writer,
                             "      <{}>{}</{}>",
-                            child.element_name,
-                            conf,
-                            child.element_name
+                            child.element_name, conf, child.element_name
                         )?;
                     }
                 }
@@ -539,11 +583,7 @@ impl GraphXmlWriter {
             // Source: title (required)
             "title" => {
                 if let Node::Source(s) = node {
-                    writeln!(
-                        writer,
-                        "      <stitle>{}</stitle>",
-                        escape_xml(&s.title)
-                    )?;
+                    writeln!(writer, "      <stitle>{}</stitle>", escape_xml(&s.title))?;
                 }
                 // Place: name is a Location struct
                 if let Node::Place(p) = node {
@@ -557,17 +597,9 @@ impl GraphXmlWriter {
             // Source: abbrev (author or pubinfo)
             "abbrev" => {
                 if let Node::Source(s) = node {
-                    let abbrev = s
-                        .author
-                        .as_deref()
-                        .or(s.pubinfo.as_deref())
-                        .unwrap_or("");
+                    let abbrev = s.author.as_deref().or(s.pubinfo.as_deref()).unwrap_or("");
                     if !abbrev.is_empty() {
-                        writeln!(
-                            writer,
-                            "      <sabbrev>{}</sabbrev>",
-                            escape_xml(abbrev)
-                        )?;
+                        writeln!(writer, "      <sabbrev>{}</sabbrev>", escape_xml(abbrev))?;
                     }
                 }
             }
@@ -575,33 +607,21 @@ impl GraphXmlWriter {
             "file" => {
                 if let Node::Media(m) = node {
                     if let Some(ref path) = m.path {
-                        writeln!(
-                            writer,
-                            "      <file>{}</file>",
-                            escape_xml(path)
-                        )?;
+                        writeln!(writer, "      <file>{}</file>", escape_xml(path))?;
                     }
                 }
             }
             // Note: text (required)
             "text" => {
                 if let Node::Note(n) = node {
-                    writeln!(
-                        writer,
-                        "      <text>{}</text>",
-                        escape_xml(&n.text)
-                    )?;
+                    writeln!(writer, "      <text>{}</text>", escape_xml(&n.text))?;
                 }
             }
             // Note: format (optional)
             "format" => {
                 if let Node::Note(n) = node {
                     if let Some(fmt) = n.format {
-                        writeln!(
-                            writer,
-                            "      <format>{}</format>",
-                            fmt
-                        )?;
+                        writeln!(writer, "      <format>{}</format>", fmt)?;
                     }
                 }
             }
@@ -822,7 +842,6 @@ impl GraphXmlWriter {
             Node::Person(p) => match field_name {
                 "handle" => Some(p.handle.clone()),
                 "gramps_id" => p.gramps_id.clone(),
-                "gender" => Some(typed_graph::gender_value(p.gender).to_string()),
                 _ => None,
             },
             Node::Family(f) => match field_name {
@@ -1015,7 +1034,13 @@ fn edge_target_handle(edge: &Edge) -> Handle {
 fn get_edge_role(edge: &Edge) -> String {
     match edge {
         Edge::PersonEventRef { metadata, .. } | Edge::FamilyEventRef { metadata, .. } => {
-            format!("{:?}", metadata.role.as_ref().unwrap_or(&typed_graph::EventRoleType::Primary))
+            format!(
+                "{:?}",
+                metadata
+                    .role
+                    .as_ref()
+                    .unwrap_or(&typed_graph::EventRoleType::Primary)
+            )
         }
         _ => "Primary".to_string(),
     }
@@ -1025,7 +1050,13 @@ fn get_edge_role(edge: &Edge) -> String {
 fn get_edge_relation(edge: &Edge) -> String {
     match edge {
         Edge::FamilyChildRef { metadata, .. } => {
-            format!("{:?}", metadata.relation.as_ref().unwrap_or(&typed_graph::ChildRefType::Birth))
+            format!(
+                "{:?}",
+                metadata
+                    .relation
+                    .as_ref()
+                    .unwrap_or(&typed_graph::ChildRefType::Birth)
+            )
         }
         _ => "Birth".to_string(),
     }
@@ -1054,6 +1085,10 @@ fn escape_xml(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    // Allow needless_update in test helpers because struct field sets differ
+    // between schema-5-1 and schema-5-2 features (e.g., birth_ref_index exists
+    // only in 5-1, while all fields are specified in 5-2).
+    #![allow(clippy::needless_update)]
     use super::*;
     use crate::SerializationMap;
     use typed_graph::graph::Graph;
@@ -1441,10 +1476,7 @@ mod tests {
         let writer = GraphXmlWriter::new(map, "5.2.0");
         let mut graph = Graph::new();
         graph
-            .add_node(
-                "t1".to_string(),
-                make_tag("t1", "Unfinished", None, None),
-            )
+            .add_node("t1".to_string(), make_tag("t1", "Unfinished", None, None))
             .unwrap();
 
         let mut output = Vec::new();
@@ -1484,8 +1516,12 @@ mod tests {
         let map = SerializationMap::new();
         let writer = GraphXmlWriter::new(map, "5.2.0");
         let mut graph = Graph::new();
-        graph.add_node("p1".to_string(), make_person("p1", None)).unwrap();
-        graph.add_node("e1".to_string(), make_event("e1", EventType::Birth)).unwrap();
+        graph
+            .add_node("p1".to_string(), make_person("p1", None))
+            .unwrap();
+        graph
+            .add_node("e1".to_string(), make_event("e1", EventType::Birth))
+            .unwrap();
         graph
             .add_edge(Edge::PersonEventRef {
                 source: "p1".to_string(),
@@ -1510,8 +1546,12 @@ mod tests {
         let map = SerializationMap::new();
         let writer = GraphXmlWriter::new(map, "5.2.0");
         let mut graph = Graph::new();
-        graph.add_node("f1".to_string(), make_family("f1", None)).unwrap();
-        graph.add_node("p1".to_string(), make_person("p1", None)).unwrap();
+        graph
+            .add_node("f1".to_string(), make_family("f1", None))
+            .unwrap();
+        graph
+            .add_node("p1".to_string(), make_person("p1", None))
+            .unwrap();
         graph
             .add_edge(Edge::FamilyChildRef {
                 source: "f1".to_string(),
@@ -1535,8 +1575,12 @@ mod tests {
         let map = SerializationMap::new();
         let writer = GraphXmlWriter::new(map, "5.2.0");
         let mut graph = Graph::new();
-        graph.add_node("p1".to_string(), make_person("p1", None)).unwrap();
-        graph.add_node("p2".to_string(), make_person("p2", None)).unwrap();
+        graph
+            .add_node("p1".to_string(), make_person("p1", None))
+            .unwrap();
+        graph
+            .add_node("p2".to_string(), make_person("p2", None))
+            .unwrap();
         graph
             .add_edge(Edge::PersonPersonRef {
                 source: "p1".to_string(),
@@ -1592,8 +1636,12 @@ mod tests {
         let map = SerializationMap::new();
         let writer = GraphXmlWriter::new(map, "5.2.0");
         let mut graph = Graph::new();
-        graph.add_node("p1".to_string(), make_person("p1", None)).unwrap();
-        graph.add_node("c1".to_string(), make_citation("c1")).unwrap();
+        graph
+            .add_node("p1".to_string(), make_person("p1", None))
+            .unwrap();
+        graph
+            .add_node("c1".to_string(), make_citation("c1"))
+            .unwrap();
         graph
             .add_edge(Edge::PersonCitation {
                 source: "p1".to_string(),
@@ -1613,7 +1661,9 @@ mod tests {
         let map = SerializationMap::new();
         let writer = GraphXmlWriter::new(map, "5.2.0");
         let mut graph = Graph::new();
-        graph.add_node("p1".to_string(), make_person("p1", None)).unwrap();
+        graph
+            .add_node("p1".to_string(), make_person("p1", None))
+            .unwrap();
         graph
             .add_node("n1".to_string(), make_note("n1", "A note"))
             .unwrap();
@@ -1640,7 +1690,9 @@ mod tests {
             let map = SerializationMap::new();
             let writer = GraphXmlWriter::new(map, "5.2.0");
             let mut graph = Graph::new();
-            graph.add_node("p1".to_string(), make_person("p1", None)).unwrap();
+            graph
+                .add_node("p1".to_string(), make_person("p1", None))
+                .unwrap();
             graph
                 .add_node("m1".to_string(), make_media("m1", "file.jpg", None))
                 .unwrap();
@@ -1664,7 +1716,9 @@ mod tests {
         let map = SerializationMap::new();
         let writer = GraphXmlWriter::new(map, "5.2.0");
         let mut graph = Graph::new();
-        graph.add_node("p1".to_string(), make_person("p1", None)).unwrap();
+        graph
+            .add_node("p1".to_string(), make_person("p1", None))
+            .unwrap();
         graph
             .add_node("t1".to_string(), make_tag("t1", "Complete", None, None))
             .unwrap();
@@ -1687,7 +1741,9 @@ mod tests {
         let map = SerializationMap::new();
         let writer = GraphXmlWriter::new(map, "5.2.0");
         let mut graph = Graph::new();
-        graph.add_node("p1".to_string(), make_person("p1", None)).unwrap();
+        graph
+            .add_node("p1".to_string(), make_person("p1", None))
+            .unwrap();
         graph
             .add_node("n1".to_string(), make_note("n1", "Note 1"))
             .unwrap();
@@ -1725,7 +1781,9 @@ mod tests {
         let map = SerializationMap::new();
         let writer = GraphXmlWriter::new(map, "5.2.0");
         let mut graph = Graph::new();
-        graph.add_node("p1".to_string(), make_person("p1", None)).unwrap();
+        graph
+            .add_node("p1".to_string(), make_person("p1", None))
+            .unwrap();
 
         let mut output = Vec::new();
         writer.write(&graph, &mut output).unwrap();
@@ -1829,11 +1887,11 @@ mod tests {
         assert!(citations_pos < sources_pos, "citations before sources");
         assert!(sources_pos < places_pos, "sources before places");
         assert!(places_pos < objects_pos, "places before objects");
-        assert!(objects_pos < repositories_pos, "objects before repositories");
         assert!(
-            repositories_pos < notes_pos,
-            "repositories before notes"
+            objects_pos < repositories_pos,
+            "objects before repositories"
         );
+        assert!(repositories_pos < notes_pos, "repositories before notes");
     }
 
     #[test]
@@ -1884,8 +1942,8 @@ mod tests {
         let xml = String::from_utf8(output).unwrap();
 
         // Validate that it's well-formed XML by trying to parse with quick-xml
-        use quick_xml::Reader;
         use quick_xml::events::Event;
+        use quick_xml::Reader;
         let mut reader = Reader::from_str(&xml);
         reader.config_mut().trim_text(true);
         let mut depth = 0u32;
@@ -1901,7 +1959,7 @@ mod tests {
                 }
                 Ok(Event::End(_)) => depth -= 1,
                 Ok(Event::Eof) => break,
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(e) => panic!("XML parse error: {}", e),
             }
         }
@@ -1944,10 +2002,7 @@ mod tests {
         let edge = Edge::PersonEventRef {
             source: "p1".to_string(),
             target: "e1".to_string(),
-            metadata: Box::new(typed_graph::graph::make_event_ref(
-                "e1".to_string(),
-                None,
-            )),
+            metadata: Box::new(typed_graph::graph::make_event_ref("e1".to_string(), None)),
         };
         assert_eq!(get_edge_role(&edge), "Primary");
     }
@@ -2018,10 +2073,7 @@ mod tests {
         let edge = Edge::FamilyChildRef {
             source: "f1".to_string(),
             target: "p1".to_string(),
-            metadata: Box::new(typed_graph::graph::make_child_ref(
-                "p1".to_string(),
-                None,
-            )),
+            metadata: Box::new(typed_graph::graph::make_child_ref("p1".to_string(), None)),
         };
         assert_eq!(get_edge_relation(&edge), "Birth");
     }
@@ -2167,10 +2219,16 @@ mod tests {
             let xml = String::from_utf8(output).unwrap();
 
             // Event type should render as "Death", not "Some(Death)"
-            assert!(xml.contains("<eventtype><type>Death</type></eventtype>"),
-                "Event type should render as Death, not Some(Death). Got: {}", xml);
-            assert!(!xml.contains("Some(Death)"),
-                "Event type should NOT contain 'Some(Death)'. Got: {}", xml);
+            assert!(
+                xml.contains("<eventtype><type>Death</type></eventtype>"),
+                "Event type should render as Death, not Some(Death). Got: {}",
+                xml
+            );
+            assert!(
+                !xml.contains("Some(Death)"),
+                "Event type should NOT contain 'Some(Death)'. Got: {}",
+                xml
+            );
         }
 
         #[test]

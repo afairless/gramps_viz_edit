@@ -155,7 +155,10 @@ fn test_build_path_conversion_roundtrip() {
 
     // gender should be enum_ref
     let gender = fields.get("gender").expect("gender field should exist");
-    assert_eq!(gender.get("type").and_then(|v| v.as_str()), Some("enum_ref"));
+    assert_eq!(
+        gender.get("type").and_then(|v| v.as_str()),
+        Some("enum_ref")
+    );
 
     // primary_name should be embedded Name
     let name = fields
@@ -190,16 +193,16 @@ fn test_build_path_conversion_roundtrip() {
     let birth = fields
         .get("birth_ref_index")
         .expect("birth_ref_index should exist");
-    assert_eq!(
-        birth.get("type").and_then(|v| v.as_str()),
-        Some("integer")
-    );
+    assert_eq!(birth.get("type").and_then(|v| v.as_str()), Some("integer"));
 
     // _class should be stripped
     assert!(!fields.contains_key("_class"), "_class should be stripped");
 
     // Enum values should be converted to strings
-    let enum_types = result.get("enum_types").and_then(|v| v.as_object()).unwrap();
+    let enum_types = result
+        .get("enum_types")
+        .and_then(|v| v.as_object())
+        .unwrap();
     let event_type = enum_types.get("EventType").unwrap();
     let values = event_type.get("values").and_then(|v| v.as_array()).unwrap();
     let strings: Vec<&str> = values.iter().filter_map(|v| v.as_str()).collect();
@@ -255,8 +258,8 @@ fn test_convert_with_date_field() {
         "enum_types": {}
     });
 
-    let result = schema_convert::convert(schema, "5.1", &json!(null))
-        .expect("conversion should succeed");
+    let result =
+        schema_convert::convert(schema, "5.1", &json!(null)).expect("conversion should succeed");
 
     let citation = result
         .get("primary_types")
@@ -267,10 +270,7 @@ fn test_convert_with_date_field() {
 
     let fields = citation.get("fields").and_then(|v| v.as_object()).unwrap();
     let date = fields.get("date").expect("date field should exist");
-    assert_eq!(
-        date.get("type").and_then(|v| v.as_str()),
-        Some("embedded")
-    );
+    assert_eq!(date.get("type").and_then(|v| v.as_str()), Some("embedded"));
     assert_eq!(
         date.get("schema").and_then(|v| v.as_str()),
         Some("DateValue")

@@ -88,10 +88,8 @@ pub fn run(args: GenerateArgs) -> Result<(), crate::error::CliError> {
     eprintln!("Generation seed: {}", seed_msg);
 
     // Create progress reporter
-    let progress = crate::progress::ProgressReporter::new(
-        args.progress_interval,
-        config.person_count,
-    );
+    let progress =
+        crate::progress::ProgressReporter::new(args.progress_interval, config.person_count);
     eprintln!(
         "Generating {} persons across {} generations...",
         config.person_count, config.generations
@@ -112,8 +110,7 @@ pub fn run(args: GenerateArgs) -> Result<(), crate::error::CliError> {
         }
         args.schema_version.clone()
     };
-    let schema = Schema::for_version(&schema_version)
-        .expect("schema version was validated above");
+    let schema = Schema::for_version(&schema_version).expect("schema version was validated above");
 
     // Map schema version to full Gramps version for XML header
     let gramps_version: String = match schema_version.as_str() {
@@ -130,8 +127,10 @@ pub fn run(args: GenerateArgs) -> Result<(), crate::error::CliError> {
     // Stage 1: Generate
     let mut result = generate_random(&config, &adversarial_config, schema)?;
     progress.finish();
-    eprintln!("Generated {} persons, {} families, {} events",
-        result.stats.person_count, result.stats.family_count, result.stats.event_count);
+    eprintln!(
+        "Generated {} persons, {} families, {} events",
+        result.stats.person_count, result.stats.family_count, result.stats.event_count
+    );
 
     // Stage 2: Validation Gate 1
     let errors = result.graph.validate(schema);
@@ -219,7 +218,9 @@ fn check_validation_errors(
 }
 
 /// Build configuration from CLI args or scenario file.
-fn build_config(args: &GenerateArgs) -> Result<(RandomConfig, AdversarialConfig, String), crate::error::CliError> {
+fn build_config(
+    args: &GenerateArgs,
+) -> Result<(RandomConfig, AdversarialConfig, String), crate::error::CliError> {
     // If a config file is specified, load from YAML
     if let Some(ref config_path) = args.config {
         let scenario = crate::scenario::load_scenario(config_path)?;
@@ -256,7 +257,9 @@ fn build_config(args: &GenerateArgs) -> Result<(RandomConfig, AdversarialConfig,
 }
 
 /// Parse the `--adversarial` flag value into an `AdversarialConfig`.
-fn parse_adversarial_flag(flag: &Option<String>) -> Result<AdversarialConfig, crate::error::CliError> {
+fn parse_adversarial_flag(
+    flag: &Option<String>,
+) -> Result<AdversarialConfig, crate::error::CliError> {
     let flag = match flag {
         Some(f) => f,
         None => {
@@ -314,30 +317,20 @@ fn strategy_from_name(name: &str) -> Option<AdversarialStrategy> {
         "one_parent" | "one-parent" | "one_parent_families" => {
             Some(AdversarialStrategy::OneParentFamilies(0.5))
         }
-        "missing_events" | "missing-events" => {
-            Some(AdversarialStrategy::MissingEvents(0.3))
-        }
-        "solo" | "solo_persons" | "solo-persons" => {
-            Some(AdversarialStrategy::SoloPersons(0.2))
-        }
+        "missing_events" | "missing-events" => Some(AdversarialStrategy::MissingEvents(0.3)),
+        "solo" | "solo_persons" | "solo-persons" => Some(AdversarialStrategy::SoloPersons(0.2)),
         "many_names" | "many-names" | "many_alternate_names" => {
             Some(AdversarialStrategy::ManyAlternateNames(0.3))
         }
         "disconnected" | "disconnected_subgraphs" | "disconnected-subgraphs" => {
             Some(AdversarialStrategy::DisconnectedSubgraphs)
         }
-        "deep_nesting" | "deep-nesting" => {
-            Some(AdversarialStrategy::DeepNesting)
-        }
-        "max_ref_chains" | "max-ref-chains" => {
-            Some(AdversarialStrategy::MaxRefChains)
-        }
+        "deep_nesting" | "deep-nesting" => Some(AdversarialStrategy::DeepNesting),
+        "max_ref_chains" | "max-ref-chains" => Some(AdversarialStrategy::MaxRefChains),
         "orphaned" | "orphaned_references" | "orphaned-references" => {
             Some(AdversarialStrategy::OrphanedReferences)
         }
-        "double_gender" | "double-gender" => {
-            Some(AdversarialStrategy::DoubleGender(0.2))
-        }
+        "double_gender" | "double-gender" => Some(AdversarialStrategy::DoubleGender(0.2)),
         _ => None,
     }
 }
@@ -384,8 +377,7 @@ mod tests {
 
     #[test]
     fn generate_command_adversarial_flag_parses_list() {
-        let config =
-            parse_adversarial_flag(&Some("disconnected,one-parent".to_string())).unwrap();
+        let config = parse_adversarial_flag(&Some("disconnected,one-parent".to_string())).unwrap();
         assert!(config.enabled);
         assert_eq!(config.strategies.len(), 2);
     }

@@ -32,14 +32,20 @@ impl ProgressReporter {
     pub fn tick(&mut self) {
         self.current += 1;
         if self.interval > 0 && self.current.is_multiple_of(self.interval) {
-            eprintln!("Progress: {}/{} persons generated...", self.current, self.total);
+            eprintln!(
+                "Progress: {}/{} persons generated...",
+                self.current, self.total
+            );
         }
     }
 
     /// Print the final progress line.
     pub fn finish(&self) {
         if self.interval > 0 {
-            eprintln!("Progress: {}/{} persons generated... done.", self.current, self.total);
+            eprintln!(
+                "Progress: {}/{} persons generated... done.",
+                self.current, self.total
+            );
         }
     }
 }
