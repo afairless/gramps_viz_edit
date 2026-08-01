@@ -79,6 +79,9 @@ pub struct RandomConfig {
     pub seed: Option<u64>,
     /// Place hierarchy depth (default: 3, used when with_places is true).
     pub place_depth: usize,
+    /// Maximum number of families a person can be a parent in (default: 1).
+    /// Setting to 2 allows remarriage/step-families.
+    pub max_parent_roles: usize,
 }
 
 impl Default for RandomConfig {
@@ -99,6 +102,7 @@ impl Default for RandomConfig {
             with_tags: false,
             seed: None,
             place_depth: 3,
+            max_parent_roles: 1,
         }
     }
 }
@@ -465,7 +469,11 @@ pub(crate) struct PersonSummary {
     pub birth_year: i32,
     pub gender: i32,
     pub layer: usize,
-    pub is_parent: bool,
+    /// Number of families this person is a parent in.
+    pub parent_count: u32,
+    /// Whether this person is excluded from family participation entirely
+    /// (solo-persons adversarial strategy).
+    pub is_solo: bool,
     pub is_child: bool,
 }
 
@@ -740,14 +748,16 @@ fn generate_death_date(
 /// - Neither person is already a sibling or child of the other.
 pub(crate) fn select_parents(
     persons: &[(crate::Handle, PersonSummary)],
-    _config: &RandomConfig,
+    config: &RandomConfig,
     layer: usize,
     rng: &mut impl rand::Rng,
 ) -> Option<(crate::Handle, crate::Handle)> {
     // Filter by layer to find candidates in the same generation
     let same_layer: Vec<_> = persons
         .iter()
-        .filter(|(_, s)| s.layer == layer && !s.is_parent)
+        .filter(|(_, s)| {
+            s.layer == layer && !s.is_solo && s.parent_count < config.max_parent_roles as u32
+        })
         .collect();
 
     if same_layer.len() < 2 {
@@ -755,8 +765,11 @@ pub(crate) fn select_parents(
         let adjacent: Vec<_> = persons
             .iter()
             .filter(|(_, s)| {
-                (s.layer == layer || s.layer == layer + 1 || (layer > 0 && s.layer == layer - 1))
-                    && !s.is_parent
+                (s.layer == layer
+                    || s.layer == layer + 1
+                    || (layer > 0 && s.layer == layer - 1))
+                    && !s.is_solo
+                    && s.parent_count < config.max_parent_roles as u32
             })
             .collect();
 
@@ -835,20 +848,20 @@ fn find_compatible_pair(
 /// if a one-parent family was created.
 pub(crate) fn generate_family(
     graph: &mut crate::Graph,
-    _config: &RandomConfig,
+    config: &RandomConfig,
     persons: &mut [(crate::Handle, PersonSummary)],
     layer: usize,
     rng: &mut impl rand::Rng,
     one_parent_fraction: f64,
 ) -> Result<(crate::Handle, Option<String>), GenerationError> {
     // Select parents
-    let parent_pair = select_parents(persons, _config, layer, rng);
+    let parent_pair = select_parents(persons, config, layer, rng);
 
     let (father_handle, mother_handle) = match parent_pair {
         Some(pair) => pair,
         None => {
             // Create a single-parent family
-            let handle = create_single_parent_family(graph, persons, layer, rng)?;
+            let handle = create_single_parent_family(graph, persons, config, layer, rng)?;
             return Ok((handle, None));
         }
     };
@@ -862,7 +875,7 @@ pub(crate) fn generate_family(
         if skip_father {
             for (handle, summary) in persons.iter_mut() {
                 if *handle == mother_handle {
-                    summary.is_parent = true;
+                    summary.parent_count += 1;
                 }
             }
 
@@ -906,7 +919,7 @@ pub(crate) fn generate_family(
             // Mark only father as parent
             for (handle, summary) in persons.iter_mut() {
                 if *handle == father_handle {
-                    summary.is_parent = true;
+                    summary.parent_count += 1;
                 }
             }
 
@@ -952,7 +965,7 @@ pub(crate) fn generate_family(
     // Mark as parents
     for (handle, summary) in persons.iter_mut() {
         if *handle == father_handle || *handle == mother_handle {
-            summary.is_parent = true;
+            summary.parent_count += 1;
         }
     }
 
@@ -1002,13 +1015,16 @@ pub(crate) fn generate_family(
 fn create_single_parent_family(
     graph: &mut crate::Graph,
     persons: &mut [(crate::Handle, PersonSummary)],
+    config: &RandomConfig,
     layer: usize,
     rng: &mut impl rand::Rng,
 ) -> Result<crate::Handle, GenerationError> {
     // Find an eligible person in this layer who is not already a parent
     let eligible: Vec<_> = persons
         .iter()
-        .filter(|(_, s)| s.layer == layer && !s.is_parent)
+        .filter(|(_, s)| {
+            s.layer == layer && !s.is_solo && s.parent_count < config.max_parent_roles as u32
+        })
         .map(|(h, _)| h.clone())
         .collect();
 
@@ -1025,7 +1041,7 @@ fn create_single_parent_family(
     // Mark as parent
     for (handle, summary) in persons.iter_mut() {
         if *handle == parent_handle {
-            summary.is_parent = true;
+            summary.parent_count += 1;
         }
     }
 
@@ -1592,7 +1608,8 @@ pub fn generate_random(
                     birth_year,
                     gender,
                     layer,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ));
@@ -1612,7 +1629,7 @@ pub fn generate_random(
             indices.swap(i, j);
         }
         for &idx in indices.iter().take(target_solo_count.min(persons.len())) {
-            persons[idx].1.is_parent = true;
+            persons[idx].1.is_solo = true;
             persons[idx].1.is_child = true;
             warnings.push(format!(
                 "Person {}: solo person — excluded from families (strategy: solo-persons, fraction: {})",
@@ -1667,7 +1684,10 @@ pub fn generate_random(
 
     // Resolve family count from family_ratio if not explicitly set
     let resolved_family_count = config.resolve_family_count();
-    let families_to_create = resolved_family_count.min(persons.len() / 2);
+    // Cap families to ensure enough parent roles for all families.
+    // With max_parent_roles=1, this is equivalent to persons.len() / 2.
+    let families_to_create = resolved_family_count
+        .min(persons.len() * config.max_parent_roles / 2);
     let mut family_handles: Vec<crate::Handle> = Vec::new();
 
     for _ in 0..families_to_create {
@@ -1815,6 +1835,7 @@ mod tests {
         assert_eq!(config.children_per_family, 1..4);
         assert_eq!(config.family_count, 0);
         assert_eq!(config.family_ratio, 0.5);
+        assert_eq!(config.max_parent_roles, 1);
     }
 
     #[test]
@@ -1823,6 +1844,7 @@ mod tests {
             person_count: 50,
             family_count: 25,
             family_ratio: 0.75,
+            max_parent_roles: 2,
             generations: 5,
             children_per_family: 2..3,
             start_year: 1900,
@@ -1850,6 +1872,7 @@ mod tests {
         assert!(config.with_tags);
         assert_eq!(config.seed, Some(42));
         assert_eq!(config.place_depth, 4);
+        assert_eq!(config.max_parent_roles, 2);
     }
 
     // -----------------------------------------------------------------------
@@ -2387,7 +2410,8 @@ mod tests {
                     birth_year: 1970,
                     gender: 0,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -2398,7 +2422,8 @@ mod tests {
                     birth_year: 1975,
                     gender: 1,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -2423,7 +2448,8 @@ mod tests {
                     birth_year: 1970,
                     gender: 0,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -2434,7 +2460,8 @@ mod tests {
                     birth_year: 1975,
                     gender: 1,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -2445,7 +2472,8 @@ mod tests {
                     birth_year: 1950,
                     gender: 0,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -2456,7 +2484,8 @@ mod tests {
                     birth_year: 1990,
                     gender: 1,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -2490,7 +2519,8 @@ mod tests {
                     birth_year: 1970,
                     gender: 0,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -2501,7 +2531,8 @@ mod tests {
                     birth_year: 1975,
                     gender: 1,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -2512,7 +2543,8 @@ mod tests {
                     birth_year: 1940,
                     gender: 0,
                     layer: 1,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -2523,7 +2555,8 @@ mod tests {
                     birth_year: 1945,
                     gender: 1,
                     layer: 1,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -2553,7 +2586,8 @@ mod tests {
                     birth_year: 1970,
                     gender: 0,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -2565,7 +2599,8 @@ mod tests {
                     birth_year: 1940,
                     gender: 0,
                     layer: 1,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -2576,7 +2611,8 @@ mod tests {
                     birth_year: 1945,
                     gender: 1,
                     layer: 1,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -2633,7 +2669,8 @@ mod tests {
                     birth_year: 1970,
                     gender: 0,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -2644,7 +2681,8 @@ mod tests {
                     birth_year: 1975,
                     gender: 1,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -2707,7 +2745,8 @@ mod tests {
                     birth_year: 1970,
                     gender: 0,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -2718,7 +2757,8 @@ mod tests {
                     birth_year: 1975,
                     gender: 1,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -2769,7 +2809,8 @@ mod tests {
                 birth_year: 1970,
                 gender: 0,
                 layer: 0,
-                is_parent: false,
+                parent_count: 0,
+                is_solo: false,
                 is_child: false,
             },
         )];
@@ -2809,7 +2850,8 @@ mod tests {
                 birth_year: 1970,
                 gender: 0,
                 layer: 0,
-                is_parent: false,
+                parent_count: 0,
+                is_solo: false,
                 is_child: false,
             },
         )];
@@ -2817,6 +2859,140 @@ mod tests {
         // Only one person, so single-parent family is created
         let result = generate_family(&mut graph, &config, &mut persons, 0, &mut rng, 0.0);
         assert!(result.is_ok(), "Single-parent family should be created");
+    }
+
+    #[test]
+    fn max_parent_roles_allows_remarriage() {
+        // With max_parent_roles = 2, a person can be a parent in 2 families.
+        let mut graph = crate::Graph::new();
+        let config = RandomConfig {
+            max_parent_roles: 2,
+            ..RandomConfig::default()
+        };
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+        // Create 4 persons: 2 males, 2 females
+        let p1 = "m1".to_string();
+        let p2 = "f1".to_string();
+        let p3 = "m2".to_string();
+        let p4 = "f2".to_string();
+
+        for (h, g) in [(&p1, 0), (&p2, 1), (&p3, 0), (&p4, 1)] {
+            graph
+                .add_node(
+                    h.clone(),
+                    crate::Node::Person(crate::PersonData {
+                        handle: h.clone(),
+                        gender: g,
+                        primary_name: crate::Name {
+                            first_name: Some("Test".to_string()),
+                            ..crate::Name::default()
+                        },
+                        ..crate::PersonData::default()
+                    }),
+                )
+                .unwrap();
+        }
+
+        let mut persons = vec![
+            (p1.clone(), PersonSummary {
+                handle: p1.clone(), birth_year: 1970, gender: 0, layer: 0,
+                parent_count: 0, is_solo: false, is_child: false,
+            }),
+            (p2.clone(), PersonSummary {
+                handle: p2.clone(), birth_year: 1975, gender: 1, layer: 0,
+                parent_count: 0, is_solo: false, is_child: false,
+            }),
+            (p3.clone(), PersonSummary {
+                handle: p3.clone(), birth_year: 1980, gender: 0, layer: 0,
+                parent_count: 0, is_solo: false, is_child: false,
+            }),
+            (p4.clone(), PersonSummary {
+                handle: p4.clone(), birth_year: 1985, gender: 1, layer: 0,
+                parent_count: 0, is_solo: false, is_child: false,
+            }),
+        ];
+
+        // First family
+        let fam1 = generate_family(&mut graph, &config, &mut persons, 0, &mut rng, 0.0)
+            .expect("first family should succeed");
+        // After first family, exactly 2 persons should have parent_count = 1
+        let parents_after_first = persons.iter().filter(|(_, s)| s.parent_count == 1).count();
+        assert_eq!(parents_after_first, 2, "Two parents after first family");
+
+        // Second family: with max_parent_roles=2, persons can be reused
+        let fam2 = generate_family(&mut graph, &config, &mut persons, 0, &mut rng, 0.0)
+            .expect("second family should succeed (remarriage)");
+        // After second family, we should have at least one person with parent_count = 2
+        // (someone who was a parent in both families)
+        let parents_after_second = persons.iter().filter(|(_, s)| s.parent_count == 2).count();
+        assert!(parents_after_second >= 1,
+            "At least one person should have parent_count=2 after remarriage, got {}",
+            parents_after_second);
+        // Total parent count increments: 2 + 2 = 4 across all persons
+        let total_parent_count: u32 = persons.iter().map(|(_, s)| s.parent_count).sum();
+        assert_eq!(total_parent_count, 4, "Total parent count should be 4");
+
+        assert_ne!(fam1, fam2, "Two distinct families should be created");
+    }
+
+    #[test]
+    fn solo_persons_excluded_regardless_of_max_parent_roles() {
+        // A solo person (is_solo = true) should never be selected as parent
+        // even with max_parent_roles > 1.
+        let mut graph = crate::Graph::new();
+        let config = RandomConfig {
+            max_parent_roles: 3,
+            ..RandomConfig::default()
+        };
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+        let p1 = "solo-male".to_string();
+        let p2 = "female".to_string();
+
+        for (h, g) in [(&p1, 0), (&p2, 1)] {
+            graph
+                .add_node(
+                    h.clone(),
+                    crate::Node::Person(crate::PersonData {
+                        handle: h.clone(),
+                        gender: g,
+                        primary_name: crate::Name {
+                            first_name: Some("Test".to_string()),
+                            ..crate::Name::default()
+                        },
+                        ..crate::PersonData::default()
+                    }),
+                )
+                .unwrap();
+        }
+
+        let mut persons = vec![
+            (p1.clone(), PersonSummary {
+                handle: p1.clone(), birth_year: 1970, gender: 0, layer: 0,
+                parent_count: 0, is_solo: true, is_child: false,
+            }),
+            (p2.clone(), PersonSummary {
+                handle: p2.clone(), birth_year: 1975, gender: 1, layer: 0,
+                parent_count: 0, is_solo: false, is_child: false,
+            }),
+        ];
+
+        // select_parents should return None because the only male is solo
+        let result = select_parents(&persons, &config, 0, &mut rng);
+        assert!(result.is_none(), "Solo person should not be selected as parent");
+
+        // create_single_parent_family should also skip the solo person
+        // and create a family with the non-solo female
+        let result = create_single_parent_family(&mut graph, &mut persons, &config, 0, &mut rng);
+        assert!(result.is_ok(), "Should create family with non-solo female");
+        let family_handle = result.unwrap();
+        if let Some(crate::Node::Family(family)) = graph.get_node(&family_handle) {
+            assert_eq!(family.mother_handle, Some(p2.clone()),
+                "Non-solo female should be the parent");
+        } else {
+            panic!("Family node should exist");
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -3238,7 +3414,8 @@ mod tests {
                     birth_year: 1970,
                     gender: 0,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -3249,7 +3426,8 @@ mod tests {
                     birth_year: 1975,
                     gender: 1,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -3274,7 +3452,8 @@ mod tests {
                     birth_year: 2000 + i,
                     gender: 0,
                     layer: 1,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ));
@@ -3345,7 +3524,8 @@ mod tests {
                     birth_year: 1970,
                     gender: 0,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -3356,7 +3536,8 @@ mod tests {
                     birth_year: 1975,
                     gender: 1,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -3385,7 +3566,8 @@ mod tests {
                 birth_year: 1990,
                 gender: 0,
                 layer: 1,
-                is_parent: false,
+                parent_count: 0,
+                is_solo: false,
                 is_child: false,
             },
         ));
@@ -3408,7 +3590,8 @@ mod tests {
                 birth_year: 2000,
                 gender: 0,
                 layer: 1,
-                is_parent: false,
+                parent_count: 0,
+                is_solo: false,
                 is_child: false,
             },
         ));
@@ -3468,7 +3651,8 @@ mod tests {
                     birth_year: 1970,
                     gender: 0,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -3479,7 +3663,8 @@ mod tests {
                     birth_year: 1975,
                     gender: 1,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -3501,7 +3686,8 @@ mod tests {
                     birth_year: 2000 + i,
                     gender: 0,
                     layer: 1,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ));
@@ -3560,7 +3746,8 @@ mod tests {
                     birth_year: 1970,
                     gender: 0,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -3571,7 +3758,8 @@ mod tests {
                     birth_year: 1975,
                     gender: 1,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -3592,7 +3780,8 @@ mod tests {
                 birth_year: 2000,
                 gender: 0,
                 layer: 1,
-                is_parent: false,
+                parent_count: 0,
+                is_solo: false,
                 is_child: true, // Already assigned!
             },
         ));
@@ -3647,7 +3836,8 @@ mod tests {
                     birth_year: 1970,
                     gender: 0,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -3658,7 +3848,8 @@ mod tests {
                     birth_year: 1975,
                     gender: 1,
                     layer: 0,
-                    is_parent: false,
+                    parent_count: 0,
+                    is_solo: false,
                     is_child: false,
                 },
             ),
@@ -3678,7 +3869,8 @@ mod tests {
                 birth_year: 2000,
                 gender: 0,
                 layer: 1,
-                is_parent: false,
+                parent_count: 0,
+                is_solo: false,
                 is_child: false,
             },
         ));
@@ -4618,13 +4810,14 @@ mod tests {
                 birth_year: 1980,
                 gender: 1, // Female
                 layer: 0,
-                is_parent: false,
+                parent_count: 0,
+                is_solo: false,
                 is_child: false,
             },
         )];
 
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-        let family_handle = create_single_parent_family(&mut graph, &mut persons, 0, &mut rng)
+        let family_handle = create_single_parent_family(&mut graph, &mut persons, &RandomConfig::default(), 0, &mut rng)
             .expect("should create single-parent family");
 
         // Verify the family has mother_handle set and father_handle is None
@@ -4669,7 +4862,7 @@ mod tests {
         assert!(
             persons
                 .iter()
-                .any(|(h, s)| *h == person_handle && s.is_parent),
+                .any(|(h, s)| *h == person_handle && s.parent_count > 0),
             "Person should be marked as parent"
         );
     }
@@ -4704,13 +4897,14 @@ mod tests {
                 birth_year: 1975,
                 gender: 0, // Male
                 layer: 0,
-                is_parent: false,
+                parent_count: 0,
+                is_solo: false,
                 is_child: false,
             },
         )];
 
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-        let family_handle = create_single_parent_family(&mut graph, &mut persons, 0, &mut rng)
+        let family_handle = create_single_parent_family(&mut graph, &mut persons, &RandomConfig::default(), 0, &mut rng)
             .expect("should create single-parent family");
 
         // Verify the family has father_handle set and mother_handle is None
@@ -4755,7 +4949,7 @@ mod tests {
         assert!(
             persons
                 .iter()
-                .any(|(h, s)| *h == person_handle && s.is_parent),
+                .any(|(h, s)| *h == person_handle && s.parent_count > 0),
             "Person should be marked as parent"
         );
     }
@@ -4790,13 +4984,14 @@ mod tests {
                 birth_year: 1990,
                 gender: 2, // Unknown
                 layer: 0,
-                is_parent: false,
+                parent_count: 0,
+                is_solo: false,
                 is_child: false,
             },
         )];
 
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-        let family_handle = create_single_parent_family(&mut graph, &mut persons, 0, &mut rng)
+        let family_handle = create_single_parent_family(&mut graph, &mut persons, &RandomConfig::default(), 0, &mut rng)
             .expect("should create single-parent family");
 
         // Verify FamilyFather edge (default for unknown gender)

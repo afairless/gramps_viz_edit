@@ -12,6 +12,7 @@ pub struct Scenario {
     pub person_count: Option<usize>,
     pub family_count: Option<usize>,
     pub family_ratio: Option<f64>,
+    pub max_parent_roles: Option<usize>,
     pub generations: Option<GenerationsConfig>,
     pub date_range: Option<DateRangeConfig>,
     pub with_citations: Option<bool>,
@@ -144,6 +145,7 @@ impl Scenario {
             person_count: self.person_count.unwrap_or(base.person_count),
             family_count: self.family_count.unwrap_or(base.family_count),
             family_ratio: self.family_ratio.unwrap_or(base.family_ratio),
+            max_parent_roles: self.max_parent_roles.unwrap_or(base.max_parent_roles),
             generations: self
                 .generations
                 .as_ref()
@@ -313,6 +315,7 @@ seed: 123
         assert_eq!(config.end_year, base.end_year);
         assert_eq!(config.with_places, base.with_places);
         assert_eq!(config.family_ratio, base.family_ratio);
+        assert_eq!(config.max_parent_roles, base.max_parent_roles);
     }
 
     #[test]

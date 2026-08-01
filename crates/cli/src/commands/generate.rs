@@ -79,6 +79,11 @@ pub struct GenerateArgs {
     /// Must be > 0.0 and <= 1.0.
     #[arg(long, default_value = "0.5")]
     pub family_ratio: f64,
+
+    /// Maximum number of families a person can be a parent in (default: 1).
+    /// Setting to 2 allows remarriage/step-families.
+    #[arg(long, default_value = "1")]
+    pub max_parent_roles: usize,
 }
 
 /// Run the generate command with the full five-stage pipeline.
@@ -273,6 +278,7 @@ fn build_config(
         with_tags: args.with_tags,
         seed: args.seed,
         place_depth: 3,
+        max_parent_roles: args.max_parent_roles,
     };
 
     // Parse adversarial flag
@@ -383,6 +389,7 @@ mod tests {
             with_tags: false,
             schema_version: "default".to_string(),
             family_ratio: 0.5,
+            max_parent_roles: 1,
         };
         let (config, adv_config, output) = build_config(&args).unwrap();
         assert_eq!(config.person_count, 50);
@@ -394,6 +401,7 @@ mod tests {
         assert_eq!(output, "test.gramps");
         assert_eq!(config.family_ratio, 0.5);
         assert_eq!(config.family_count, 25);
+        assert_eq!(config.max_parent_roles, 1);
     }
 
     #[test]
@@ -434,6 +442,7 @@ mod tests {
             with_tags: false,
             schema_version: "default".to_string(),
             family_ratio: 0.5,
+            max_parent_roles: 1,
         };
         // build_config should succeed even with empty output (it's just a string)
         let result = build_config(&args);
@@ -458,6 +467,7 @@ mod tests {
             with_tags: false,
             schema_version: "default".to_string(),
             family_ratio: 0.5,
+            max_parent_roles: 1,
         };
         let (config, _, _) = build_config(&args).unwrap();
         // person_count is 0, generation should fail
