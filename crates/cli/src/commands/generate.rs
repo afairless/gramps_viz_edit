@@ -73,6 +73,12 @@ pub struct GenerateArgs {
     /// Schema version to use (e.g., "5.1", "5.2"). Default: highest installed.
     #[arg(long, default_value = "default")]
     pub schema_version: String,
+
+    /// Family-to-person ratio (default: 0.5).
+    /// family_count = (person_count * family_ratio).round().
+    /// Must be > 0.0 and <= 1.0.
+    #[arg(long, default_value = "0.5")]
+    pub family_ratio: f64,
 }
 
 /// Run the generate command with the full five-stage pipeline.
@@ -233,9 +239,28 @@ fn build_config(
     }
 
     // Build from CLI args
+    // Validate family_ratio
+    if args.family_ratio <= 0.0 {
+        return Err(crate::error::CliError::ConfigError(format!(
+            "family-ratio must be > 0.0, got {}",
+            args.family_ratio
+        )));
+    }
+    if args.family_ratio > 1.0 {
+        return Err(crate::error::CliError::ConfigError(format!(
+            "family-ratio must be <= 1.0, got {}",
+            args.family_ratio
+        )));
+    }
+
+    let family_count = (args.count as f64 * args.family_ratio)
+        .round()
+        .max(1.0) as usize;
+
     let config = RandomConfig {
         person_count: args.count,
-        family_count: args.count / 2,
+        family_count,
+        family_ratio: args.family_ratio,
         generations: args.depth,
         children_per_family: 1..4,
         start_year: 1850,
@@ -357,6 +382,7 @@ mod tests {
             with_media: false,
             with_tags: false,
             schema_version: "default".to_string(),
+            family_ratio: 0.5,
         };
         let (config, adv_config, output) = build_config(&args).unwrap();
         assert_eq!(config.person_count, 50);
@@ -366,6 +392,8 @@ mod tests {
         assert!(!config.with_citations);
         assert!(!adv_config.enabled);
         assert_eq!(output, "test.gramps");
+        assert_eq!(config.family_ratio, 0.5);
+        assert_eq!(config.family_count, 25);
     }
 
     #[test]
@@ -405,6 +433,7 @@ mod tests {
             with_media: false,
             with_tags: false,
             schema_version: "default".to_string(),
+            family_ratio: 0.5,
         };
         // build_config should succeed even with empty output (it's just a string)
         let result = build_config(&args);
@@ -428,6 +457,7 @@ mod tests {
             with_media: false,
             with_tags: false,
             schema_version: "default".to_string(),
+            family_ratio: 0.5,
         };
         let (config, _, _) = build_config(&args).unwrap();
         // person_count is 0, generation should fail

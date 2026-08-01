@@ -47,8 +47,12 @@ use crate::generate::adversarial::AdversarialStrategy;
 pub struct RandomConfig {
     /// Number of Person nodes to generate (default: 200).
     pub person_count: usize,
-    /// Number of Family nodes to generate (default: person_count / 2).
+    /// Number of Family nodes to generate.
+    /// Default: 0 (sentinel) — resolved from family_ratio when not explicitly set.
     pub family_count: usize,
+    /// Family-to-person ratio (default: 0.5).
+    /// When family_count is 0, it is computed as person_count * family_ratio.
+    pub family_ratio: f64,
     /// Number of generations (default: 3).
     /// Used to assign default birth years when no dates are specified.
     pub generations: usize,
@@ -81,7 +85,8 @@ impl Default for RandomConfig {
     fn default() -> Self {
         RandomConfig {
             person_count: 200,
-            family_count: 100,
+            family_count: 0,
+            family_ratio: 0.5,
             generations: 3,
             children_per_family: 1..4,
             start_year: 1850,
@@ -94,6 +99,23 @@ impl Default for RandomConfig {
             with_tags: false,
             seed: None,
             place_depth: 3,
+        }
+    }
+}
+
+impl RandomConfig {
+    /// Resolve the family count from `family_ratio` when `family_count` is
+    /// not explicitly set (0 is a sentinel meaning "not set").
+    ///
+    /// Returns the number of families to create, computed as
+    /// `(person_count * family_ratio).round()` with a minimum of 1.
+    pub fn resolve_family_count(&self) -> usize {
+        if self.family_count == 0 {
+            (self.person_count as f64 * self.family_ratio)
+                .round()
+                .max(1.0) as usize
+        } else {
+            self.family_count
         }
     }
 }
@@ -1643,7 +1665,9 @@ pub fn generate_random(
     // Sort persons by birth year for parent selection
     persons.sort_by(|a, b| a.1.birth_year.cmp(&b.1.birth_year));
 
-    let families_to_create = config.family_count.min(persons.len() / 2);
+    // Resolve family count from family_ratio if not explicitly set
+    let resolved_family_count = config.resolve_family_count();
+    let families_to_create = resolved_family_count.min(persons.len() / 2);
     let mut family_handles: Vec<crate::Handle> = Vec::new();
 
     for _ in 0..families_to_create {
@@ -1789,7 +1813,8 @@ mod tests {
         assert!(config.seed.is_none());
         assert_eq!(config.place_depth, 3);
         assert_eq!(config.children_per_family, 1..4);
-        assert_eq!(config.family_count, 100);
+        assert_eq!(config.family_count, 0);
+        assert_eq!(config.family_ratio, 0.5);
     }
 
     #[test]
@@ -1797,6 +1822,7 @@ mod tests {
         let config = RandomConfig {
             person_count: 50,
             family_count: 25,
+            family_ratio: 0.75,
             generations: 5,
             children_per_family: 2..3,
             start_year: 1900,

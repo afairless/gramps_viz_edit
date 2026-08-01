@@ -9,6 +9,7 @@ fn generate_small_family_tree() {
     let config = typed_graph::generate::RandomConfig {
         person_count: 10,
         family_count: 5,
+        family_ratio: 0.5,
         generations: 2,
         children_per_family: 1..3,
         start_year: 1900,
@@ -42,6 +43,7 @@ fn generate_single_person() {
     let config = typed_graph::generate::RandomConfig {
         person_count: 1,
         family_count: 0,
+        family_ratio: 0.5,
         generations: 1,
         children_per_family: 1..2,
         start_year: 1900,
@@ -73,6 +75,7 @@ fn generate_zero_persons_fails() {
     let config = typed_graph::generate::RandomConfig {
         person_count: 0,
         family_count: 0,
+        family_ratio: 0.5,
         generations: 1,
         children_per_family: 1..2,
         start_year: 1900,
@@ -99,6 +102,7 @@ fn generate_with_adversarial_all_preserves_validity() {
     let config = typed_graph::generate::RandomConfig {
         person_count: 50,
         family_count: 25,
+        family_ratio: 0.5,
         generations: 3,
         children_per_family: 1..4,
         start_year: 1850,
@@ -150,6 +154,7 @@ fn generate_serialize_and_validate_roundtrip() {
     let config = typed_graph::generate::RandomConfig {
         person_count: 20,
         family_count: 10,
+        family_ratio: 0.5,
         generations: 2,
         children_per_family: 1..3,
         start_year: 1900,
