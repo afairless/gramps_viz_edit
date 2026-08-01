@@ -279,6 +279,7 @@ fn build_config(
         seed: args.seed,
         place_depth: 3,
         max_parent_roles: args.max_parent_roles,
+        layer_linking: args.depth > 1,
     };
 
     // Parse adversarial flag

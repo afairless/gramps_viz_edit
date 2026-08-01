@@ -82,6 +82,10 @@ pub struct RandomConfig {
     /// Maximum number of families a person can be a parent in (default: 1).
     /// Setting to 2 allows remarriage/step-families.
     pub max_parent_roles: usize,
+    /// Whether to assign families to layers sequentially instead of randomly
+    /// (default: false). When enabled, families cycle through generations in
+    /// descending order, guaranteeing cross-generation chains.
+    pub layer_linking: bool,
 }
 
 impl Default for RandomConfig {
@@ -103,6 +107,7 @@ impl Default for RandomConfig {
             seed: None,
             place_depth: 3,
             max_parent_roles: 1,
+            layer_linking: false,
         }
     }
 }
@@ -836,6 +841,25 @@ fn find_compatible_pair(
     }
 
     best_pair
+}
+
+/// Compute the layer for a family at the given index.
+///
+/// When `layer_linking` is enabled, families are assigned to layers in
+/// sequential descending order, wrapping around: the oldest cohort gets the
+/// first families, and layers cycle from `generations - 1` down to 0.
+/// Otherwise, a random layer is chosen uniformly.
+fn assign_family_layer(
+    family_index: usize,
+    generations: usize,
+    layer_linking: bool,
+    rng: &mut impl rand::Rng,
+) -> usize {
+    if layer_linking {
+        (generations - 1) - (family_index % generations)
+    } else {
+        rng.gen_range(0..generations)
+    }
 }
 
 /// Create a Family node with the given parents.
@@ -1690,9 +1714,9 @@ pub fn generate_random(
         .min(persons.len() * config.max_parent_roles / 2);
     let mut family_handles: Vec<crate::Handle> = Vec::new();
 
-    for _ in 0..families_to_create {
-        // Assign a layer for this family (cycling through generations)
-        let layer = rng.gen_range(0..config.generations);
+    for (family_index, _) in (0..families_to_create).enumerate() {
+        // Assign a layer for this family
+        let layer = assign_family_layer(family_index, config.generations, config.layer_linking, &mut rng);
 
         match generate_family(
             &mut graph,
@@ -1836,6 +1860,7 @@ mod tests {
         assert_eq!(config.family_count, 0);
         assert_eq!(config.family_ratio, 0.5);
         assert_eq!(config.max_parent_roles, 1);
+        assert!(!config.layer_linking);
     }
 
     #[test]
@@ -1845,6 +1870,7 @@ mod tests {
             family_count: 25,
             family_ratio: 0.75,
             max_parent_roles: 2,
+            layer_linking: false,
             generations: 5,
             children_per_family: 2..3,
             start_year: 1900,
@@ -4345,6 +4371,36 @@ mod tests {
             !result.warnings.is_empty() || result.stats.family_count > 0,
             "Should generate families or emit warnings"
         );
+    }
+
+    #[test]
+    fn layer_linking_sequential_assignment() {
+        // Verify the layer assignment helper produces the expected sequential
+        // descending pattern: with 4 layers and 8 families, the layers
+        // should be 3, 2, 1, 0, 3, 2, 1, 0 — each layer gets exactly 2 families.
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let generations = 4;
+        let mut layer_counts = [0usize; 4];
+        let expected_pattern = [3, 2, 1, 0, 3, 2, 1, 0];
+
+        for (i, &expected_layer) in expected_pattern.iter().enumerate() {
+            let layer = assign_family_layer(i, generations, true, &mut rng);
+            assert_eq!(
+                layer, expected_layer,
+                "Family {} should be in layer {}, got {}",
+                i, expected_layer, layer
+            );
+            layer_counts[layer] += 1;
+        }
+
+        // Each layer should have exactly 2 families
+        for (layer, &count) in layer_counts.iter().enumerate() {
+            assert_eq!(
+                count, 2,
+                "Layer {} should have exactly 2 families, got {}",
+                layer, count
+            );
+        }
     }
 
     #[test]

@@ -146,6 +146,12 @@ impl Scenario {
             family_count: self.family_count.unwrap_or(base.family_count),
             family_ratio: self.family_ratio.unwrap_or(base.family_ratio),
             max_parent_roles: self.max_parent_roles.unwrap_or(base.max_parent_roles),
+            layer_linking: self
+                .generations
+                .as_ref()
+                .map(|g| g.depth.unwrap_or(base.generations))
+                .unwrap_or(base.generations)
+                > 1,
             generations: self
                 .generations
                 .as_ref()
