@@ -1,6 +1,95 @@
 //! Integration tests for the CLI crate.
 
+use std::collections::{HashMap, HashSet, VecDeque};
 use tempfile::NamedTempFile;
+
+/// Compute the size of the largest connected component of Person nodes
+/// connected through Family nodes (person-family-person edges).
+fn largest_connected_person_component(graph: &typed_graph::Graph) -> usize {
+    // Build adjacency: for each person handle, find all other person handles
+    // connected through shared families.
+    let mut person_adj: HashMap<String, Vec<String>> = HashMap::new();
+
+    // Collect all person handles
+    let person_handles: Vec<String> = graph
+        .iter_nodes()
+        .filter_map(|(h, n)| {
+            if matches!(n, typed_graph::Node::Person(_)) {
+                Some(h.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    for h in &person_handles {
+        person_adj.entry(h.clone()).or_default();
+    }
+
+    // Walk edge list: for each Family* edge, find the family node, then
+    // find all Person nodes connected to that family.
+    for (_, node) in graph.iter_nodes() {
+        if let typed_graph::Node::Family(family) = node {
+            let mut members: Vec<String> = Vec::new();
+            if let Some(ref fh) = family.father_handle {
+                if person_handles.contains(fh) {
+                    members.push(fh.clone());
+                }
+            }
+            if let Some(ref mh) = family.mother_handle {
+                if person_handles.contains(mh) {
+                    members.push(mh.clone());
+                }
+            }
+            // Add children: find FamilyChildRef edges targeting this family
+            for edge in graph.iter_edges() {
+                if let typed_graph::Edge::FamilyChildRef { ref source, ref target, .. } = edge {
+                    if source == &family.handle && person_handles.contains(target) {
+                        members.push(target.clone());
+                    }
+                }
+            }
+            // Connect all members in a clique
+            for i in 0..members.len() {
+                for j in (i + 1)..members.len() {
+                    person_adj.get_mut(&members[i]).unwrap().push(members[j].clone());
+                    person_adj.get_mut(&members[j]).unwrap().push(members[i].clone());
+                }
+            }
+        }
+    }
+
+    // BFS to find largest connected component
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut largest = 0;
+
+    for h in &person_handles {
+        if visited.contains(h) {
+            continue;
+        }
+        // BFS
+        let mut queue = VecDeque::new();
+        queue.push_back(h.clone());
+        visited.insert(h.clone());
+        let mut component_size = 0;
+
+        while let Some(current) = queue.pop_front() {
+            component_size += 1;
+            if let Some(neighbors) = person_adj.get(&current) {
+                for n in neighbors {
+                    if !visited.contains(n) {
+                        visited.insert(n.clone());
+                        queue.push_back(n.clone());
+                    }
+                }
+            }
+        }
+
+        largest = largest.max(component_size);
+    }
+
+    largest
+}
 
 /// Integration test: generate a small valid family tree.
 #[test]
@@ -411,4 +500,51 @@ fn validate_invalid_file_strict_mode() {
     };
     let result = cli::commands::validate::run(args);
     assert!(result.is_err());
+}
+
+/// Regression test for the original bug: `--count 16 --seed 2026 --depth 4`
+/// produced a largest connected component of only 3 people.
+///
+/// The largest connected component of Person nodes (via person-family-person
+/// edges) must now be at least half the person count.
+#[test]
+fn generate_depth_4_produces_deep_tree() {
+    let schema = typed_graph::Schema::default();
+    // Mirror the CLI's build_config() for: --count 16 --seed 2026 --depth 4
+    let config = typed_graph::generate::RandomConfig {
+        person_count: 16,
+        family_count: 8,
+        family_ratio: 0.5,
+        generations: 4,
+        children_per_family: 1..4,
+        start_year: 1850,
+        end_year: 2025,
+        name_style: "modern".to_string(),
+        with_places: false,
+        with_citations: false,
+        with_notes: false,
+        with_media: false,
+        with_tags: false,
+        seed: Some(2026),
+        place_depth: 3,
+        max_parent_roles: 1,
+        layer_linking: true, // depth > 1
+    };
+    let adv_config = typed_graph::generate::AdversarialConfig::default();
+
+    let mut result =
+        typed_graph::generate::generate_random(&config, &adv_config, &schema).unwrap();
+
+    // The largest connected component must be >= 8 (at least half of 16)
+    let largest = largest_connected_person_component(&result.graph);
+    assert!(
+        largest >= 8,
+        "Largest connected component should be >= 8, got {}. Graph has {} persons",
+        largest,
+        result.stats.person_count
+    );
+
+    // The generated graph must still be valid
+    let errors = result.graph.validate(&schema);
+    assert!(errors.is_empty(), "Validation errors: {:?}", errors);
 }
