@@ -1286,9 +1286,86 @@ mod tests {
         writer.write(&graph, &mut output).unwrap();
         let xml = String::from_utf8(output).unwrap();
 
-        assert!(xml.contains(r#"<person handle="p1" id="I0001""#));
+        assert!(xml.contains(r#"<person handle="p1" id="I0001">"#));
+        assert!(xml.contains("<gender>M</gender>"));
         assert!(xml.contains("<first>John</first>"));
         assert!(xml.contains("<surname>Doe</surname>"));
+    }
+
+    #[test]
+    fn serialize_person_gender_values() {
+        for (gender_int, expected_char) in [(0, "M"), (1, "F"), (2, "U")] {
+            let map = SerializationMap::new();
+            let writer = GraphXmlWriter::new(map, "5.2.0");
+            let mut graph = Graph::new();
+            let node = Node::Person(PersonData {
+                handle: "p1".to_string(),
+                gramps_id: None,
+                gender: typed_graph::graph::into_gender_field(gender_int),
+                primary_name: Name {
+                    first_name: Some("Test".to_string()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+            graph.add_node("p1".to_string(), node).unwrap();
+
+            let mut output = Vec::new();
+            writer.write(&graph, &mut output).unwrap();
+            let xml = String::from_utf8(output).unwrap();
+
+            assert!(
+                xml.contains(&format!("<gender>{}</gender>", expected_char)),
+                "gender {} should serialize as <gender>{}</gender>, got: {}",
+                gender_int, expected_char, xml
+            );
+        }
+    }
+
+    #[cfg(not(feature = "schema-5-1"))]
+    #[test]
+    fn serialize_person_gender_other_maps_to_u() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map, "5.2.0");
+        let mut graph = Graph::new();
+        let node = Node::Person(PersonData {
+            handle: "p1".to_string(),
+            gramps_id: None,
+            gender: typed_graph::graph::into_gender_field(3),
+            primary_name: Name {
+                first_name: Some("Test".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        graph.add_node("p1".to_string(), node).unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(
+            xml.contains("<gender>U</gender>"),
+            "gender 3 (Other) should serialize as <gender>U</gender>, got: {}",
+            xml
+        );
+    }
+
+    #[test]
+    fn serialize_person_no_gender_attribute() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map, "5.2.0");
+        let mut graph = Graph::new();
+        graph.add_node("p1".to_string(), make_person("p1", None)).unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        // The string 'gender="' should NOT appear (it was an attribute, now a child element)
+        assert!(!xml.contains(r#"gender=""#));
+        // The child element should be present
+        assert!(xml.contains("<gender>M</gender>"));
     }
 
     #[test]

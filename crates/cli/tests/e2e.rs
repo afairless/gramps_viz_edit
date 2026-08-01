@@ -411,9 +411,9 @@ fn e2e_51_gender_distribution() {
 
     let content = std::fs::read_to_string(&output).unwrap();
 
-    // Count genders in the output XML
-    let female_count = content.matches("gender=\"1\"").count();
-    let total_count = content.matches("gender=\"").count();
+    // Count genders in the output XML (child element format)
+    let female_count = content.matches("<gender>F</gender>").count();
+    let total_count = content.matches("<gender>").count();
     let female_pct = female_count as f64 / total_count as f64 * 100.0;
 
     assert!(
