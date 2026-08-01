@@ -81,12 +81,9 @@ fn generate_random_51_only_validates() {
         ..generate::RandomConfig::default()
     };
 
-    let result = generate::generate_random(
-        &config,
-        &generate::AdversarialConfig::default(),
-        schema,
-    )
-    .expect("generation should succeed");
+    let result =
+        generate::generate_random(&config, &generate::AdversarialConfig::default(), schema)
+            .expect("generation should succeed");
 
     let mut graph = result.graph;
     let validation_errors = graph.validate(schema);
@@ -111,12 +108,9 @@ fn generate_random_merged_validates() {
         ..generate::RandomConfig::default()
     };
 
-    let result = generate::generate_random(
-        &config,
-        &generate::AdversarialConfig::default(),
-        &schema,
-    )
-    .expect("generation should succeed");
+    let result =
+        generate::generate_random(&config, &generate::AdversarialConfig::default(), &schema)
+            .expect("generation should succeed");
 
     let mut graph = result.graph;
     let validation_errors = graph.validate(&schema);
@@ -155,8 +149,14 @@ fn event_type_merged_values_no_duplicates() {
     // (e.g., POS_STRING appears twice in 5.1 EventType). This is a known limitation
     // of the converter — the merge algorithm preserves all values as-is.
     // The test only verifies no obviously erroneous state.
-    assert!(values_51.len() >= 10, "5.1 EventType should have at least 10 values");
-    assert!(values_52.len() >= 10, "5.2 EventType should have at least 10 values");
+    assert!(
+        values_51.len() >= 10,
+        "5.1 EventType should have at least 10 values"
+    );
+    assert!(
+        values_52.len() >= 10,
+        "5.2 EventType should have at least 10 values"
+    );
 
     // Merged schema should contain the union
     let merged = Schema::default();
@@ -198,4 +198,112 @@ fn date_value_methods() {
         ..DateValue::default()
     };
     assert!(!d3.is_valid());
+}
+
+// ---------------------------------------------------------------------------
+// Gender and family structure tests
+// ---------------------------------------------------------------------------
+
+/// Verify that 5.1 generation produces a mix of genders.
+/// This test guards against the regression where all persons were assigned
+/// gender 0 (male) due to the missing Gender enum in the 5.1 schema conversion.
+#[test]
+fn gender_enum_synthesized_for_51() {
+    let schema = Schema::for_version("5.1").expect("Schema 5.1 should be compiled in");
+
+    // Verify Gender is in the schema's valid_enum_values
+    let genders = schema
+        .valid_enum_values
+        .get("Gender")
+        .expect("Gender should be in valid_enum_values for 5.1");
+
+    assert!(
+        genders.contains(&"0"),
+        "Gender 0 (Male) should be valid"
+    );
+    assert!(
+        genders.contains(&"1"),
+        "Gender 1 (Female) should be valid"
+    );
+    assert!(
+        genders.contains(&"2"),
+        "Gender 2 (Unknown) should be valid"
+    );
+
+    // Generate with 5.1 schema and verify gender distribution
+    let config = generate::RandomConfig {
+        person_count: 100,
+        generations: 2,
+        children_per_family: Range { start: 1, end: 4 },
+        start_year: 1900,
+        end_year: 2000,
+        seed: Some(2026),
+        ..generate::RandomConfig::default()
+    };
+
+    let result =
+        generate::generate_random(&config, &generate::AdversarialConfig::default(), schema)
+            .expect("generation should succeed");
+
+    let mut female_count = 0;
+    let mut total_count = 0;
+
+    for (_, node) in result.graph.iter_nodes() {
+        if let Node::Person(person) = node {
+            total_count += 1;
+            if gender_value(person.gender) == 1 {
+                female_count += 1;
+            }
+        }
+    }
+
+    assert!(
+        female_count > 0,
+        "No female persons found in 5.1 generation. All {} persons are male/unknown.",
+        total_count
+    );
+
+    let female_pct = female_count as f64 / total_count as f64 * 100.0;
+    assert!(
+        female_pct >= 5.0,
+        "Female proportion too low: {:.1}% ({}/{}). Expected at least 5%.",
+        female_pct,
+        female_count,
+        total_count
+    );
+}
+
+/// Verify that every family in a 5.1 generation has at least one parent edge
+/// (father or mother). This guards against the bug where single-parent
+/// families were created without any parent handles or edges.
+#[test]
+fn families_have_at_least_one_parent_51() {
+    let schema = Schema::for_version("5.1").expect("Schema 5.1 should be compiled in");
+    let config = generate::RandomConfig {
+        person_count: 50,
+        generations: 3,
+        children_per_family: Range { start: 1, end: 3 },
+        start_year: 1850,
+        end_year: 2000,
+        seed: Some(42),
+        ..generate::RandomConfig::default()
+    };
+
+    let result =
+        generate::generate_random(&config, &generate::AdversarialConfig::default(), schema)
+            .expect("generation should succeed");
+
+    for family_handle in result.graph.nodes_by_kind(NodeKind::Family) {
+        let has_parent = result.graph.edges_from(family_handle).iter().any(|e| {
+            matches!(
+                e,
+                Edge::FamilyFather { .. } | Edge::FamilyMother { .. }
+            )
+        });
+        assert!(
+            has_parent,
+            "Family {} has no parent edges (no father or mother)",
+            family_handle
+        );
+    }
 }

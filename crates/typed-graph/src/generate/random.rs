@@ -4462,9 +4462,11 @@ mod tests {
                         crate::Edge::FamilyFather { .. } | crate::Edge::FamilyMother { .. }
                     )
                 });
-                // This test just checks that the generation doesn't crash
-                // (single-parent families are structurally valid)
-                let _ = has_parent;
+                assert!(
+                    has_parent,
+                    "Seed {}: Family {} has no parent edges",
+                    seed, family_handle
+                );
             }
         }
     }
