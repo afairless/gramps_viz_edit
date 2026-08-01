@@ -1317,7 +1317,9 @@ mod tests {
             assert!(
                 xml.contains(&format!("<gender>{}</gender>", expected_char)),
                 "gender {} should serialize as <gender>{}</gender>, got: {}",
-                gender_int, expected_char, xml
+                gender_int,
+                expected_char,
+                xml
             );
         }
     }
@@ -1356,7 +1358,9 @@ mod tests {
         let map = SerializationMap::new();
         let writer = GraphXmlWriter::new(map, "5.2.0");
         let mut graph = Graph::new();
-        graph.add_node("p1".to_string(), make_person("p1", None)).unwrap();
+        graph
+            .add_node("p1".to_string(), make_person("p1", None))
+            .unwrap();
 
         let mut output = Vec::new();
         writer.write(&graph, &mut output).unwrap();
