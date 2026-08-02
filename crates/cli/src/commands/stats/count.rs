@@ -1045,6 +1045,7 @@ mod tests {
     fn report_default_empty_table() {
         let report = StatsReport::default();
         assert!(report.family_group_generation_table.is_empty());
+        assert!(report.family_group_distribution.is_empty());
     }
 
     #[test]

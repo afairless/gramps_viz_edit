@@ -503,6 +503,14 @@ mod tests {
         assert_eq!(parsed["people_not_in_family"], 2);
         assert_eq!(parsed["dangling_refs"], 0);
         assert!(parsed["warnings"].is_array());
+        assert!(
+            parsed["family_group_generation_table"].is_object(),
+            "Should have family_group_generation_table"
+        );
+        assert!(
+            parsed["family_group_distribution"].is_object(),
+            "Should have family_group_distribution"
+        );
     }
 
     #[test]
@@ -608,7 +616,7 @@ mod tests {
             },
             family_size_distribution: BTreeMap::from([(3, 1)]),
             family_group_generation_table: table,
-            family_group_distribution: BTreeMap::new(),
+            family_group_distribution: BTreeMap::from([(3, 1)]),
             people_not_in_family: 0,
             dangling_refs: 0,
             warnings: vec![],
@@ -617,12 +625,15 @@ mod tests {
         let text = format_text_report(&report, false);
         assert!(text.contains("Family size distribution"));
         assert!(text.contains("Family group size × generation table"));
+        assert!(text.contains("Family group distribution"));
         assert!(text.contains("# generations"));
-        // Section appears below distribution, above dangling refs
+        // Sections appear in order: distribution, generation table, then dangling refs
         let dist_pos = text.find("Family size distribution").unwrap();
+        let fg_dist_pos = text.find("Family group distribution").unwrap();
         let table_pos = text.find("Family group size × generation table").unwrap();
         let people_pos = text.find("People not in any family").unwrap();
-        assert!(dist_pos < table_pos);
+        assert!(dist_pos < fg_dist_pos);
+        assert!(fg_dist_pos < table_pos);
         assert!(table_pos < people_pos);
     }
 
