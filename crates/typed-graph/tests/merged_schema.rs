@@ -82,7 +82,7 @@ fn generate_random_51_only_validates() {
     };
 
     let result =
-        generate::generate_random(&config, &generate::AdversarialConfig::default(), schema)
+        generate::generate_random(&config, &generate::AdversarialConfig::default(), None, schema)
             .expect("generation should succeed");
 
     let mut graph = result.graph;
@@ -109,7 +109,7 @@ fn generate_random_merged_validates() {
     };
 
     let result =
-        generate::generate_random(&config, &generate::AdversarialConfig::default(), &schema)
+        generate::generate_random(&config, &generate::AdversarialConfig::default(), None, &schema)
             .expect("generation should succeed");
 
     let mut graph = result.graph;
@@ -233,7 +233,7 @@ fn gender_enum_synthesized_for_51() {
     };
 
     let result =
-        generate::generate_random(&config, &generate::AdversarialConfig::default(), schema)
+        generate::generate_random(&config, &generate::AdversarialConfig::default(), None, schema)
             .expect("generation should succeed");
 
     let mut female_count = 0;
@@ -281,7 +281,7 @@ fn families_have_at_least_one_parent_51() {
     };
 
     let result =
-        generate::generate_random(&config, &generate::AdversarialConfig::default(), schema)
+        generate::generate_random(&config, &generate::AdversarialConfig::default(), None, schema)
             .expect("generation should succeed");
 
     for family_handle in result.graph.nodes_by_kind(NodeKind::Family) {

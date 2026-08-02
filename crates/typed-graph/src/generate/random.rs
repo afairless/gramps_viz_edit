@@ -1416,7 +1416,7 @@ pub(crate) fn generate_events(
 }
 
 /// Get the birth year of a person from their birth event in the graph.
-fn get_person_birth_year(graph: &crate::Graph, person_handle: &crate::Handle) -> Option<i32> {
+pub(crate) fn get_person_birth_year(graph: &crate::Graph, person_handle: &crate::Handle) -> Option<i32> {
     let edges = graph.edges_from(person_handle);
     for edge in &edges {
         if let crate::Edge::PersonEventRef { target, .. } = edge {
@@ -1447,6 +1447,8 @@ pub struct GenerationResult {
     pub warnings: Vec<String>,
     /// Generation statistics.
     pub stats: GenerationStats,
+    /// Optional result from the connection densifier post-processor.
+    pub densify_result: Option<crate::generate::densify::DensifyResult>,
 }
 
 /// Statistics about a generation run.
@@ -1481,6 +1483,7 @@ pub struct GenerationStats {
 pub fn generate_random(
     config: &RandomConfig,
     adversarial_config: &AdversarialConfig,
+    densify_config: Option<&crate::generate::densify::DensifyConfig>,
     schema: &crate::Schema,
 ) -> Result<GenerationResult, GenerationError> {
     // Validate config
@@ -1783,6 +1786,18 @@ pub fn generate_random(
     generate_events(&mut graph, config, &mut rng)?;
 
     // -----------------------------------------------------------------------
+    // Stage 4.5: Connection densification (optional)
+    // -----------------------------------------------------------------------
+    let densify_result = if let Some(dc) = densify_config {
+        let densify_seed = seed.wrapping_add(0x0D3E_5F1E);
+        let mut rng_densify = rand::rngs::StdRng::seed_from_u64(densify_seed);
+        let result = crate::generate::densify::densify_connections(&mut graph, dc, &mut rng_densify);
+        Some(result)
+    } else {
+        None
+    };
+
+    // -----------------------------------------------------------------------
     // Apply Category B (post-generation) adversarial strategies
     // -----------------------------------------------------------------------
     let adversarial_result =
@@ -1795,7 +1810,7 @@ pub fn generate_random(
     }
 
     // -----------------------------------------------------------------------
-    // Collect statistics
+    // Collect statistics (recomputed after densification if it ran)
     // -----------------------------------------------------------------------
     let stats = collect_stats(&graph);
 
@@ -1804,11 +1819,12 @@ pub fn generate_random(
         seed,
         warnings,
         stats,
+        densify_result,
     })
 }
 
 /// Collect statistics from the generated graph.
-fn collect_stats(graph: &crate::Graph) -> GenerationStats {
+pub(crate) fn collect_stats(graph: &crate::Graph) -> GenerationStats {
     let mut stats = GenerationStats::default();
 
     for (_, node) in graph.iter_nodes() {
@@ -3044,7 +3060,7 @@ mod tests {
         };
         let schema = crate::Schema::default();
         let result =
-            generate_random(&config, &adversarial, &schema).expect("generation should succeed");
+            generate_random(&config, &adversarial, None, &schema).expect("generation should succeed");
 
         // With fraction 0.0, no one-parent families should be created
         // (all families should have both parents if the pair was found)
@@ -3087,7 +3103,7 @@ mod tests {
         };
         let schema = crate::Schema::default();
         let result =
-            generate_random(&config, &adversarial, &schema).expect("generation should succeed");
+            generate_random(&config, &adversarial, None, &schema).expect("generation should succeed");
 
         // With fraction 1.0, all families should be one-parent
         let mut families = 0;
@@ -3123,7 +3139,7 @@ mod tests {
         };
         let schema = crate::Schema::default();
         let mut result =
-            generate_random(&config, &adversarial, &schema).expect("generation should succeed");
+            generate_random(&config, &adversarial, None, &schema).expect("generation should succeed");
 
         // One-parent families are structurally valid
         let errors = result.graph.validate(&schema);
@@ -3149,7 +3165,7 @@ mod tests {
         };
         let schema = crate::Schema::default();
         let result =
-            generate_random(&config, &adversarial, &schema).expect("generation should succeed");
+            generate_random(&config, &adversarial, None, &schema).expect("generation should succeed");
 
         // With fraction 1.0, every family should produce a one-parent warning
         let one_parent_warnings: Vec<_> = result
@@ -3179,7 +3195,7 @@ mod tests {
             strategies: vec![AdversarialStrategy::OneParentFamilies(1.0)],
         };
         let schema = crate::Schema::default();
-        let result = generate_random(&config, &adversarial, &schema)
+        let result = generate_random(&config, &adversarial, None, &schema)
             .expect("single person generation should succeed");
         assert_eq!(result.stats.person_count, 1);
         assert_eq!(result.stats.family_count, 0);
@@ -3204,7 +3220,7 @@ mod tests {
         };
         let schema = crate::Schema::default();
         let result =
-            generate_random(&config, &adversarial, &schema).expect("generation should succeed");
+            generate_random(&config, &adversarial, None, &schema).expect("generation should succeed");
 
         // With fraction 0.0, all persons should have events.
         // No missing-events warnings should appear.
@@ -3235,7 +3251,7 @@ mod tests {
         };
         let schema = crate::Schema::default();
         let result =
-            generate_random(&config, &adversarial, &schema).expect("generation should succeed");
+            generate_random(&config, &adversarial, None, &schema).expect("generation should succeed");
 
         // With fraction 1.0, all persons should have missing events
         let missing_warnings: Vec<_> = result
@@ -3269,7 +3285,7 @@ mod tests {
         };
         let schema = crate::Schema::default();
         let mut result =
-            generate_random(&config, &adversarial, &schema).expect("generation should succeed");
+            generate_random(&config, &adversarial, None, &schema).expect("generation should succeed");
 
         // Missing events should still pass validation
         let errors = result.graph.validate(&schema);
@@ -3295,7 +3311,7 @@ mod tests {
         };
         let schema = crate::Schema::default();
         let result =
-            generate_random(&config, &adversarial, &schema).expect("generation should succeed");
+            generate_random(&config, &adversarial, None, &schema).expect("generation should succeed");
 
         // With fraction 0.5, roughly half should be missing
         // (statistical, so check for some but not all)
@@ -3329,7 +3345,7 @@ mod tests {
         };
         let schema = crate::Schema::default();
         let result =
-            generate_random(&config, &adversarial, &schema).expect("generation should succeed");
+            generate_random(&config, &adversarial, None, &schema).expect("generation should succeed");
 
         // Every warning should mention "missing events"
         let missing_warnings: Vec<_> = result
@@ -3365,7 +3381,7 @@ mod tests {
                 strategies: vec![AdversarialStrategy::OneParentFamilies(0.8)],
             };
             let schema = crate::Schema::default();
-            if let Ok(result) = generate_random(&config, &adversarial, &schema) {
+            if let Ok(result) = generate_random(&config, &adversarial, None, &schema) {
                 for w in &result.warnings {
                     if w.contains("father skipped") {
                         father_skipped.insert(seed);
@@ -4364,7 +4380,7 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+        let result = generate_random(&config, &AdversarialConfig::default(), None, &schema)
             .expect("generation should succeed");
         assert!(result.graph.node_count() > 0, "Graph should have nodes");
         assert!(
@@ -4413,7 +4429,7 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+        let result = generate_random(&config, &AdversarialConfig::default(), None, &schema)
             .expect("generation should succeed");
         assert_eq!(
             result.stats.person_count, 15,
@@ -4432,7 +4448,7 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+        let result = generate_random(&config, &AdversarialConfig::default(), None, &schema)
             .expect("generation should succeed");
         assert!(
             result.stats.family_count > 0,
@@ -4451,7 +4467,7 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+        let result = generate_random(&config, &AdversarialConfig::default(), None, &schema)
             .expect("generation should succeed");
         assert!(
             result.stats.event_count > 0,
@@ -4470,9 +4486,9 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let r1 = generate_random(&config, &AdversarialConfig::default(), &schema)
+        let r1 = generate_random(&config, &AdversarialConfig::default(), None, &schema)
             .expect("first gen should succeed");
-        let r2 = generate_random(&config, &AdversarialConfig::default(), &schema)
+        let r2 = generate_random(&config, &AdversarialConfig::default(), None, &schema)
             .expect("second gen should succeed");
 
         // Same seed should produce identical graphs
@@ -4495,9 +4511,9 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let r1 = generate_random(&config1, &AdversarialConfig::default(), &schema)
+        let r1 = generate_random(&config1, &AdversarialConfig::default(), None, &schema)
             .expect("first gen should succeed");
-        let r2 = generate_random(&config2, &AdversarialConfig::default(), &schema)
+        let r2 = generate_random(&config2, &AdversarialConfig::default(), None, &schema)
             .expect("second gen should succeed");
 
         // Different seeds should produce different stats (or at least different seeds)
@@ -4512,7 +4528,7 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+        let result = generate_random(&config, &AdversarialConfig::default(), None, &schema)
             .expect("generation should succeed");
         assert_eq!(result.seed, 42, "Seed should be recorded in result");
     }
@@ -4527,7 +4543,7 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+        let result = generate_random(&config, &AdversarialConfig::default(), None, &schema)
             .expect("generation should succeed");
         let total_nodes = result.stats.person_count
             + result.stats.family_count
@@ -4551,7 +4567,7 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let result = generate_random(&config, &AdversarialConfig::default(), &schema);
+        let result = generate_random(&config, &AdversarialConfig::default(), None, &schema);
         assert!(
             matches!(result, Err(GenerationError::InvalidConfig(_))),
             "Zero persons should be invalid"
@@ -4567,7 +4583,7 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let result = generate_random(&config, &AdversarialConfig::default(), &schema);
+        let result = generate_random(&config, &AdversarialConfig::default(), None, &schema);
         assert!(
             matches!(result, Err(GenerationError::InvalidConfig(_))),
             "start_year > end_year should be invalid"
@@ -4585,7 +4601,7 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+        let result = generate_random(&config, &AdversarialConfig::default(), None, &schema)
             .expect("generation should succeed");
         assert!(
             result.stats.place_count > 0,
@@ -4604,7 +4620,7 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+        let result = generate_random(&config, &AdversarialConfig::default(), None, &schema)
             .expect("generation should succeed");
         assert!(
             result.stats.source_count > 0,
@@ -4623,7 +4639,7 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let result = generate_random(&config, &AdversarialConfig::default(), &schema);
+        let result = generate_random(&config, &AdversarialConfig::default(), None, &schema);
         assert!(result.is_ok(), "50 persons should generate without panic");
     }
 
@@ -4637,7 +4653,7 @@ mod tests {
             ..RandomConfig::default()
         };
 
-        let mut result = generate_random(&config, &AdversarialConfig::default(), &schema)
+        let mut result = generate_random(&config, &AdversarialConfig::default(), None, &schema)
             .expect("generation should succeed");
         let errors = result.graph.validate(&schema);
         // Birth/death events are created inline, so the graph should be valid
@@ -4665,7 +4681,7 @@ mod tests {
                 seed: Some(seed as u64),
                 ..RandomConfig::default()
             };
-            let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+            let result = generate_random(&config, &AdversarialConfig::default(), None, &schema)
                 .unwrap_or_else(|e| {
                     panic!("Seed {}: generation failed: {:?}", seed, e);
                 });
@@ -4692,11 +4708,11 @@ mod tests {
                 seed: Some(seed),
                 ..RandomConfig::default()
             };
-            let r1 = generate_random(&config, &AdversarialConfig::default(), &schema)
+            let r1 = generate_random(&config, &AdversarialConfig::default(), None, &schema)
                 .unwrap_or_else(|e| {
                     panic!("Seed {}: first gen failed: {:?}", seed, e);
                 });
-            let r2 = generate_random(&config, &AdversarialConfig::default(), &schema)
+            let r2 = generate_random(&config, &AdversarialConfig::default(), None, &schema)
                 .unwrap_or_else(|e| {
                     panic!("Seed {}: second gen failed: {:?}", seed, e);
                 });
@@ -4718,7 +4734,7 @@ mod tests {
                 seed: Some(seed),
                 ..RandomConfig::default()
             };
-            let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+            let result = generate_random(&config, &AdversarialConfig::default(), None, &schema)
                 .unwrap_or_else(|e| {
                     panic!("Seed {}: generation failed: {:?}", seed, e);
                 });
@@ -4744,7 +4760,7 @@ mod tests {
                 seed: Some(seed),
                 ..RandomConfig::default()
             };
-            let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+            let result = generate_random(&config, &AdversarialConfig::default(), None, &schema)
                 .unwrap_or_else(|e| {
                     panic!("Seed {}: generation failed: {:?}", seed, e);
                 });
@@ -4776,7 +4792,7 @@ mod tests {
                 seed: Some(seed),
                 ..RandomConfig::default()
             };
-            let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+            let result = generate_random(&config, &AdversarialConfig::default(), None, &schema)
                 .unwrap_or_else(|e| {
                     panic!("Seed {}: generation failed: {:?}", seed, e);
                 });
@@ -4806,7 +4822,7 @@ mod tests {
                 seed: Some(seed),
                 ..RandomConfig::default()
             };
-            let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+            let result = generate_random(&config, &AdversarialConfig::default(), None, &schema)
                 .unwrap_or_else(|e| {
                     panic!("Seed {}: generation failed: {:?}", seed, e);
                 });
@@ -5081,7 +5097,7 @@ mod tests {
                 seed: Some(seed),
                 ..RandomConfig::default()
             };
-            let result = generate_random(&config, &AdversarialConfig::default(), &schema)
+            let result = generate_random(&config, &AdversarialConfig::default(), None, &schema)
                 .unwrap_or_else(|e| {
                     panic!("Seed {}: generation failed: {:?}", seed, e);
                 });

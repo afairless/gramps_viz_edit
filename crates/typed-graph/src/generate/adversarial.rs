@@ -1284,6 +1284,7 @@ mod tests {
         let result = crate::generate::generate_random(
             &config,
             &crate::generate::AdversarialConfig::default(),
+            None,
             &schema,
         )
         .expect("generation should succeed");
@@ -1323,6 +1324,7 @@ mod tests {
         let result = crate::generate::generate_random(
             &config,
             &crate::generate::AdversarialConfig::default(),
+            None,
             &schema,
         )
         .expect("generation should succeed");
@@ -1696,7 +1698,7 @@ mod tests {
         };
         let adversarial_config = crate::generate::AdversarialConfig::default();
         let result =
-            crate::generate::random::generate_random(&config, &adversarial_config, &schema)
+            crate::generate::random::generate_random(&config, &adversarial_config, None, &schema)
                 .unwrap();
         result.graph
     }
@@ -1933,7 +1935,7 @@ mod tests {
         };
         let adversarial_config = crate::generate::AdversarialConfig::default();
         let result =
-            crate::generate::random::generate_random(&config, &adversarial_config, &schema)
+            crate::generate::random::generate_random(&config, &adversarial_config, None, &schema)
                 .unwrap();
         result.graph
     }
@@ -2239,7 +2241,7 @@ mod tests {
                     enabled: true,
                     strategies: vec![strategy.clone()],
                 };
-                let result = generate_random(&config, &adversarial_config, &schema);
+                let result = generate_random(&config, &adversarial_config, None, &schema);
                 if let Ok(result) = result {
                     let mut graph = result.graph;
                     let errors = graph.validate(&schema);
@@ -2268,7 +2270,7 @@ mod tests {
                 enabled: false,
                 strategies: vec![],
             };
-            let result = generate_random(&config, &adversarial_config, &schema);
+            let result = generate_random(&config, &adversarial_config, None, &schema);
             assert!(
                 result.is_ok(),
                 "Seed {}: generation should succeed with adversarial disabled",
@@ -2306,7 +2308,7 @@ mod tests {
                 enabled: true,
                 strategies: combined_strategies.clone(),
             };
-            let result = generate_random(&config, &adversarial_config, &schema);
+            let result = generate_random(&config, &adversarial_config, None, &schema);
             if let Ok(result) = result {
                 let mut graph = result.graph;
                 let errors = graph.validate(&schema);
@@ -2336,7 +2338,7 @@ mod tests {
                     AdversarialStrategy::DisconnectedSubgraphs,
                 ],
             };
-            let result = generate_random(&config, &adversarial_config, &schema);
+            let result = generate_random(&config, &adversarial_config, None, &schema);
             assert!(
                 result.is_ok(),
                 "Seed {}: combined Category A + B strategies failed: {:?}",

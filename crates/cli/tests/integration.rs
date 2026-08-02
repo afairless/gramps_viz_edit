@@ -116,7 +116,7 @@ fn generate_small_family_tree() {
     };
     let adv_config = typed_graph::generate::AdversarialConfig::default();
 
-    let mut result = typed_graph::generate::generate_random(&config, &adv_config, &schema).unwrap();
+    let mut result = typed_graph::generate::generate_random(&config, &adv_config, None, &schema).unwrap();
     assert_eq!(result.stats.person_count, 10);
     assert!(result.stats.family_count <= 5);
     assert!(result.stats.event_count > 0);
@@ -152,7 +152,7 @@ fn generate_single_person() {
     };
     let adv_config = typed_graph::generate::AdversarialConfig::default();
 
-    let mut result = typed_graph::generate::generate_random(&config, &adv_config, &schema).unwrap();
+    let mut result = typed_graph::generate::generate_random(&config, &adv_config, None, &schema).unwrap();
     assert_eq!(result.stats.person_count, 1);
     assert!(result.stats.family_count == 0);
 
@@ -186,7 +186,7 @@ fn generate_zero_persons_fails() {
     };
     let adv_config = typed_graph::generate::AdversarialConfig::default();
 
-    let result = typed_graph::generate::generate_random(&config, &adv_config, &schema);
+    let result = typed_graph::generate::generate_random(&config, &adv_config, None, &schema);
     assert!(result.is_err());
 }
 
@@ -225,7 +225,7 @@ fn generate_with_adversarial_all_preserves_validity() {
     };
 
     // Generate with adversarial strategies
-    let result = typed_graph::generate::generate_random(&config, &adv_config, &schema).unwrap();
+    let result = typed_graph::generate::generate_random(&config, &adv_config, None, &schema).unwrap();
 
     // Apply Category B transforms
     let mut graph =
@@ -269,7 +269,7 @@ fn generate_serialize_and_validate_roundtrip() {
     };
     let adv_config = typed_graph::generate::AdversarialConfig::default();
 
-    let result = typed_graph::generate::generate_random(&config, &adv_config, &schema).unwrap();
+    let result = typed_graph::generate::generate_random(&config, &adv_config, None, &schema).unwrap();
 
     // Serialize
     let map = output::SerializationMap::new();
@@ -424,7 +424,7 @@ fn generate_respects_schema_version() {
 
     // Generate with 5.1 schema
     let mut result =
-        typed_graph::generate::generate_random(&config, &adv_config, &schema_51).unwrap();
+        typed_graph::generate::generate_random(&config, &adv_config, None, &schema_51).unwrap();
 
     // Validate with 5.1 — must pass
     let errors = result.graph.validate(&schema_51);
@@ -468,7 +468,7 @@ fn cross_version_validation_consistent() {
 
     // Generate with 5.1 schema
     let mut result =
-        typed_graph::generate::generate_random(&config, &adv_config, &schema_51).unwrap();
+        typed_graph::generate::generate_random(&config, &adv_config, None, &schema_51).unwrap();
 
     // Validate with 5.1 — must pass (same version used for generation)
     let errors_51 = result.graph.validate(&schema_51);
@@ -533,7 +533,7 @@ fn generate_depth_4_produces_deep_tree() {
     let adv_config = typed_graph::generate::AdversarialConfig::default();
 
     let mut result =
-        typed_graph::generate::generate_random(&config, &adv_config, &schema).unwrap();
+        typed_graph::generate::generate_random(&config, &adv_config, None, &schema).unwrap();
 
     // The largest connected component must be >= 8 (at least half of 16)
     let largest = largest_connected_person_component(&result.graph);

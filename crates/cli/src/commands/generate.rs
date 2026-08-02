@@ -136,7 +136,7 @@ pub fn run(args: GenerateArgs) -> Result<(), crate::error::CliError> {
     };
 
     // Stage 1: Generate
-    let mut result = generate_random(&config, &adversarial_config, schema)?;
+    let mut result = generate_random(&config, &adversarial_config, None, schema)?;
     progress.finish();
     eprintln!(
         "Generated {} persons, {} families, {} events",
@@ -474,7 +474,7 @@ mod tests {
         // person_count is 0, generation should fail
         let schema = Schema::default();
         let adv_config = AdversarialConfig::default();
-        let result = generate_random(&config, &adv_config, &schema);
+        let result = generate_random(&config, &adv_config, None, &schema);
         assert!(result.is_err());
         match result {
             Err(GenerationError::InvalidConfig(_)) => {} // Expected
