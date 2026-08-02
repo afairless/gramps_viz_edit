@@ -7,9 +7,8 @@
 
 pub mod count;
 
-
-use clap::Args;
 use crate::error::CliError;
+use clap::Args;
 use count::{count_gramps_xml, StatsReport};
 
 /// Arguments for the `stats` subcommand.
@@ -134,8 +133,8 @@ mod tests {
 
     #[test]
     fn stats_malformed_xml_returns_xml_parse_error() {
-        use tempfile::NamedTempFile;
         use std::io::Write;
+        use tempfile::NamedTempFile;
 
         let mut tmp = NamedTempFile::new().unwrap();
         write!(tmp, "<database><person></database>").unwrap();
@@ -154,8 +153,8 @@ mod tests {
 
     #[test]
     fn stats_empty_content_returns_zeroed_report() {
-        use tempfile::NamedTempFile;
         use std::io::Write;
+        use tempfile::NamedTempFile;
 
         let mut tmp = NamedTempFile::new().unwrap();
         write!(tmp, "").unwrap();
@@ -186,6 +185,7 @@ mod tests {
                 tags: 2,
             },
             family_size_distribution: BTreeMap::from([(1, 1), (2, 2), (3, 5), (4, 2)]),
+            family_generation_table: BTreeMap::new(),
             people_not_in_family: 8,
             dangling_refs: 0,
             warnings: vec![],
@@ -197,9 +197,15 @@ mod tests {
         assert!(text.contains("File: family.gramps"));
         assert!(text.contains("Object counts"));
         // Check that the People line has the right format
-        assert!(text.lines().any(|l| l.starts_with("  People:") && l.ends_with("42")));
-        assert!(text.lines().any(|l| l.starts_with("  Families:") && l.ends_with("10")));
-        assert!(text.lines().any(|l| l.starts_with("  Media objects:") && l.ends_with("4")));
+        assert!(text
+            .lines()
+            .any(|l| l.starts_with("  People:") && l.ends_with("42")));
+        assert!(text
+            .lines()
+            .any(|l| l.starts_with("  Families:") && l.ends_with("10")));
+        assert!(text
+            .lines()
+            .any(|l| l.starts_with("  Media objects:") && l.ends_with("4")));
         assert!(text.contains("Family size distribution"));
         assert!(text.contains("size  1: 1 family (1 person)"));
         assert!(text.contains("size  3: 5 families (15 people)"));
@@ -216,6 +222,7 @@ mod tests {
             file: "test.gramps".to_string(),
             counts: PrimaryTypeCounts::default(),
             family_size_distribution: dist,
+            family_generation_table: BTreeMap::new(),
             people_not_in_family: 5,
             dangling_refs: 1,
             warnings: vec![],
@@ -244,6 +251,7 @@ mod tests {
                 tags: 1,
             },
             family_size_distribution: BTreeMap::from([(0, 1), (2, 1), (4, 1)]),
+            family_generation_table: BTreeMap::new(),
             people_not_in_family: 3,
             dangling_refs: 0,
             warnings: vec![],
@@ -264,6 +272,7 @@ mod tests {
                 ..PrimaryTypeCounts::default()
             },
             family_size_distribution: BTreeMap::from([(2, 1)]),
+            family_generation_table: BTreeMap::new(),
             people_not_in_family: 2,
             dangling_refs: 0,
             warnings: vec!["a warning".to_string()],

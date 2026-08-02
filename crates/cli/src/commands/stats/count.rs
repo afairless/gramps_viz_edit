@@ -56,6 +56,8 @@ pub struct StatsReport {
     pub counts: PrimaryTypeCounts,
     /// Family size → number of families, ascending by size.
     pub family_size_distribution: BTreeMap<usize, usize>,
+    /// Family-size × generation-span contingency table.
+    pub family_generation_table: FamilyGenerationTable,
     /// People whose handle never appears in any family.
     pub people_not_in_family: usize,
     /// Family `ref` handles without a matching `<person>`.
@@ -103,6 +105,7 @@ pub fn count_gramps_xml(content: &str) -> Result<StatsReport, CliError> {
     let mut all_handles: HashSet<String> = HashSet::new();
     let mut ref_handles: HashSet<String> = HashSet::new();
     let mut family_records: Vec<FamilyRecord> = Vec::new();
+    let mut completed_records: Vec<FamilyRecord> = Vec::new();
     let mut histogram: HashMap<usize, usize> = HashMap::new();
 
     loop {
@@ -164,7 +167,7 @@ pub fn count_gramps_xml(content: &str) -> Result<StatsReport, CliError> {
                     b"family" => {
                         report.counts.families += 1;
                         // Self-closing family: size 0
-                        family_records.push(FamilyRecord {
+                        completed_records.push(FamilyRecord {
                             parent_handles: Vec::new(),
                             child_handles: Vec::new(),
                         });
@@ -204,6 +207,7 @@ pub fn count_gramps_xml(content: &str) -> Result<StatsReport, CliError> {
                     if let Some(record) = family_records.pop() {
                         let size = record.size();
                         *histogram.entry(size).or_insert(0) += 1;
+                        completed_records.push(record);
                     }
                 }
             }
@@ -231,6 +235,11 @@ pub fn count_gramps_xml(content: &str) -> Result<StatsReport, CliError> {
         .len()
         .saturating_sub(ref_handles.intersection(&all_handles).count());
     report.dangling_refs = ref_handles.len() - ref_handles.intersection(&all_handles).count();
+
+    // Build generation table
+    let (table, gen_warnings) = compute_generation_table(&completed_records, &all_handles);
+    report.family_generation_table = table;
+    report.warnings.extend(gen_warnings);
 
     Ok(report)
 }
@@ -1000,5 +1009,104 @@ mod tests {
         assert!(warnings.is_empty());
         assert_cell(&table, 2, 1, 1);
         assert_row_total(&table, 2, 1);
+    }
+
+    // ---------------------------------------------------------------------
+    // StatsReport wiring tests
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn report_default_empty_table() {
+        let report = StatsReport::default();
+        assert!(report.family_generation_table.is_empty());
+    }
+
+    #[test]
+    fn json_output_contains_generation_table() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header><created date="2025-01-01" version="5.2"/></header>
+  <people>
+    <person handle="p1"/><person handle="p2"/><person handle="p3"/>
+  </people>
+  <families>
+    <family handle="f1">
+      <father hlink="p1"/><mother hlink="p2"/>
+      <childref hlink="p3"/>
+    </family>
+  </families>
+</database>"#;
+        let report = count_gramps_xml(xml).unwrap();
+
+        // count_gramps_xml populates the table: size 3, span 2.
+        assert_cell(&report.family_generation_table, 3, 2, 1);
+        assert_row_total(&report.family_generation_table, 3, 1);
+
+        // JSON round-trip includes the new field.
+        let json = serde_json::to_string(&report).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed["family_generation_table"].is_object());
+        assert_eq!(parsed["family_generation_table"]["3"]["2"], 1);
+        assert_eq!(parsed["family_generation_table"]["3"]["total"], 1);
+
+        let back: StatsReport = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, report);
+    }
+
+    #[test]
+    fn generation_table_integration() {
+        use output::GraphXmlWriter;
+        use output::SerializationMap;
+        use typed_graph::generate::GraphBuilder;
+
+        let mut graph = typed_graph::Graph::new();
+        let mut builder = GraphBuilder::new(&mut graph);
+
+        // Alice + Bob (parents) + Charlie (child); Dana isolated.
+        let alice = builder
+            .add_person_auto()
+            .with_name("Alice", "Smith")
+            .with_gender(1)
+            .build()
+            .unwrap();
+        let bob = builder
+            .add_person_auto()
+            .with_name("Bob", "Smith")
+            .with_gender(0)
+            .build()
+            .unwrap();
+        let charlie = builder
+            .add_person_auto()
+            .with_name("Charlie", "Smith")
+            .build()
+            .unwrap();
+        let _dana = builder
+            .add_person_auto()
+            .with_name("Dana", "Smith")
+            .build()
+            .unwrap();
+
+        let _ = builder
+            .add_family_auto()
+            .with_father(&alice)
+            .with_mother(&bob)
+            .add_child_birth(&charlie)
+            .build()
+            .unwrap();
+
+        let _ = builder.into_graph();
+
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map, "5.2.0");
+        let mut buffer = Vec::new();
+        writer
+            .write(&graph, &mut std::io::BufWriter::new(&mut buffer))
+            .unwrap();
+        let xml = String::from_utf8(buffer).unwrap();
+
+        let report = count_gramps_xml(&xml).unwrap();
+        assert_eq!(report.counts.families, 1);
+        assert_cell(&report.family_generation_table, 3, 2, 1);
+        assert_row_total(&report.family_generation_table, 3, 1);
     }
 }
