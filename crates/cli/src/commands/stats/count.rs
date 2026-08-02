@@ -260,8 +260,10 @@ pub fn count_gramps_xml(content: &str) -> Result<StatsReport, CliError> {
     report.dangling_refs = ref_handles.len() - ref_handles.intersection(&all_handles).count();
 
     // Build generation table
-    let (table, gen_warnings) = compute_generation_table(&completed_records, &all_handles);
+    let (table, distribution, gen_warnings) =
+        compute_generation_table(&completed_records, &all_handles);
     report.family_group_generation_table = table;
+    report.family_group_distribution = distribution;
     report.warnings.extend(gen_warnings);
 
     Ok(report)
@@ -380,7 +382,7 @@ fn dfs_cycle<'a>(
 pub fn compute_generation_table(
     family_records: &[FamilyRecord],
     all_handles: &HashSet<String>,
-) -> (FamilyGroupGenerationTable, Vec<String>) {
+) -> (FamilyGroupGenerationTable, BTreeMap<usize, usize>, Vec<String>) {
     // Connected components via DSU over existing person handles.
     let mut dsu = Dsu::new();
     for handle in all_handles {
@@ -405,10 +407,8 @@ pub fn compute_generation_table(
 
     // Group existing handles by component root.
     let mut components: HashMap<String, Vec<String>> = HashMap::new();
-    let mut root_of: HashMap<String, String> = HashMap::new();
     for handle in all_handles {
         let root = dsu.find(handle);
-        root_of.insert(handle.clone(), root.clone());
         components.entry(root).or_default().push(handle.clone());
     }
 
@@ -485,29 +485,25 @@ pub fn compute_generation_table(
         span_by_root.insert(root.clone(), max_gen + 1);
     }
 
-    // Tabulate families by (size, span).
+    // Tabulate family groups by (size, span) and build distribution.
+    // Iterate over all components, including isolated-person components
+    // (size 1, span 1) that have zero family records.
     let mut table: FamilyGroupGenerationTable = BTreeMap::new();
-    for record in family_records {
-        let size = record.size();
-        let mut span: Option<usize> = None;
-        for h in record
-            .parent_handles
-            .iter()
-            .chain(record.child_handles.iter())
-        {
-            if let Some(root) = root_of.get(h) {
-                span = span_by_root.get(root).copied();
-                break;
-            }
-        }
-        if let Some(span) = span {
-            let row = table.entry(size.to_string()).or_default();
-            *row.entry(span.to_string()).or_insert(0) += 1;
-            *row.entry("total".to_string()).or_insert(0) += 1;
-        }
+    let mut distribution: BTreeMap<usize, usize> = BTreeMap::new();
+    for (root, component) in &components {
+        let size = component.len();
+        let span = *span_by_root.get(root).unwrap_or(&1);
+
+        // Table: one row per component by (size, span).
+        let row = table.entry(size.to_string()).or_default();
+        *row.entry(span.to_string()).or_insert(0) += 1;
+        *row.entry("total".to_string()).or_insert(0) += 1;
+
+        // Distribution: one entry per component by size.
+        *distribution.entry(size).or_insert(0) += 1;
     }
 
-    (table, warnings)
+    (table, distribution, warnings)
 }
 
 /// Read the `handle` attribute from an element.
@@ -832,7 +828,7 @@ mod tests {
     fn generation_table_empty() {
         let records: Vec<FamilyRecord> = Vec::new();
         let all: HashSet<String> = HashSet::new();
-        let (table, warnings) = compute_generation_table(&records, &all);
+        let (table, _distribution, warnings) = compute_generation_table(&records, &all);
         assert!(table.is_empty());
         assert!(warnings.is_empty());
     }
@@ -841,7 +837,7 @@ mod tests {
     fn generation_table_single_family_no_children() {
         let records = vec![rec(&["p1", "p2"], &[])];
         let all = collect_handles(&records);
-        let (table, warnings) = compute_generation_table(&records, &all);
+        let (table, _distribution, warnings) = compute_generation_table(&records, &all);
         assert!(warnings.is_empty());
         assert_cell(&table, 2, 1, 1);
         assert_row_total(&table, 2, 1);
@@ -851,7 +847,7 @@ mod tests {
     fn generation_table_single_family_with_children() {
         let records = vec![rec(&["p1", "p2"], &["p3"])];
         let all = collect_handles(&records);
-        let (table, warnings) = compute_generation_table(&records, &all);
+        let (table, _distribution, warnings) = compute_generation_table(&records, &all);
         assert!(warnings.is_empty());
         assert_cell(&table, 3, 2, 1);
         assert_row_total(&table, 3, 1);
@@ -862,11 +858,12 @@ mod tests {
         // Family A: p1+p2 → p3; Family B: p3+p4 → p5 → 3-generation component.
         let records = vec![rec(&["p1", "p2"], &["p3"]), rec(&["p3", "p4"], &["p5"])];
         let all = collect_handles(&records);
-        let (table, warnings) = compute_generation_table(&records, &all);
+        let (table, distribution, warnings) = compute_generation_table(&records, &all);
         assert!(warnings.is_empty());
-        // Both families have 3 members and sit in a 3-generation component.
-        assert_cell(&table, 3, 3, 2);
-        assert_row_total(&table, 3, 2);
+        // Both families collapse into a single 5-person, 3-generation component.
+        assert_cell(&table, 5, 3, 1);
+        assert_row_total(&table, 5, 1);
+        assert_eq!(distribution.get(&5), Some(&1));
     }
 
     #[test]
@@ -877,13 +874,13 @@ mod tests {
             rec(&["p3", "p5"], &["p6"]),
         ];
         let all = collect_handles(&records);
-        let (table, warnings) = compute_generation_table(&records, &all);
+        let (table, distribution, warnings) = compute_generation_table(&records, &all);
         assert!(warnings.is_empty());
         // Gens: p1,p2,p5 = 0; p3,p4 = 1; p6 = 2 → span 3.
-        assert_cell(&table, 4, 3, 1); // family A: 4 members
-        assert_cell(&table, 3, 3, 1); // family B: 3 members
-        assert_row_total(&table, 4, 1);
-        assert_row_total(&table, 3, 1);
+        // Single component of 6 people (p1..p6).
+        assert_cell(&table, 6, 3, 1);
+        assert_row_total(&table, 6, 1);
+        assert_eq!(distribution.get(&6), Some(&1));
     }
 
     #[test]
@@ -895,18 +892,23 @@ mod tests {
             rec(&["p5", "p6"], &["p7"]),
         ];
         let all = collect_handles(&records);
-        let (table, warnings) = compute_generation_table(&records, &all);
+        let (table, distribution, warnings) = compute_generation_table(&records, &all);
         assert!(warnings.is_empty());
-        assert_cell(&table, 3, 4, 3);
-        assert_row_total(&table, 3, 3);
+        // All 7 people form a single 4-generation component.
+        assert_cell(&table, 7, 4, 1);
+        assert_row_total(&table, 7, 1);
+        assert_eq!(distribution.get(&7), Some(&1));
     }
 
     #[test]
     fn generation_table_isolated_person() {
         let records: Vec<FamilyRecord> = Vec::new();
         let all: HashSet<String> = HashSet::from(["p1".to_string()]);
-        let (table, warnings) = compute_generation_table(&records, &all);
-        assert!(table.is_empty());
+        let (table, distribution, warnings) = compute_generation_table(&records, &all);
+        // An isolated person is a size-1, span-1 family group.
+        assert_cell(&table, 1, 1, 1);
+        assert_row_total(&table, 1, 1);
+        assert_eq!(distribution.get(&1), Some(&1));
         assert!(warnings.is_empty());
     }
 
@@ -917,7 +919,7 @@ mod tests {
             rec(&["p4", "p5"], &[]),     // size 2, span 1
         ];
         let all = collect_handles(&records);
-        let (table, warnings) = compute_generation_table(&records, &all);
+        let (table, _distribution, warnings) = compute_generation_table(&records, &all);
         assert!(warnings.is_empty());
         assert_cell(&table, 3, 2, 1);
         assert_cell(&table, 2, 1, 1);
@@ -935,13 +937,12 @@ mod tests {
             rec(&["c1", "c2"], &["z"]),
         ];
         let all = collect_handles(&records);
-        let (table, warnings) = compute_generation_table(&records, &all);
+        let (table, distribution, warnings) = compute_generation_table(&records, &all);
         assert!(warnings.is_empty());
-        // All families share the 4-generation component.
-        assert_cell(&table, 4, 4, 1); // grandparent family
-        assert_cell(&table, 3, 4, 3); // three 3-person families
-        assert_row_total(&table, 4, 1);
-        assert_row_total(&table, 3, 3);
+        // All 9 people form one 4-generation component.
+        assert_cell(&table, 9, 4, 1);
+        assert_row_total(&table, 9, 1);
+        assert_eq!(distribution.get(&9), Some(&1));
     }
 
     #[test]
@@ -949,7 +950,7 @@ mod tests {
         // Artificial cycle: p1 → p2 → p1.
         let records = vec![rec(&["p1"], &["p2"]), rec(&["p2"], &["p1"])];
         let all = collect_handles(&records);
-        let (table, warnings) = compute_generation_table(&records, &all);
+        let (table, _distribution, warnings) = compute_generation_table(&records, &all);
         assert_eq!(warnings.len(), 1);
         assert!(
             warnings[0].contains("cycle"),
@@ -971,9 +972,9 @@ mod tests {
                 );
             }
         }
-        // Both 2-person families land in the cyclic component.
-        assert_cell(&table, 2, MAX_GENERATION + 1, 2);
-        assert_row_total(&table, 2, 2);
+        // Single 2-person component in the cyclic component.
+        assert_cell(&table, 2, MAX_GENERATION + 1, 1);
+        assert_row_total(&table, 2, 1);
     }
 
     #[test]
@@ -981,18 +982,19 @@ mod tests {
         // p1 is a parent in two families.
         let records = vec![rec(&["p1", "p2"], &["p3"]), rec(&["p1", "p4"], &["p5"])];
         let all = collect_handles(&records);
-        let (table, warnings) = compute_generation_table(&records, &all);
+        let (table, distribution, warnings) = compute_generation_table(&records, &all);
         assert!(warnings.is_empty());
-        // Both families are 3-person families in the same 2-generation component.
-        assert_cell(&table, 3, 2, 2);
-        assert_row_total(&table, 3, 2);
+        // Both families collapse into a single 5-person, 2-generation component.
+        assert_cell(&table, 5, 2, 1);
+        assert_row_total(&table, 5, 1);
+        assert_eq!(distribution.get(&5), Some(&1));
     }
 
     #[test]
     fn generation_table_single_parent_family() {
         let records = vec![rec(&["p1"], &["p2"])];
         let all = collect_handles(&records);
-        let (table, warnings) = compute_generation_table(&records, &all);
+        let (table, _distribution, warnings) = compute_generation_table(&records, &all);
         assert!(warnings.is_empty());
         // p1 gen 0, p2 gen 1 → span 2, size 2.
         assert_cell(&table, 2, 2, 1);
@@ -1003,7 +1005,7 @@ mod tests {
     fn generation_table_child_only_family() {
         let records = vec![rec(&[], &["p1", "p2"])];
         let all = collect_handles(&records);
-        let (table, warnings) = compute_generation_table(&records, &all);
+        let (table, _distribution, warnings) = compute_generation_table(&records, &all);
         assert!(warnings.is_empty());
         // No parents → both gen 0 → span 1, size 2.
         assert_cell(&table, 2, 1, 1);
@@ -1014,7 +1016,7 @@ mod tests {
     fn generation_table_single_member_family() {
         let records = vec![rec(&["p1"], &[])];
         let all = collect_handles(&records);
-        let (table, warnings) = compute_generation_table(&records, &all);
+        let (table, _distribution, warnings) = compute_generation_table(&records, &all);
         assert!(warnings.is_empty());
         // One parent, no children → size 1, span 1.
         assert_cell(&table, 1, 1, 1);
@@ -1023,15 +1025,16 @@ mod tests {
 
     #[test]
     fn generation_table_dangling_refs_skipped() {
-        // p2 is dangling (not in all_handles); family size still counts it,
-        // but the component is built from p1 only → span 1.
+        // p2 is dangling (not in all_handles); the component is built from
+        // p1 only → a size-1, span-1 family group.
         let records = vec![rec(&["p1", "p2"], &[])];
         let mut all = collect_handles(&records);
         all.remove("p2");
-        let (table, warnings) = compute_generation_table(&records, &all);
+        let (table, distribution, warnings) = compute_generation_table(&records, &all);
         assert!(warnings.is_empty());
-        assert_cell(&table, 2, 1, 1);
-        assert_row_total(&table, 2, 1);
+        assert_cell(&table, 1, 1, 1);
+        assert_row_total(&table, 1, 1);
+        assert_eq!(distribution.get(&1), Some(&1));
     }
 
     // ---------------------------------------------------------------------
