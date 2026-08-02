@@ -1,0 +1,275 @@
+//! Integration tests for the visualize crate.
+//!
+//! Tests the full pipeline from `.gramps` XML files to `GraphData`
+//! via `visualize::load_graph_data`, covering round-trips, edge cases,
+//! and error handling.
+
+use std::io::Write;
+use tempfile::NamedTempFile;
+
+/// Helper: write content to a temp file, rename to `.gramps`, return path.
+fn write_gramps_file(content: &str) -> std::path::PathBuf {
+    let mut tmp = NamedTempFile::new().unwrap();
+    write!(tmp, "{}", content).unwrap();
+    let path = tmp.path().with_extension("gramps");
+    std::fs::rename(tmp.path(), &path).unwrap();
+    path
+}
+
+// ---------------------------------------------------------------------------
+// Valid round-trip
+// ---------------------------------------------------------------------------
+
+#[test]
+fn round_trip_simple_family() {
+    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <people>
+    <person handle="p1"><gender>M</gender><name><first>John</first><surname>Smith</surname></name><birth><dateval val="1850-03-15"/></birth></person>
+    <person handle="p2"><gender>F</gender><name><first>Jane</first><surname>Smith</surname></name><birth><dateval val="1855-06-01"/></birth></person>
+    <person handle="p3"><gender>M</gender><name><first>Jim</first><surname>Smith</surname></name></person>
+  </people>
+  <families>
+    <family handle="f1"><father hlink="p1"/><mother hlink="p2"/><childref hlink="p3"/></family>
+  </families>
+</database>"#;
+
+    let path = write_gramps_file(xml);
+    let gd = visualize::load_graph_data(path.to_str().unwrap(), false, 25).unwrap();
+
+    // Shape: 3 people, 1 spouse link + 2 parent-child links = 3 links, 1 family group
+    assert_eq!(gd.nodes.len(), 3, "expected 3 nodes");
+    assert_eq!(
+        gd.links.len(),
+        3,
+        "expected 3 links (1 spouse + 2 parent-child)"
+    );
+    assert_eq!(gd.family_groups.len(), 1, "expected 1 family group");
+
+    // Verify node fields exist
+    let p1 = gd.nodes.iter().find(|n| n.handle == "p1").unwrap();
+    assert_eq!(p1.name, "John Smith");
+    assert_eq!(p1.gender, "male");
+    assert_eq!(p1.birth_year, Some(1850));
+    assert!(!p1.is_imputed);
+
+    // Serialize to JSON and verify basic shape
+    let json = serde_json::to_string(&gd).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert!(parsed.get("nodes").unwrap().is_array());
+    assert!(parsed.get("links").unwrap().is_array());
+    assert!(parsed.get("family_groups").unwrap().is_array());
+
+    // Check that JSON node has all expected fields
+    let first_node = &parsed["nodes"][0];
+    assert!(first_node.get("handle").unwrap().is_string());
+    assert!(first_node.get("name").unwrap().is_string());
+    assert!(first_node.get("gender").unwrap().is_string());
+    // birth_year is a number or null
+    assert!(
+        first_node.get("birth_year").unwrap().is_number()
+            || first_node.get("birth_year").unwrap().is_null()
+    );
+    // is_imputed is a boolean
+    assert!(first_node.get("is_imputed").unwrap().is_boolean());
+
+    // Check JSON link has expected fields
+    let first_link = &parsed["links"][0];
+    assert!(first_link.get("source").unwrap().is_string());
+    assert!(first_link.get("target").unwrap().is_string());
+    assert!(first_link.get("link_type").unwrap().is_string());
+}
+
+// ---------------------------------------------------------------------------
+// Empty file
+// ---------------------------------------------------------------------------
+
+#[test]
+fn empty_file_returns_error() {
+    let path = write_gramps_file("");
+    let result = visualize::load_graph_data(path.to_str().unwrap(), false, 25);
+    match result {
+        Err(msg) => assert!(msg.contains("No people found"), "got: {}", msg),
+        Ok(_) => panic!("expected error for empty file"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// File with no people section
+// ---------------------------------------------------------------------------
+
+#[test]
+fn file_without_people_returns_error() {
+    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <tags>
+    <tag handle="t1" name="Bookmark"/>
+  </tags>
+</database>"#;
+    let path = write_gramps_file(xml);
+    let result = visualize::load_graph_data(path.to_str().unwrap(), false, 25);
+    match result {
+        Err(msg) => assert!(msg.contains("No people found"), "got: {}", msg),
+        Ok(_) => panic!("expected error for file without people"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Malformed XML
+// ---------------------------------------------------------------------------
+
+#[test]
+fn malformed_xml_returns_error() {
+    let path = write_gramps_file("<database><person handle=p1></database>");
+    let result = visualize::load_graph_data(path.to_str().unwrap(), false, 25);
+    match result {
+        Err(msg) => assert!(msg.contains("Gramps XML"), "got: {}", msg),
+        Ok(_) => panic!("expected error for malformed XML"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Missing file
+// ---------------------------------------------------------------------------
+
+#[test]
+fn missing_file_returns_error() {
+    let result = visualize::load_graph_data("/nonexistent/path.gramps", false, 25);
+    match result {
+        Err(msg) => assert!(msg.contains("Cannot read file"), "got: {}", msg),
+        Ok(_) => panic!("expected error for missing file"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Cycles in family graph
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cycles_produce_valid_capped_generations() {
+    // Create a cycle: p1 is father of p2, p2 is father of p1 → impossible but
+    // we test that the generator handles it gracefully (capped at MAX_GENERATION).
+    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <people>
+    <person handle="p1"><gender>M</gender><name><first>Alice</first><surname>A</surname></name><birth><dateval val="1900"/></birth></person>
+    <person handle="p2"><gender>M</gender><name><first>Bob</first><surname>B</surname></name></person>
+  </people>
+  <families>
+    <family handle="f1"><father hlink="p1"/><childref hlink="p2"/></family>
+    <family handle="f2"><father hlink="p2"/><childref hlink="p1"/></family>
+  </families>
+</database>"#;
+
+    let path = write_gramps_file(xml);
+    // Should not panic — generations are capped at MAX_GENERATION
+    let gd = visualize::load_graph_data(path.to_str().unwrap(), false, 25).unwrap();
+    assert_eq!(gd.nodes.len(), 2);
+    // Both nodes should have valid generations (0 or capped)
+    for node in &gd.nodes {
+        assert!(
+            node.generation <= gramps_reader::MAX_GENERATION,
+            "generation {} exceeds MAX_GENERATION {}",
+            node.generation,
+            gramps_reader::MAX_GENERATION
+        );
+    }
+    // Should have a single family group
+    assert_eq!(gd.family_groups.len(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// Large family with multiple components
+// ---------------------------------------------------------------------------
+
+#[test]
+fn multi_component_family() {
+    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <people>
+    <person handle="p1"><gender>M</gender><name><first>G1</first><surname>A</surname></name><birth><dateval val="1800"/></birth></person>
+    <person handle="p2"><gender>F</gender><name><first>G1</first><surname>B</surname></name><birth><dateval val="1805"/></birth></person>
+    <person handle="p3"><gender>M</gender><name><first>G1</first><surname>C</surname></name><birth><dateval val="1830"/></birth></person>
+    <person handle="p4"><gender>M</gender><name><first>G2</first><surname>D</surname></name><birth><dateval val="1900"/></birth></person>
+    <person handle="p5"><gender>F</gender><name><first>G2</first><surname>E</surname></name><birth><dateval val="1905"/></birth></person>
+  </people>
+  <families>
+    <family handle="f1"><father hlink="p1"/><mother hlink="p2"/><childref hlink="p3"/></family>
+    <family handle="f2"><father hlink="p4"/><mother hlink="p5"/></family>
+  </families>
+</database>"#;
+
+    let path = write_gramps_file(xml);
+    let gd = visualize::load_graph_data(path.to_str().unwrap(), false, 25).unwrap();
+
+    // 5 people, 2 family groups
+    assert_eq!(gd.nodes.len(), 5);
+    assert_eq!(
+        gd.family_groups.len(),
+        2,
+        "expected 2 disconnected components"
+    );
+
+    // Group 0: p1, p2, p3 (3 people, span 2 — gen 0 → gen 1)
+    let g0 = gd.family_groups.iter().find(|g| g.id == 0).unwrap();
+    assert_eq!(g0.size, 3);
+    assert_eq!(g0.span, 2);
+
+    // Group 1: p4, p5 (2 people, span 1 — both parents at gen 0)
+    let g1 = gd.family_groups.iter().find(|g| g.id == 1).unwrap();
+    assert_eq!(g1.size, 2);
+    assert_eq!(g1.span, 1);
+}
+
+// ---------------------------------------------------------------------------
+// No impute mode
+// ---------------------------------------------------------------------------
+
+#[test]
+fn no_impute_skips_date_imputation() {
+    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <people>
+    <person handle="p1"><gender>M</gender><name><first>John</first><surname>S</surname></name><birth><dateval val="1850"/></birth></person>
+    <person handle="p2"><gender>M</gender><name><first>Jim</first><surname>S</surname></name></person>
+  </people>
+  <families>
+    <family handle="f1"><father hlink="p1"/><childref hlink="p2"/></family>
+  </families>
+</database>"#;
+
+    let path = write_gramps_file(xml);
+    let gd = visualize::load_graph_data(path.to_str().unwrap(), true, 25).unwrap();
+    // p2 (Jim) should have no birth_year and is_imputed = false
+    let p2 = gd.nodes.iter().find(|n| n.handle == "p2").unwrap();
+    assert!(
+        p2.birth_year.is_none(),
+        "no_impute: birth_year should be None, got {:?}",
+        p2.birth_year
+    );
+    assert!(!p2.is_imputed, "no_impute: is_imputed should be false");
+}
+
+// ---------------------------------------------------------------------------
+// Custom generation gap
+// ---------------------------------------------------------------------------
+
+#[test]
+fn custom_generation_gap_affects_imputation() {
+    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <people>
+    <person handle="p1"><gender>M</gender><name><first>John</first><surname>S</surname></name><birth><dateval val="1850"/></birth></person>
+    <person handle="p2"><gender>M</gender><name><first>Jim</first><surname>S</surname></name></person>
+  </people>
+  <families>
+    <family handle="f1"><father hlink="p1"/><childref hlink="p2"/></family>
+  </families>
+</database>"#;
+
+    let path = write_gramps_file(xml);
+    // 50-year gap: p2's imputed birth year = 1850 + 50 = 1900
+    let gd = visualize::load_graph_data(path.to_str().unwrap(), false, 50).unwrap();
+    let p2 = gd.nodes.iter().find(|n| n.handle == "p2").unwrap();
+    assert_eq!(p2.birth_year, Some(1900), "custom gap 50 should give 1900");
+}
