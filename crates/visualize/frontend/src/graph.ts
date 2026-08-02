@@ -3,6 +3,12 @@
 
 import * as d3 from 'd3';
 import type { GraphData } from './types';
+import {
+  buildColorScale,
+  getNodeColor,
+  getNodeStrokeDash,
+  getNodeOpacity,
+} from './colors';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -139,6 +145,7 @@ export function renderGraph(
   let nodeGroup: d3.Selection<SVGGElement, SimNode, SVGGElement, unknown>;
   let linkGroup: d3.Selection<SVGLineElement, SimLink, SVGGElement, unknown>;
   let simulation: d3.Simulation<SimNode, undefined>;
+  let colorScale = buildColorScale([]);
 
   // --- SVG scaffold ---
   const width = containerElement.clientWidth || 960;
@@ -232,6 +239,14 @@ export function renderGraph(
       .attr('stroke', '#fff')
       .attr('stroke-width', 1.5);
 
+    // Apply colors to all circles (enter + update)
+    nodeGroup.each(function (d: SimNode) {
+      const circle = d3.select(this).select('circle');
+      circle.attr('fill', getNodeColor(d.birth_year, colorScale));
+      circle.attr('stroke-dasharray', getNodeStrokeDash(d.is_imputed));
+      circle.attr('opacity', getNodeOpacity(d.is_imputed));
+    });
+
     nodeEnter
       .append('text')
       .text((d: SimNode) => d.name)
@@ -294,11 +309,16 @@ export function renderGraph(
         'stroke-width',
         isSelected ? SELECTED_STROKE_WIDTH : 1.5,
       );
+      // Ensure fill/stroke-dasharray/opacity stay correct (no overlapped deselection)
+      el.select('circle').attr('fill', getNodeColor(d.birth_year, colorScale));
+      el.select('circle').attr('stroke-dasharray', getNodeStrokeDash(d.is_imputed));
+      el.select('circle').attr('opacity', getNodeOpacity(d.is_imputed));
     });
   }
 
   // ---- build data ----
   simNodes = buildSimNodes(data);
+  colorScale = buildColorScale(simNodes.map((n: SimNode) => n.birth_year));
   const nodeMap = new Map(simNodes.map((n: SimNode) => [n.handle, n]));
   simLinks = buildSimLinks(data, nodeMap);
   restartSimulation();
@@ -307,6 +327,7 @@ export function renderGraph(
   const controller: GraphController = {
     updateData(newData: GraphData) {
       simNodes = buildSimNodes(newData);
+      colorScale = buildColorScale(simNodes.map((n: SimNode) => n.birth_year));
       const nm = new Map(simNodes.map((n: SimNode) => [n.handle, n]));
       simLinks = buildSimLinks(newData, nm);
       highlighted = new Set();
