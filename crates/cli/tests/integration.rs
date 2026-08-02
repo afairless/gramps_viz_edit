@@ -634,16 +634,34 @@ fn stats_count_known_graph() {
     assert_eq!(report.people_not_in_family, 1);
     assert_eq!(report.dangling_refs, 0);
 
-    // Generation table: size 3, span 2 (parents gen 0, child gen 1)
+    // Generation table: family groups (connected components)
+    // - Alice, Bob, Charlie form one family group: size 3, span 2
+    //   (parents gen 0, child gen 1)
+    // - Dana is an isolated family group: size 1, span 1
     let table = &report.family_group_generation_table;
     assert_eq!(
         table.get("3").and_then(|r| r.get("2")),
         Some(&1),
-        "Expected 1 family of size 3 with span 2"
+        "Expected 1 family group of size 3 with span 2"
     );
     assert_eq!(
         table.get("3").and_then(|r| r.get("total")),
         Some(&1),
-        "Expected row total 1"
+        "Expected row total 1 for size 3"
     );
+    assert_eq!(
+        table.get("1").and_then(|r| r.get("1")),
+        Some(&1),
+        "Expected 1 family group of size 1 with span 1 (isolated Dana)"
+    );
+    assert_eq!(
+        table.get("1").and_then(|r| r.get("total")),
+        Some(&1),
+        "Expected row total 1 for size 1"
+    );
+
+    // Family group distribution: one group of 3 people, one group of 1 person
+    assert_eq!(report.family_group_distribution.len(), 2);
+    assert_eq!(report.family_group_distribution.get(&3), Some(&1));
+    assert_eq!(report.family_group_distribution.get(&1), Some(&1));
 }
