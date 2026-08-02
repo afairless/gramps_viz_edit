@@ -544,8 +544,8 @@ fn e2e_stats_json_output() {
         "Should have family_size_distribution"
     );
     assert!(
-        parsed["family_generation_table"].is_object(),
-        "Should have family_generation_table"
+        parsed["family_group_generation_table"].is_object(),
+        "Should have family_group_generation_table"
     );
     assert!(
         parsed["people_not_in_family"].is_i64(),

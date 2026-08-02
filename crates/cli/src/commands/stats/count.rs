@@ -36,28 +36,51 @@ impl FamilyRecord {
     }
 }
 
-/// Cross-classification of nuclear families by size and generation span.
+/// Cross-classification of family groups (connected components of the person
+/// graph) by size and generation span.
 ///
-/// The outer map key is family size (as a string), the inner map key is the
-/// generation span (as a string) plus `"total"` for the row marginal. This
+/// A family group is a connected component of the person graph — all people
+/// linked by any family relationship (parent, child, marriage). A family group
+/// may contain one or more Gramps `<family>` elements, or none at all (an
+/// isolated person).
+///
+/// The outer map key is family-group size (as a string), the inner map key is
+/// the generation span (as a string) plus `"total"` for the row marginal. This
 /// shape serializes directly to JSON:
 ///
 /// ```json
 /// { "3": { "2": 1, "total": 1 } }
 /// ```
-pub type FamilyGenerationTable = BTreeMap<String, BTreeMap<String, usize>>;
+pub type FamilyGroupGenerationTable = BTreeMap<String, BTreeMap<String, usize>>;
 
 /// Statistics collected from a single `.gramps` XML document.
+///
+/// # Gramps families vs. family groups
+///
+/// Throughout this report, two related but distinct concepts share the word
+/// "family":
+///
+/// - **Gramps families** — nuclear families represented by `<family>` XML
+///   elements (parents + children). Counted by `family_size_distribution`.
+/// - **Family groups** — connected components of the person graph, built by
+///   linking people across all `<family>` elements. Tabulated by
+///   `family_group_generation_table` and `family_group_distribution`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct StatsReport {
     /// Path of the analyzed file (filled in by the CLI).
     pub file: String,
     /// Counts per primary object type.
     pub counts: PrimaryTypeCounts,
-    /// Family size → number of families, ascending by size.
+    /// Gramps-family size → number of families, ascending by size.
+    /// Counts `<family>` XML elements by nuclear-family size.
     pub family_size_distribution: BTreeMap<usize, usize>,
-    /// Family-size × generation-span contingency table.
-    pub family_generation_table: FamilyGenerationTable,
+    /// Family-group-size × generation-span contingency table.
+    /// Each row is a connected component (family group) of the person graph.
+    pub family_group_generation_table: FamilyGroupGenerationTable,
+    /// Family-group size → number of groups (connected components).
+    /// Populated during the same component iteration that builds the
+    /// generation table.
+    pub family_group_distribution: BTreeMap<usize, usize>,
     /// People whose handle never appears in any family.
     pub people_not_in_family: usize,
     /// Family `ref` handles without a matching `<person>`.
@@ -238,7 +261,7 @@ pub fn count_gramps_xml(content: &str) -> Result<StatsReport, CliError> {
 
     // Build generation table
     let (table, gen_warnings) = compute_generation_table(&completed_records, &all_handles);
-    report.family_generation_table = table;
+    report.family_group_generation_table = table;
     report.warnings.extend(gen_warnings);
 
     Ok(report)
@@ -346,18 +369,18 @@ fn dfs_cycle<'a>(
     false
 }
 
-/// Compute the family-size × generation-span contingency table.
+/// Compute the family-group-size × generation-span contingency table.
 ///
 /// Returns `(table, warnings)`. Each row of the table maps a generation span
-/// to a family count plus a `"total"` marginal. Connected components are
-/// built over person handles that exist in `all_handles`; dangling references
-/// (family refs without a matching `<person>` element) are skipped, so a
-/// family's generation span reflects only its existing-person subset. Cycle
-/// warnings are appended to `warnings`.
+/// to a family-group count plus a `"total"` marginal. Connected components
+/// are built over person handles that exist in `all_handles`; dangling
+/// references (family refs without a matching `<person>` element) are
+/// skipped, so a family group's generation span reflects only its
+/// existing-person subset. Cycle warnings are appended to `warnings`.
 pub fn compute_generation_table(
     family_records: &[FamilyRecord],
     all_handles: &HashSet<String>,
-) -> (FamilyGenerationTable, Vec<String>) {
+) -> (FamilyGroupGenerationTable, Vec<String>) {
     // Connected components via DSU over existing person handles.
     let mut dsu = Dsu::new();
     for handle in all_handles {
@@ -463,7 +486,7 @@ pub fn compute_generation_table(
     }
 
     // Tabulate families by (size, span).
-    let mut table: FamilyGenerationTable = BTreeMap::new();
+    let mut table: FamilyGroupGenerationTable = BTreeMap::new();
     for record in family_records {
         let size = record.size();
         let mut span: Option<usize> = None;
@@ -791,7 +814,7 @@ mod tests {
         all
     }
 
-    fn assert_cell(table: &FamilyGenerationTable, size: usize, span: usize, count: usize) {
+    fn assert_cell(table: &FamilyGroupGenerationTable, size: usize, span: usize, count: usize) {
         let row = table.get(&size.to_string()).expect("row exists");
         assert_eq!(
             row.get(&span.to_string()),
@@ -800,7 +823,7 @@ mod tests {
         );
     }
 
-    fn assert_row_total(table: &FamilyGenerationTable, size: usize, total: usize) {
+    fn assert_row_total(table: &FamilyGroupGenerationTable, size: usize, total: usize) {
         let row = table.get(&size.to_string()).expect("row exists");
         assert_eq!(row.get("total"), Some(&total), "row total size={size}");
     }
@@ -1018,7 +1041,7 @@ mod tests {
     #[test]
     fn report_default_empty_table() {
         let report = StatsReport::default();
-        assert!(report.family_generation_table.is_empty());
+        assert!(report.family_group_generation_table.is_empty());
     }
 
     #[test]
@@ -1039,15 +1062,15 @@ mod tests {
         let report = count_gramps_xml(xml).unwrap();
 
         // count_gramps_xml populates the table: size 3, span 2.
-        assert_cell(&report.family_generation_table, 3, 2, 1);
-        assert_row_total(&report.family_generation_table, 3, 1);
+        assert_cell(&report.family_group_generation_table, 3, 2, 1);
+        assert_row_total(&report.family_group_generation_table, 3, 1);
 
         // JSON round-trip includes the new field.
         let json = serde_json::to_string(&report).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert!(parsed["family_generation_table"].is_object());
-        assert_eq!(parsed["family_generation_table"]["3"]["2"], 1);
-        assert_eq!(parsed["family_generation_table"]["3"]["total"], 1);
+        assert!(parsed["family_group_generation_table"].is_object());
+        assert_eq!(parsed["family_group_generation_table"]["3"]["2"], 1);
+        assert_eq!(parsed["family_group_generation_table"]["3"]["total"], 1);
 
         let back: StatsReport = serde_json::from_str(&json).unwrap();
         assert_eq!(back, report);
@@ -1106,7 +1129,7 @@ mod tests {
 
         let report = count_gramps_xml(&xml).unwrap();
         assert_eq!(report.counts.families, 1);
-        assert_cell(&report.family_generation_table, 3, 2, 1);
-        assert_row_total(&report.family_generation_table, 3, 1);
+        assert_cell(&report.family_group_generation_table, 3, 2, 1);
+        assert_row_total(&report.family_group_generation_table, 3, 1);
     }
 }

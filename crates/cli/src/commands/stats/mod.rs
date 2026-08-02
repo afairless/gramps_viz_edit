@@ -10,7 +10,7 @@ pub mod count;
 
 use crate::error::CliError;
 use clap::Args;
-use count::{count_gramps_xml, FamilyGenerationTable, StatsReport};
+use count::{count_gramps_xml, FamilyGroupGenerationTable, StatsReport};
 
 /// Arguments for the `stats` subcommand.
 #[derive(Args, Clone, Debug)]
@@ -105,10 +105,10 @@ fn format_text_report(report: &StatsReport, no_unicode: bool) -> String {
     out.push('\n');
     if no_unicode {
         out.push_str(&render_generation_table_ascii(
-            &report.family_generation_table,
+            &report.family_group_generation_table,
         ));
     } else {
-        out.push_str(&render_generation_table(&report.family_generation_table));
+        out.push_str(&render_generation_table(&report.family_group_generation_table));
     }
 
     // People not in family / dangling refs
@@ -134,19 +134,19 @@ fn format_text_report(report: &StatsReport, no_unicode: bool) -> String {
 
 /// Render the family-size × generation-span contingency table using
 /// Unicode box-drawing characters.
-fn render_generation_table(table: &FamilyGenerationTable) -> String {
+fn render_generation_table(table: &FamilyGroupGenerationTable) -> String {
     render_generation_table_inner(table, true)
 }
 
 /// Render the family-size × generation-span contingency table using
 /// pure ASCII characters.
-fn render_generation_table_ascii(table: &FamilyGenerationTable) -> String {
+fn render_generation_table_ascii(table: &FamilyGroupGenerationTable) -> String {
     render_generation_table_inner(table, false)
 }
 
 /// Shared table renderer. `unicode` selects box-drawing characters;
 /// ASCII mode falls back to `|`, `-`, `+`.
-fn render_generation_table_inner(table: &FamilyGenerationTable, unicode: bool) -> String {
+fn render_generation_table_inner(table: &FamilyGroupGenerationTable, unicode: bool) -> String {
     let (vline, hline, cross, title) = if unicode {
         ("│", "─", "┼", "Family size × generation table")
     } else {
@@ -380,7 +380,8 @@ mod tests {
                 tags: 2,
             },
             family_size_distribution: BTreeMap::from([(1, 1), (2, 2), (3, 5), (4, 2)]),
-            family_generation_table: BTreeMap::new(),
+            family_group_generation_table: BTreeMap::new(),
+            family_group_distribution: BTreeMap::new(),
             people_not_in_family: 8,
             dangling_refs: 0,
             warnings: vec![],
@@ -417,7 +418,8 @@ mod tests {
             file: "test.gramps".to_string(),
             counts: PrimaryTypeCounts::default(),
             family_size_distribution: dist,
-            family_generation_table: BTreeMap::new(),
+            family_group_generation_table: BTreeMap::new(),
+            family_group_distribution: BTreeMap::new(),
             people_not_in_family: 5,
             dangling_refs: 1,
             warnings: vec![],
@@ -446,7 +448,8 @@ mod tests {
                 tags: 1,
             },
             family_size_distribution: BTreeMap::from([(0, 1), (2, 1), (4, 1)]),
-            family_generation_table: BTreeMap::new(),
+            family_group_generation_table: BTreeMap::new(),
+            family_group_distribution: BTreeMap::new(),
             people_not_in_family: 3,
             dangling_refs: 0,
             warnings: vec![],
@@ -467,7 +470,8 @@ mod tests {
                 ..PrimaryTypeCounts::default()
             },
             family_size_distribution: BTreeMap::from([(2, 1)]),
-            family_generation_table: BTreeMap::new(),
+            family_group_generation_table: BTreeMap::new(),
+            family_group_distribution: BTreeMap::new(),
             people_not_in_family: 2,
             dangling_refs: 0,
             warnings: vec!["a warning".to_string()],
@@ -487,7 +491,7 @@ mod tests {
 
     #[test]
     fn render_generation_table_empty() {
-        let table: FamilyGenerationTable = BTreeMap::new();
+        let table: FamilyGroupGenerationTable = BTreeMap::new();
         let text = render_generation_table(&table);
         assert!(text.contains("Family size × generation table"));
         assert!(text.contains("(no data)"));
@@ -495,7 +499,7 @@ mod tests {
 
     #[test]
     fn render_generation_table_single_row() {
-        let table: FamilyGenerationTable = BTreeMap::from([(
+        let table: FamilyGroupGenerationTable = BTreeMap::from([(
             "2".to_string(),
             BTreeMap::from([("1".to_string(), 3), ("total".to_string(), 3)]),
         )]);
@@ -509,7 +513,7 @@ mod tests {
 
     #[test]
     fn render_generation_table_multi_row() {
-        let mut table: FamilyGenerationTable = BTreeMap::new();
+        let mut table: FamilyGroupGenerationTable = BTreeMap::new();
         table.insert(
             "1".to_string(),
             BTreeMap::from([
@@ -555,7 +559,7 @@ mod tests {
 
     #[test]
     fn render_generation_table_unicode_ascii() {
-        let mut table: FamilyGenerationTable = BTreeMap::new();
+        let mut table: FamilyGroupGenerationTable = BTreeMap::new();
         table.insert(
             "2".to_string(),
             BTreeMap::from([("1".to_string(), 3), ("total".to_string(), 3)]),
@@ -575,7 +579,7 @@ mod tests {
 
     #[test]
     fn format_text_report_contains_generation_table_section() {
-        let mut table: FamilyGenerationTable = BTreeMap::new();
+        let mut table: FamilyGroupGenerationTable = BTreeMap::new();
         table.insert(
             "3".to_string(),
             BTreeMap::from([("2".to_string(), 1), ("total".to_string(), 1)]),
@@ -587,7 +591,8 @@ mod tests {
                 ..PrimaryTypeCounts::default()
             },
             family_size_distribution: BTreeMap::from([(3, 1)]),
-            family_generation_table: table,
+            family_group_generation_table: table,
+            family_group_distribution: BTreeMap::new(),
             people_not_in_family: 0,
             dangling_refs: 0,
             warnings: vec![],
@@ -611,7 +616,8 @@ mod tests {
             file: "test.gramps".to_string(),
             counts: PrimaryTypeCounts::default(),
             family_size_distribution: BTreeMap::new(),
-            family_generation_table: BTreeMap::new(),
+            family_group_generation_table: BTreeMap::new(),
+            family_group_distribution: BTreeMap::new(),
             people_not_in_family: 0,
             dangling_refs: 0,
             warnings: vec![

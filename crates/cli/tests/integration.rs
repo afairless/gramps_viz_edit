@@ -635,7 +635,7 @@ fn stats_count_known_graph() {
     assert_eq!(report.dangling_refs, 0);
 
     // Generation table: size 3, span 2 (parents gen 0, child gen 1)
-    let table = &report.family_generation_table;
+    let table = &report.family_group_generation_table;
     assert_eq!(
         table.get("3").and_then(|r| r.get("2")),
         Some(&1),
