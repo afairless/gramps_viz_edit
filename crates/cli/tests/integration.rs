@@ -548,3 +548,74 @@ fn generate_depth_4_produces_deep_tree() {
     let errors = result.graph.validate(&schema);
     assert!(errors.is_empty(), "Validation errors: {:?}", errors);
 }
+
+/// Integration test: count_gramps_xml on a known graph through serialization.
+#[test]
+fn stats_count_known_graph() {
+    use std::io::BufWriter;
+    use cli::commands::stats::count::count_gramps_xml;
+    use output::GraphXmlWriter;
+    use output::SerializationMap;
+    use typed_graph::generate::GraphBuilder;
+
+    let mut graph = typed_graph::Graph::new();
+    let mut builder = GraphBuilder::new(&mut graph);
+
+    // Build a small family: Alice + Bob + child Charlie, plus isolated Dana
+    let alice = builder
+        .add_person_auto()
+        .with_name("Alice", "Smith")
+        .with_gender(1)
+        .build()
+        .unwrap();
+    let bob = builder
+        .add_person_auto()
+        .with_name("Bob", "Smith")
+        .with_gender(0)
+        .build()
+        .unwrap();
+    let charlie = builder
+        .add_person_auto()
+        .with_name("Charlie", "Smith")
+        .build()
+        .unwrap();
+    let _dana = builder
+        .add_person_auto()
+        .with_name("Dana", "Smith")
+        .build()
+        .unwrap();
+
+    let _ = builder
+        .add_family_auto()
+        .with_father(&alice)
+        .with_mother(&bob)
+        .add_child_birth(&charlie)
+        .build()
+        .unwrap();
+
+    let _ = builder.into_graph();
+
+    // Serialize
+    let map = SerializationMap::new();
+    let writer = GraphXmlWriter::new(map, "5.2.0");
+    let mut buffer = Vec::new();
+    writer
+        .write(&graph, &mut BufWriter::new(&mut buffer))
+        .unwrap();
+    let xml = String::from_utf8(buffer).unwrap();
+
+    // Count
+    let report = count_gramps_xml(&xml).unwrap();
+
+    // Assert
+    assert_eq!(report.counts.people, 4);
+    assert_eq!(report.counts.families, 1);
+
+    // Family size 3: Alice, Bob, Charlie
+    assert_eq!(report.family_size_distribution.len(), 1);
+    assert_eq!(report.family_size_distribution.get(&3), Some(&1));
+
+    // Dana is not in any family
+    assert_eq!(report.people_not_in_family, 1);
+    assert_eq!(report.dangling_refs, 0);
+}
