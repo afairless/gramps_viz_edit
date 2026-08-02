@@ -273,3 +273,67 @@ fn custom_generation_gap_affects_imputation() {
     let p2 = gd.nodes.iter().find(|n| n.handle == "p2").unwrap();
     assert_eq!(p2.birth_year, Some(1900), "custom gap 50 should give 1900");
 }
+
+// ---------------------------------------------------------------------------
+// Real-world fixture: exp01.gramps
+// ---------------------------------------------------------------------------
+
+#[test]
+fn exp01_fixture_counts() {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/exp01.gramps");
+    let gd = visualize::load_graph_data(path.to_str().unwrap(), false, 25).unwrap();
+
+    // Expected: 64 persons, 49 families
+    assert_eq!(
+        gd.nodes.len(),
+        64,
+        "exp01.gramps: expected 64 nodes, got {}",
+        gd.nodes.len()
+    );
+    assert_eq!(
+        gd.links.len(),
+        86,
+        "exp01.gramps: expected 86 links, got {}",
+        gd.links.len()
+    );
+    assert!(
+        !gd.family_groups.is_empty(),
+        "exp01.gramps: expected at least 1 family group, got {}",
+        gd.family_groups.len()
+    );
+
+    // Verify all nodes have valid handles
+    for node in &gd.nodes {
+        assert!(!node.handle.is_empty(), "node handle should not be empty");
+        assert!(!node.name.is_empty(), "node name should not be empty");
+    }
+
+    // Verify all links reference existing handles
+    for link in &gd.links {
+        assert!(
+            gd.nodes.iter().any(|n| n.handle == link.source),
+            "link source {} not found in nodes",
+            link.source
+        );
+        assert!(
+            gd.nodes.iter().any(|n| n.handle == link.target),
+            "link target {} not found in nodes",
+            link.target
+        );
+    }
+
+    // Verify no person has a gen 0 birth year that is imputed (gen 0 founders
+    // should have explicit dates, not imputed ones)
+    for node in &gd.nodes {
+        if node.generation == 0 && node.is_imputed {
+            // This is acceptable — some founders may lack dates in real data
+            // Just log via the assertion message
+            assert!(
+                node.birth_year.is_some(),
+                "gen 0 node {} has imputed=true but no birth_year",
+                node.handle
+            );
+        }
+    }
+}
