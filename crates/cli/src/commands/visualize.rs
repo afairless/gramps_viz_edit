@@ -55,7 +55,8 @@ pub fn run(args: VisualizeArgs) -> Result<(), CliError> {
     if args.no_impute {
         cmd.arg("--no-impute");
     }
-    cmd.arg("--generation-gap").arg(args.generation_gap.to_string());
+    cmd.arg("--generation-gap")
+        .arg(args.generation_gap.to_string());
 
     let status = cmd.status().map_err(|e| CliError::Io {
         path: sibling.display().to_string(),
@@ -149,7 +150,7 @@ mod tests {
 
         let mut tmp = NamedTempFile::new().unwrap();
         write!(tmp, "<database/>").unwrap();
-        let path = tmp.path().to_str().unwrap().to_string();
+        let _path = tmp.path().to_str().unwrap().to_string();
 
         // Rename to a .gramps extension.
         let gramps_path = tmp.path().with_extension("gramps");

@@ -5,6 +5,7 @@ import { renderGraph, validateGraphData } from './graph';
 import type { GraphController } from './graph';
 import type { GraphData } from './types';
 import { createHoverHandler } from './tooltip';
+import { createSelectionPanel, exportToFile } from './selection';
 
 function showError(container: HTMLElement, message: string): void {
   container.textContent = '';
@@ -95,6 +96,23 @@ async function main(): Promise<void> {
   // Wire up hover tooltip
   const hoverHandler = createHoverHandler(graphData);
   controller.onNodeHover(hoverHandler);
+
+  // Wire up selection panel
+  const panelEl = document.getElementById('selection-panel');
+  if (panelEl) {
+    const selectionManager = createSelectionPanel(graphData, {
+      panelEl,
+      onExport: async (exportData) => {
+        await exportToFile(exportData);
+      },
+    });
+
+    // Route graph node clicks to selection manager
+    controller.onNodeClick((handle: string) => {
+      selectionManager.click(handle, false);
+      controller.setHighlighted(new Set(selectionManager.handles));
+    });
+  }
 
   // Store controller for dev console access
   (window as unknown as Record<string, GraphController>).__GRAPH_CONTROLLER__ =

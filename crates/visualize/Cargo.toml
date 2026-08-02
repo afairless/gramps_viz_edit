@@ -7,13 +7,14 @@ edition = "2021"
 default = []
 # Enables the Tauri desktop shell. Without this feature the crate compiles
 # as a plain library — no WebKit2GTK / WebView2 system dependencies needed.
-visualize = ["dep:tauri"]
+visualize = ["dep:tauri", "dep:tauri-plugin-dialog"]
 
 [dependencies]
 gramps-reader = { path = "../gramps-reader" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tauri = { version = "2", optional = true }
+tauri-plugin-dialog = { version = "2", optional = true }
 
 [build-dependencies]
 tauri-build = { version = "2" }
