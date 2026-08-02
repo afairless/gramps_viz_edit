@@ -10,6 +10,7 @@ use cli::commands::generate::GenerateArgs;
 use cli::commands::schema::SchemaCommand;
 use cli::commands::stats::StatsArgs;
 use cli::commands::validate::ValidateArgs;
+use cli::commands::visualize::VisualizeArgs;
 use cli::error::CliError;
 
 /// Generate valid Gramps family tree datasets
@@ -28,6 +29,8 @@ enum Command {
     Stats(StatsArgs),
     /// Validate a .gramps file
     Validate(ValidateArgs),
+    /// Open a .gramps file in the family-group visualization app
+    Visualize(VisualizeArgs),
     /// Extract the schema from a Gramps installation
     ExtractSchema(ExtractSchemaArgs),
     /// List and download Gramps schemas
@@ -45,6 +48,7 @@ fn main() -> Result<(), CliError> {
         Command::Generate(args) => cli::commands::generate::run(args)?,
         Command::Stats(args) => cli::commands::stats::run(args)?,
         Command::Validate(args) => cli::commands::validate::run(args)?,
+        Command::Visualize(args) => cli::commands::visualize::run(args)?,
         Command::ExtractSchema(args) => extract_schema::run(args)?,
         Command::Schema(args) => cli::commands::schema::run(args)?,
     }
