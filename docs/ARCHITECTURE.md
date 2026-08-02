@@ -4,13 +4,15 @@
 
 **gramps-gen** generates valid, plausible [Gramps](https://gramps-project.org/) family tree datasets for testing and development. It models Gramps data as a **typed directed multigraph**, supports both random and scenario-driven generation, applies adversarial transforms for stress-testing, and outputs Gramps XML (`.gramps` format).
 
-The system is a **Rust workspace** with three crates:
+The system is a **Rust workspace** with five crates:
 
 | Crate | Purpose |
 |---|---|
 | `typed-graph` | Core graph model, schema codegen, validation, generation |
 | `output` | Gramps XML serialization |
+| `gramps-reader` | Shared library for streaming `.gramps` XML parsing, DSU, generation computation |
 | `cli` | CLI binary (`gramps-gen`), scenario parsing, pipeline wiring |
+| `visualize` | Tauri v2 desktop app with D3.js force-directed graph visualization (optional, gated behind `--features visualize`) |
 
 A **Python extractor** (`extract/extract_schema.py`) introspects Gramps Python classes to produce `schemas/schema-5.2.json`, which drives compile-time Rust code generation.
 
@@ -32,39 +34,83 @@ A **Python extractor** (`extract/extract_schema.py`) introspects Gramps Python c
 └─────────────┬───────────────┘
               │ build.rs reads at compile time
               ▼
-┌─────────────────────────────────────────────────────────┐
-│  typed-graph  (Rust crate)                               │
-│                                                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐ │
-│  │ Schema types  │  │ Graph store  │  │  Validation   │ │
-│  │ (codegen)     │  │ (nodes+edges)│  │  (structural +│ │
-│  │ Node, Edge,   │  │ forward/rev  │  │   referential)│ │
-│  │ XxxData,      │  │ indexes      │  │               │ │
-│  │ enums, Schema │  │              │  │               │ │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬────────┘ │
-│         │                 │                  │          │
-│  ┌──────┴─────────────────┴──────────────────┴────────┐ │
-│  │              Generation Engine                       │ │
-│  │  RandomGen (procedural names/dates/places)          │ │
-│  │  GraphBuilder (fluent API)                          │ │
-│  │  AdversarialStrategies (Category A + B)             │ │
-│  └───────────────────────┬─────────────────────────────┘ │
-└──────────────────────────┼───────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  typed-graph  (Rust crate)                                     │
+│                                                                │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐ │
+│  │ Schema types  │  │ Graph store  │  │  Validation         │ │
+│  │ (codegen)     │  │ (nodes+edges)│  │  (structural +      │ │
+│  │ Node, Edge,   │  │ forward/rev  │  │   referential)      │ │
+│  │ XxxData,      │  │ indexes      │  │                     │ │
+│  │ enums, Schema │  │              │  │                     │ │
+│  └──────┬───────┘  └──────┬───────┘  └──────────┬──────────┘ │
+│         │                 │                      │            │
+│  ┌──────┴─────────────────┴──────────────────────┴──────────┐ │
+│  │              Generation Engine                             │ │
+│  │  RandomGen (procedural names/dates/places)                │ │
+│  │  GraphBuilder (fluent API)                                │ │
+│  │  AdversarialStrategies (Category A + B)                   │ │
+│  └───────────────────────┬───────────────────────────────────┘ │
+└──────────────────────────┼─────────────────────────────────────┘
                            │
-┌──────────────────────────┼───────────────────────────────┐
-│  output  (Rust crate)    │                                │
-│                          ▼                                │
-│  GraphXmlWriter  ──────────── Walks Graph via quick-xml   │
-│  SerializationMap  ───────── Hand-coded XML element map   │
-└──────────────────────────┬───────────────────────────────┘
+┌──────────────────────────┼─────────────────────────────────────┐
+│  output  (Rust crate)    │                                      │
+│                          ▼                                      │
+│  GraphXmlWriter  ──────────── Walks Graph via quick-xml         │
+│  SerializationMap  ───────── Hand-coded XML element map         │
+└──────────────────────────┬─────────────────────────────────────┘
                            │
-┌──────────────────────────┼───────────────────────────────┐
-│  cli  (Rust binary)      │                                │
-│                          ▼                                │
-│  gramps-gen generate ──────── 5-stage pipeline            │
-│  gramps-gen validate ──────── XML structure check         │
-│  gramps-gen extract-schema ── Stub                        │
-└───────────────────────────────────────────────────────────┘
+                           ▼
+┌────────────────────────────────────────────────────────────────┐
+│  gramps-reader  (Rust library crate, shared by cli & visualize)│
+│                                                                │
+│  ┌──────────────────┐  ┌──────────────────┐                    │
+│  │  xml/            │  │  graph.rs         │                    │
+│  │  count.rs        │  │  Dsu (disjoint    │                    │
+│  │  extract.rs      │  │  set union)       │                    │
+│  │  (person/family  │  │  compute_genera-  │                    │
+│  │   streaming)     │  │  tions            │                    │
+│  └──────────────────┘  └──────────────────┘                    │
+│  ┌──────────────────┐  ┌──────────────────┐                    │
+│  │  types.rs        │  │  xml.rs (helpers) │                    │
+│  │  FamilyRecord,   │  │  strip_prefix,    │                    │
+│  │  ParsedPerson,   │  │  read_handle_attr,│                    │
+│  │  ParsedFamily    │  │  read_hlink_attr  │                    │
+│  └──────────────────┘  └──────────────────┘                    │
+└──────────────────────────┬─────────────────────────────────────┘
+                           │
+┌──────────────────────────┼─────────────────────────────────────┐
+│  cli  (Rust binary)      │                                     │
+│                          ▼                                     │
+│  gramps-gen generate ──────── 5-stage pipeline                 │
+│  gramps-gen validate ──────── XML structure check              │
+│  gramps-gen stats ──────────── File summary                    │
+│  gramps-gen visualize ──────── Spawns gramps-gen-visualize     │
+│  gramps-gen extract-schema ── Stub                              │
+└────────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌────────────────────────────────────────────────────────────────┐
+│  visualize  (Rust binary + Tauri app, optional feature)        │
+│                                                                │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐ │
+│  │ graph_data.rs │  │ dates.rs     │  │ lib.rs               │ │
+│  │ (adapter:     │  │ (multi-source│  │ load_graph_data()    │ │
+│  │  ParsedPerson │  │  BFS date    │  │ (pure function,      │ │
+│  │  → PersonNode,│  │  imputation) │  │  testable)           │ │
+│  │  FamilyLink)  │  │              │  │                      │ │
+│  └──────┬───────┘  └──────┬───────┘  └──────────┬───────────┘ │
+│         │                 │                      │            │
+│         └─────────────────┴──────────────────────┘            │
+│                           │  GraphData (JSON via Tauri IPC)    │
+│                           ▼                                    │
+│  ┌──────────────────────────────────────────────────────────┐ │
+│  │  Frontend (D3.js + TypeScript)                           │ │
+│  │  - forceSimulation, SVG, zoom/pan                       │ │
+│  │  - hover tooltips, selection, export                     │ │
+│  │  - viridis color gradient, filter, legend                │ │
+│  └──────────────────────────────────────────────────────────┘ │
+└────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -422,6 +468,8 @@ Future: plan describes extracting this from the Gramps RelaxNG schema at build t
 |---|---|
 | `gramps-gen generate` | Full 5-stage pipeline → `.gramps` output |
 | `gramps-gen validate <file>` | Minimal XML structure check (well-formedness, root element, namespace) |
+| `gramps-gen stats <file>` | Streaming count and summary of a `.gramps` file (text or JSON) |
+| `gramps-gen visualize <file>` | Open a Tauri desktop window with force-directed graph visualization |
 | `gramps-gen extract-schema <path>` | Stub (planned: run Python extractor) |
 | `gramps-gen schema list` | List local and available Gramps schemas |
 | `gramps-gen schema download [VERSION]` | Download a schema from Gramps GitHub |
@@ -461,6 +509,140 @@ adversarial:
     - disconnected
     - one_parent
 ```
+
+---
+
+## Visualization Architecture
+
+The `visualize` crate (optional, gated behind `--features visualize`) provides a
+desktop application for interactively exploring family trees as a force-directed
+graph. It uses **Tauri v2** for the desktop shell, **D3.js** for rendering, and
+the **gramps-reader** shared crate for data parsing.
+
+### Two-binary approach
+
+- `gramps-gen` (CLI binary) gains a `visualize` subcommand that locates the
+  sibling `gramps-gen-visualize` binary and spawns it with the file path and
+  flags
+- `gramps-gen-visualize` (Tauri binary) owns `main()` and opens the native
+  window
+
+### Data Flow
+
+```
+.gramps file
+    │
+    ▼
+┌──────────────────────────────┐
+│  gramps-reader::xml::extract  │  Streaming parse → ParsedPerson[], ParsedFamily[]
+└──────────┬───────────────────┘
+           │
+           ▼
+┌──────────────────────────────┐
+│  visualize::graph_data.rs     │  DSU components, generation layering,
+│  build_graph_data()           │  gender mapping, FamilyLink construction
+└──────────┬───────────────────┘
+           │  PersonNode[], FamilyLink[]
+           ▼
+┌──────────────────────────────┐
+│  visualize::dates.rs          │  Multi-source BFS date imputation:
+│  impute_dates()               │  - Propagate from dated nodes with
+│                                │    configurable gap (default 25 years)
+│                                │  - Average ties from multiple sources
+│                                │  - Null fallback for unreachable nodes
+└──────────┬───────────────────┘
+           │  GraphData
+           ▼
+┌──────────────────────────────┐
+│  visualize::lib.rs            │  load_graph_data() — pure function that
+│                                │  orchestrates the full pipeline
+│                                │  (unit-testable, IPC-agnostic)
+└──────────┬───────────────────┘
+           │  GraphData → serde_json
+           ▼
+┌──────────────────────────────┐
+│  Tauri IPC bridge             │  #[tauri::command] load_graph(path, no_impute,
+│  src/main.rs                  │    generation_gap) → Result<GraphData, String>
+│                                │  #[tauri::command] export_selections(path,
+│                                │    selections) → Result<String, String>
+└──────────┬───────────────────┘
+           │  JSON via invoke()
+           ▼
+┌──────────────────────────────┐
+│  Frontend (D3.js + TypeScript)│
+│                                │
+│  src/graph.ts                  │  d3.forceSimulation, SVG, zoom/pan
+│  src/tooltip.ts                │  200ms hover tooltip (name, birth, death)
+│  src/selection.ts              │  Click-to-select, Shift multi-select, export
+│  src/colors.ts                 │  d3.interpolateViridis, imputed dashed, gray null
+│  src/types.ts                  │  TypeScript interfaces matching Rust types
+│  src/main.ts                   │  Entry point, IPC wiring, filter dropdown, legend
+└──────────────────────────────┘
+```
+
+### Feature gate
+
+The `visualize` feature is optional to avoid requiring WebKit2GTK / WebView2
+system dependencies for the core CLI:
+
+```bash
+cargo build --release                    # Core CLI only
+cargo build --release --features visualize  # With visualization (requires system deps)
+```
+
+The `visualize` crate is excluded from `default-members` in the workspace
+`Cargo.toml`.
+
+### Data model
+
+```rust
+pub struct GraphData {
+    pub nodes: Vec<PersonNode>,
+    pub links: Vec<FamilyLink>,
+    pub family_groups: Vec<FamilyGroupMeta>,
+}
+
+pub struct PersonNode {
+    pub handle: String,
+    pub name: String,
+    pub birth_date: Option<String>,
+    pub death_date: Option<String>,
+    pub birth_year: Option<i32>,
+    pub is_imputed: bool,
+    pub gender: String,
+    pub family_group: usize,
+    pub generation: usize,
+}
+
+pub struct FamilyLink {
+    pub source: String,
+    pub target: String,
+    pub link_type: LinkType,  // Spouse | ParentChild
+}
+```
+
+### Date imputation
+
+For nodes without a birth date, a multi-source BFS propagates from all dated
+nodes simultaneously:
+
+1. Initialize a queue with every node that has a known birth year
+2. For each visited undated node: `imputed_year = source_year + (gen_diff × gap)`
+3. If reached from multiple sources at the same distance, average the candidates
+4. Nodes with no reachable dated node → `birth_year = None` → neutral gray
+
+The generation gap is configurable (default: 25 years, validated range: 1-100).
+
+### Frontend features
+
+| Feature | File | Description |
+|---|---|---|
+| Force simulation | `graph.ts` | d3.forceSimulation with collision, zoom/pan, SVG circles+lines |
+| Hover tooltips | `tooltip.ts` | 200ms delay, name+birth+death, cursor-follow, mouse-out hide |
+| Selection | `selection.ts` | Click toggle, Shift multi-select, Export via Tauri save dialog |
+| Color gradient | `colors.ts` | d3.interpolateViridis, imputed dashed border, undated gray |
+| Filter | `main.ts` | Dropdown to filter by family group (connected component) |
+| Legend | `colors.ts` | Gradient bar with year labels, undated/imputed caption items |
 
 ---
 

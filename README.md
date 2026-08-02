@@ -131,16 +131,127 @@ gramps-gen stats output.gramps
 gramps-gen stats --json output.gramps
 ```
 
-## Commands
+### Inspect a `.gramps` file
 
-| Command | Description |
-|---|---|
-| `generate` | Generate a random family tree dataset in `.gramps` format |
-| `validate` | Validate the XML structure and namespace of a `.gramps` file |
-| `stats` | Summarize the contents of a `.gramps` file (counts, families, etc.) |
-| `extract-schema` | Extract the Gramps schema from a local Gramps source checkout (stub) |
+```bash
+# Human-readable summary
+cargo run --release -- stats output.gramps
+
+# Machine-readable JSON
+cargo run --release -- stats --json output.gramps
+```
+
+### Visualize a `.gramps` file
+
+Requires the `--features visualize` flag and system dependencies (see below).
+
+```bash
+# Open the family graph in a Tauri desktop window
+cargo run --release --features visualize -- visualize output.gramps
+
+# Skip date imputation (use only explicit dates)
+cargo run --release --features visualize -- visualize output.gramps --no-impute
+
+# Custom generation gap for date imputation (default: 25, range: 1-100)
+cargo run --release --features visualize -- visualize output.gramps --generation-gap 30
+```
+
+See [Visualization](#visualization) for details on the force-directed graphact the Gramps schema from a local Gramps source checkout (stub) |
 | `schema list` | List local and available Gramps schemas |
 | `schema download` | Download a schema from Gramps GitHub |
+
+## Visualization
+
+The `visualize` subcommand opens a native desktop window with an interactive
+force-directed graph of the family tree. It uses **Tauri v2** for the desktop
+shell and **D3.js** for graph rendering.
+
+### Features
+
+- **Force-directed graph**: Nodes are persons, edges represent spouse or
+  parent-child relationships. The layout uses D3's force simulation with
+  collision detection
+- **Zoom and pan**: Scroll to zoom, drag to pan
+- **Hover tooltips**: 200ms delay tooltip showing name, birth date, and death date
+- **Selection and export**: Click to select nodes (Shift-click for multi-select),
+  export selections as JSON
+- **Color gradient**: Nodes are colored by birth year using
+  `d3.interpolateViridis` (perceptually uniform, colorblind-friendly).
+  Imputed dates shown with dashed borders; undated nodes shown in neutral gray
+- **Family group filter**: Dropdown to filter the view to a single connected
+  component
+- **Legend**: Color gradient bar showing the year range with labels
+
+### Build Dependencies
+
+Building the full Tauri app requires additional system libraries:
+
+```bash
+# Debian/Ubuntu
+sudo apt install libwebkit2gtk-4.1-dev libdbus-1-dev pkg-config nodejs npm
+
+# Fedora
+sudo dnf install webkit2gtk4.1-devel dbus-devel pkgconf pkg-config nodejs npm
+```
+
+### Frontend Build
+
+The frontend assets must be built before the Tauri binary:
+
+```bash
+cd crates/visualize/frontend
+npm install
+npm run build
+cd ../../..
+cargo build --release --features visualize
+```
+
+### Feature gate
+
+The `visualize` crate is gated behind the `visualize` Cargo feature so the
+core CLI can build without system webview dependencies:
+
+```bash
+# Build core CLI only (no system deps required)
+cargo build --release
+
+# Build with visualization (requires system deps)
+cargo build --release --features visualize
+```
+
+### Two-binary architecture
+
+- `gramps-gen` — the existing CLI, gains a `visualize` subcommand that locates
+  and spawns the sibling binary
+- `gramps-gen-visualize` — the Tauri desktop app binary
+
+Both binaries are installed to the same directory by `cargo install --path .`
+
+### Data Flow
+
+```
+.gramps file
+    │
+    ▼
+┌─────────────────────────────┐
+│  gramps-reader: XML parse   │  Streaming parser → ParsedPerson[], ParsedFamily[]
+└──────────┬──────────────────┘
+           │
+           ▼
+┌─────────────────────────────┐
+│  visualize: graph_data.rs   │  DSU components, generation layering, gender mapping
+└──────────┬──────────────────┘
+           │
+           ▼
+┌─────────────────────────────┐
+│  visualize: dates.rs        │  Multi-source BFS date imputation
+└──────────┬──────────────────┘
+           │  GraphData (JSON via Tauri IPC)
+           ▼
+┌─────────────────────────────┐
+│  Frontend: D3.js            │  Force simulation, zoom/pan, tooltips, selection
+└─────────────────────────────┘
+```
 
 ## Pipeline
 
@@ -162,7 +273,9 @@ Generate → Validate (Gate 1) → Adversarial Transform → Validate (Gate 2) �
 |---|---|---|
 | `typed-graph` | `crates/typed-graph/` | Graph model, schema-driven codegen, structural/referential validation, random generation, adversarial strategies, GraphBuilder fluent API |
 | `output` | `crates/output/` | Gramps XML serialization with hand-coded `SerializationMap`, streaming `GraphXmlWriter` |
+| `gramps-reader` | `crates/gramps-reader/` | Shared library for streaming `.gramps` XML parsing: `FamilyRecord`, `ParsedPerson`, `ParsedFamily`, `Dsu`, `compute_generations`, XML attribute helpers |
 | `cli` | `crates/cli/` | CLI binary (`clap`), YAML scenario parsing, pipeline wiring, progress reporting |
+| `visualize` | `crates/visualize/` | Tauri v2 desktop app with D3.js force-directed graph visualization (gated behind `--features visualize`) |
 
 ## Documentation
 
