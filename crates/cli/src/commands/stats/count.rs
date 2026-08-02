@@ -11,6 +11,31 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::CliError;
 
+/// A record of a single nuclear family's parent and child handles.
+///
+/// During the streaming pass, `parent_handles` collects `father`/`mother`
+/// refs and `child_handles` collects `childref` refs. After the pass,
+/// these records are used to build the person graph for generation-layering.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FamilyRecord {
+    pub parent_handles: Vec<String>,
+    pub child_handles: Vec<String>,
+}
+
+impl FamilyRecord {
+    /// Number of distinct person handles across both parents and children.
+    pub fn size(&self) -> usize {
+        let mut distinct = std::collections::HashSet::new();
+        for h in &self.parent_handles {
+            distinct.insert(h.as_str());
+        }
+        for h in &self.child_handles {
+            distinct.insert(h.as_str());
+        }
+        distinct.len()
+    }
+}
+
 /// Statistics collected from a single `.gramps` XML document.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct StatsReport {
@@ -66,7 +91,7 @@ pub fn count_gramps_xml(content: &str) -> Result<StatsReport, CliError> {
     let mut report = StatsReport::default();
     let mut all_handles: HashSet<String> = HashSet::new();
     let mut ref_handles: HashSet<String> = HashSet::new();
-    let mut family_members: Vec<HashSet<String>> = Vec::new();
+    let mut family_records: Vec<FamilyRecord> = Vec::new();
     let mut histogram: HashMap<usize, usize> = HashMap::new();
 
     loop {
@@ -83,7 +108,10 @@ pub fn count_gramps_xml(content: &str) -> Result<StatsReport, CliError> {
                     }
                     b"family" => {
                         report.counts.families += 1;
-                        family_members.push(HashSet::new());
+                        family_records.push(FamilyRecord {
+                            parent_handles: Vec::new(),
+                            child_handles: Vec::new(),
+                        });
                     }
                     b"event" => report.counts.events += 1,
                     b"placeobj" => report.counts.places += 1,
@@ -93,10 +121,18 @@ pub fn count_gramps_xml(content: &str) -> Result<StatsReport, CliError> {
                     b"object" => report.counts.media += 1,
                     b"note" => report.counts.notes += 1,
                     b"tag" => report.counts.tags += 1,
-                    b"father" | b"mother" | b"childref" => {
+                    b"father" | b"mother" => {
                         if let Some(ref_handle) = read_hlink_attr(e) {
-                            if let Some(current) = family_members.last_mut() {
-                                current.insert(ref_handle.clone());
+                            if let Some(current) = family_records.last_mut() {
+                                current.parent_handles.push(ref_handle.clone());
+                            }
+                            ref_handles.insert(ref_handle);
+                        }
+                    }
+                    b"childref" => {
+                        if let Some(ref_handle) = read_hlink_attr(e) {
+                            if let Some(current) = family_records.last_mut() {
+                                current.child_handles.push(ref_handle.clone());
                             }
                             ref_handles.insert(ref_handle);
                         }
@@ -117,6 +153,10 @@ pub fn count_gramps_xml(content: &str) -> Result<StatsReport, CliError> {
                     b"family" => {
                         report.counts.families += 1;
                         // Self-closing family: size 0
+                        family_records.push(FamilyRecord {
+                            parent_handles: Vec::new(),
+                            child_handles: Vec::new(),
+                        });
                         *histogram.entry(0).or_insert(0) += 1;
                     }
                     b"event" => report.counts.events += 1,
@@ -127,10 +167,18 @@ pub fn count_gramps_xml(content: &str) -> Result<StatsReport, CliError> {
                     b"object" => report.counts.media += 1,
                     b"note" => report.counts.notes += 1,
                     b"tag" => report.counts.tags += 1,
-                    b"father" | b"mother" | b"childref" => {
+                    b"father" | b"mother" => {
                         if let Some(ref_handle) = read_hlink_attr(e) {
-                            if let Some(current) = family_members.last_mut() {
-                                current.insert(ref_handle.clone());
+                            if let Some(current) = family_records.last_mut() {
+                                current.parent_handles.push(ref_handle.clone());
+                            }
+                            ref_handles.insert(ref_handle);
+                        }
+                    }
+                    b"childref" => {
+                        if let Some(ref_handle) = read_hlink_attr(e) {
+                            if let Some(current) = family_records.last_mut() {
+                                current.child_handles.push(ref_handle.clone());
                             }
                             ref_handles.insert(ref_handle);
                         }
@@ -142,8 +190,8 @@ pub fn count_gramps_xml(content: &str) -> Result<StatsReport, CliError> {
                 let name = e.name().as_ref().to_vec();
                 let name = strip_prefix(&name);
                 if name == b"family" {
-                    if let Some(members) = family_members.pop() {
-                        let size = members.len();
+                    if let Some(record) = family_records.pop() {
+                        let size = record.size();
                         *histogram.entry(size).or_insert(0) += 1;
                     }
                 }
@@ -162,13 +210,15 @@ pub fn count_gramps_xml(content: &str) -> Result<StatsReport, CliError> {
     let mut sizes: Vec<usize> = histogram.keys().copied().collect();
     sizes.sort();
     for size in sizes {
-        report.family_size_distribution.insert(size, histogram[&size]);
+        report
+            .family_size_distribution
+            .insert(size, histogram[&size]);
     }
 
     // Compute people_not_in_family and dangling_refs
-    report.people_not_in_family = all_handles.len().saturating_sub(
-        ref_handles.intersection(&all_handles).count(),
-    );
+    report.people_not_in_family = all_handles
+        .len()
+        .saturating_sub(ref_handles.intersection(&all_handles).count());
     report.dangling_refs = ref_handles.len() - ref_handles.intersection(&all_handles).count();
 
     Ok(report)
@@ -377,14 +427,8 @@ mod tests {
 
         // Histogram: size 10: 2 families, size 3: 5 families
         assert_eq!(report.family_size_distribution.len(), 2);
-        assert_eq!(
-            report.family_size_distribution.get(&3),
-            Some(&5)
-        );
-        assert_eq!(
-            report.family_size_distribution.get(&10),
-            Some(&2)
-        );
+        assert_eq!(report.family_size_distribution.get(&3), Some(&5));
+        assert_eq!(report.family_size_distribution.get(&10), Some(&2));
 
         // 15 people not in any family (p36-p50)
         assert_eq!(report.people_not_in_family, 15);
