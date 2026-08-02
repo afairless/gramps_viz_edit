@@ -1,159 +1,79 @@
-# Implementation Plan: Family-Size × Generations Contingency Table
+# Implementation Plan: Family Group Statistics
 
-Source: `docs/research/family-generation-table.md`
+Source: `docs/research/family-group-stats.md`
+
+This plan reworks the existing `Family size × generation table` (which conflates Gramps families with family groups) into a self-consistent `Family group size × generation table` that counts connected components of the person graph. It also adds a new `Family group distribution` section.
+
+**Branch:** `agent/family-generation-table` (the existing feature branch for the generation table)
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `feat(cli): Replace family_members with FamilyRecord for parent-child separation` | FamilyRecord struct and streaming pass update | `crates/cli/src/commands/stats/count.rs` | Unit |
-| 2 | `feat(cli): Implement connected-component generation layering` | `compute_generation_table()` with DSU and longest-path layering | `crates/cli/src/commands/stats/count.rs` | Unit |
-| 3 | `feat(cli): Add FamilyGenerationTable to StatsReport` | Wired generation table into stats report | `crates/cli/src/commands/stats/count.rs` | Unit, Integration |
-| 4 | `feat(cli): Render generation table in text output` | `render_generation_table()` with Unicode box-drawing and `--no-unicode` flag | `crates/cli/src/commands/stats/mod.rs` | Unit |
-| 5 | `test(cli): Update E2E tests for generation table` | E2E assertions for text and JSON output | `crates/cli/tests/e2e.rs` | Integration |
-| 6 | `test(cli): Update integration tests for generation table` | Integration test for known graph | `crates/cli/tests/integration.rs` | Integration |
-| 7 | `chore: Run full test suite` | Verify all tests pass and clippy is clean | — | — |
+| 1 | `refactor(cli): Rename FamilyGenerationTable to FamilyGroupGenerationTable and add family_group_distribution` | Type/field renames | `crates/cli/src/commands/stats/count.rs`, `crates/cli/src/commands/stats/mod.rs` | Unit (compile check, default values) |
+| 2 | `feat(cli): Rewrite generation table to count family groups (connected components) instead of Gramps families` | Component-level tabulation | `crates/cli/src/commands/stats/count.rs` | Unit (multi-family collapse, isolated persons, disconnected components, empty graph, family group distribution) |
+| 3 | `feat(cli): Add "Family group distribution" section and update table rendering in text report` | Text report update | `crates/cli/src/commands/stats/mod.rs` | Unit (new section, updated table title, renamed functions) |
+| 4 | `test(cli): Update unit tests for family group statistics` | Unit test updates | `crates/cli/src/commands/stats/count.rs`, `crates/cli/src/commands/stats/mod.rs` | Unit (all existing and new tests pass) |
+| 5 | `test(cli): Update integration and E2E tests for family group statistics` | Integration/E2E test updates | `crates/cli/tests/integration.rs`, `crates/cli/tests/e2e.rs` | Integration, E2E (full test suite passes) |
 
----
+## Step Details
 
-## Step 1 — FamilyRecord struct and streaming pass update
+### Step 1 — Rename types and fields
 
-**Commit:** `feat(cli): Replace family_members with FamilyRecord for parent-child separation`
+- Rename `FamilyGenerationTable` → `FamilyGroupGenerationTable` (keep the same `BTreeMap` shape)
+- Rename `family_generation_table` → `family_group_generation_table` on `StatsReport`
+- Add `family_group_distribution: BTreeMap<usize, usize>` field to `StatsReport` (default: empty)
+- Update `StatsReport::default()` and `Default` derive
+- Update `count_gramps_xml` return to populate `family_group_generation_table` (rename only, behavior unchanged)
+- Update `mod.rs` imports and usages of the renamed type/field
+- Update doc comments on `StatsReport` to distinguish Gramps families vs. family groups
 
-**Files:** `crates/cli/src/commands/stats/count.rs`
+**Tests:** Compile check; `report_default_empty_table` verifies new field defaults; `json_output_contains_generation_table` updated for field name.
 
-Replace `family_members: Vec<HashSet<String>>` with `family_records: Vec<FamilyRecord>` where `FamilyRecord` has:
+### Step 2 — Rewrite tabulation to count components
 
-- `size: usize` — distinct count of handles across both parents and children
-- `parent_handles: Vec<String>` — handles from `<father>` and `<mother>` refs
-- `child_handles: Vec<String>` — handles from `<childref>` refs
+- Rewrite the final tabulation loop in `compute_generation_table` (renamed `compute_family_group_table`) to iterate over **components** (including isolated-person components with zero family records) instead of iterating over `family_records`
+- Populate `family_group_distribution` in the same component iteration loop: for each component, increment `distribution[component.len()]`
+- The DSU and component-building code in the first half of the function remains unchanged
+- Keep the same function signature but change the tabulation logic
 
-In the streaming pass, separate parent refs (`father`/`mother`) from child refs (`childref`) when recording family data. For self-closing `<family/>`, push a `FamilyRecord { size: 0, parent_handles: vec![], child_handles: vec![] }`. Keep `histogram: HashMap<usize, usize>` logic unchanged.
+**Key behavioral changes:**
 
-Also add optional `person_parent_families: HashMap<String, Vec<usize>>` and `person_child_families: HashMap<String, Vec<usize>>` for debugging.
-
-**Tests:** Existing tests must still pass. The family size distribution is unchanged.
-
-**Test verification:**
-
-- `cargo test -p cli --lib -- commands::stats::count`
-- All existing count tests pass with the new struct
-
----
-
-## Step 2 — Connected-component generation layering
-
-**Commit:** `feat(cli): Implement connected-component generation layering`
-
-**Files:** `crates/cli/src/commands/stats/count.rs`
-
-Define `pub type FamilyGenerationTable = BTreeMap<String, BTreeMap<String, usize>>` at the top of `count.rs`.
-
-Implement `fn compute_generation_table(family_records: &[FamilyRecord], all_handles: &HashSet<String>) -> FamilyGenerationTable`:
-
-1. Build a `Dsu` (Disjoint Set Union) over person handles that exist in `all_handles`. Union all members of each family.
-2. For each DSU connected component, build parent→child edges and assign generation numbers via longest-path layering from roots (people with no parents).
-3. Handle cycles: detect via visited-set, cap at 50, emit warning.
-4. For each nuclear family, compute `family_size` (distinct handles) and `family_gen_span` (component span of any member). Increment table cell.
-5. Return the nested `BTreeMap` representation.
-
-**New tests:**
-
-- `generation_table_empty` — no families → empty table
-- `generation_table_single_family_no_children` — size 2, 1 gen
-- `generation_table_single_family_with_children` — size 3, 2 gens
-- `generation_table_two_family_chain` — two families forming a parent→child chain → 3 gens
-- `generation_table_three_generation_chain` — grandparent→parent→child→grandchild → 4 gens
-- `generation_table_isolated_person` — single person, no families → empty table
-- `generation_table_disconnected_components` — two independent components
-- `generation_table_pedigree_collapse` — cousins marry; DAG preserved
-- `generation_table_cycle` — artificial cycle → warning, layering caps at 50
-- `generation_table_duplicate_handles` — same person in multiple families
-- `generation_table_single_parent_family` — single parent + child → size 2, 2 gens
-- `generation_table_child_only_family` — only children, no parents → all gen 0, 1 gen
-- `generation_table_single_member_family` — family with one parent, no children → size 1, 1 gen
-
----
-
-## Step 3 — FamilyGenerationTable in StatsReport
-
-**Commit:** `feat(cli): Add FamilyGenerationTable to StatsReport`
-
-**Files:** `crates/cli/src/commands/stats/count.rs`
-
-- Add `pub family_generation_table: FamilyGenerationTable` field to `StatsReport`
-- Type alias already defined in Step 2; `BTreeMap` derives `Serialize`/`Deserialize` by default
-- Update `StatsReport` construction in `count_gramps_xml()` to call `compute_generation_table()` and populate the field
-- Add warnings from cycle detection to `report.warnings`
-- Update `StatsReport::default()` if needed (empty `BTreeMap` is default, so no change)
+- Multi-family components collapse to a single row (size = total people in component, span = component's generation span)
+- Isolated persons (no family records) appear as size-1, span-1 family groups
+- Empty graph still produces empty table
 
 **Tests:**
 
-- `json_output_contains_generation_table` — JSON round-trip includes the new field
-- `report_default_empty_table` — default report has empty table
-- `generation_table_integration` — generate a known graph (via `GraphBuilder` + `GraphXmlWriter`), count via `count_gramps_xml`, verify the table matches expected values (existing `stats_count_known_graph` test in integration.rs can be extended)
+- `generation_table_multi_family_collapse` — multiple Gramps families in one component → single family-group row
+- `generation_table_isolated_person_components` — isolated persons appear as size-1 family groups
+- `family_group_distribution_empty` — empty graph → empty map
+- `family_group_distribution_single` — single component → one entry
+- `family_group_distribution_multiple` — multiple components of varying sizes
+- Update existing tests for new semantics (e.g., `generation_table_pedigree_collapse` now produces one row instead of four)
 
----
+### Step 3 — Update text report rendering
 
-## Step 4 — Text table rendering
-
-**Commit:** `feat(cli): Render generation table in text output`
-
-**Files:** `crates/cli/src/commands/stats/mod.rs`
-
-Add `render_generation_table(table: &FamilyGenerationTable) -> String`:
-
-- Unicode box-drawing (`│`, `─`, `┼`) for terminal output
-- Auto-sized column widths
-- Header: "Family size × generation table" then column labels
-- Row labels: "# people" on first row, numeric size thereafter
-- Marginal sums (row totals and column totals)
-- Fallback to ASCII (`|`, `-`, `+`) when `--no-unicode` is set
-
-Add `--no-unicode` flag to `StatsArgs`.
-
-Call `render_generation_table` from `format_text_report` and append after "Family size distribution" section.
-
-Add "Warnings" section at end of text report (renders `report.warnings`).
+- Add "Family group distribution" section to `format_text_report` (after "Family size distribution", before the generation table)
+- Update table title: `"Family size × generation table"` → `"Family group size × generation table"`
+- Rename rendering functions: `render_generation_table` → `render_family_group_table`, `render_generation_table_ascii` → `render_family_group_table_ascii`, `render_generation_table_inner` → `render_family_group_table_inner`
+- Update field references from `report.family_generation_table` to `report.family_group_generation_table`
 
 **Tests:**
 
-- `render_generation_table_empty` — no rows → "No data" or empty section
-- `render_generation_table_single_row` — one row
-- `render_generation_table_multi_row` — multiple rows, column widths
-- `render_generation_table_unicode_ascii` — both modes produce correct alignment
-- `format_text_report_contains_generation_table_section` — full report includes the new section
-- `format_text_report_warnings` — report with cycle warnings renders them in text output
+- Update `format_text_report_contains_generation_table_section` for new table title and new section
+- Update render table tests for renamed functions
+- Add test for "Family group distribution" section rendering
 
----
+### Step 4 — Update unit tests
 
-## Step 5 — E2E tests
+- In `count.rs` tests: update `json_output_contains_generation_table` for renamed JSON field; update `generation_table_integration` for renamed field; update all generation table tests for new semantics (component-level counting)
+- In `mod.rs` tests: update `format_text_report_expected_output` for new section; update `render_generation_table_*` tests for renamed functions; update `format_text_report_contains_generation_table_section`
+- Add new tests from Step 2
 
-**Commit:** `test(cli): Update E2E tests for generation table`
+**Tests:** All unit tests pass.
 
-**Files:** `crates/cli/tests/e2e.rs`
+### Step 5 — Update integration and E2E tests
 
-- `e2e_stats_text_output` — add assertion that the generation table section appears in stdout
-- `e2e_stats_json_output` — add assertion that `family_generation_table` is present in parsed JSON
-- Existing assertions must still pass
+- `integration.rs`: Update `stats_count_known_graph` to use new field name `family_group_generation_table` and add `family_group_distribution` assertion
+- `e2e.rs`: Rename `family_generation_table` → `family_group_generation_table` in JSON assertions; add `family_group_distribution` assertion; update text output assertions for new table title
 
----
-
-## Step 6 — Integration tests
-
-**Commit:** `test(cli): Update integration tests for generation table`
-
-**Files:** `crates/cli/tests/integration.rs`
-
-- `stats_count_known_graph` — add assertions for the generation table (the existing test builds a 3-person family; the generation table should have one entry: size 3, span 2 generations)
-
----
-
-## Step 7 — Full test suite verification
-
-**Commit:** `chore: Run full test suite`
-
-```bash
-cargo test --workspace
-cargo clippy --all-targets --all-features -- -D warnings
-```
-
-No code changes. Verify everything passes.
+**Tests:** `cargo test --workspace` passes; `cargo clippy --all-targets --all-features -- -D warnings` passes.
