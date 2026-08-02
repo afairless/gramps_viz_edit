@@ -7,9 +7,10 @@
 use std::collections::{HashMap, HashSet};
 
 use gramps_reader::{compute_generations, FamilyRecord, ParsedFamily, ParsedPerson};
+use serde::Serialize;
 
 /// A single person node in the force-directed graph.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PersonNode {
     pub handle: String,
     pub name: String,
@@ -23,7 +24,7 @@ pub struct PersonNode {
 }
 
 /// A directed link between two person nodes.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FamilyLink {
     pub source: String,
     pub target: String,
@@ -31,14 +32,14 @@ pub struct FamilyLink {
 }
 
 /// The kind of relationship between two linked persons.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum LinkType {
     Spouse,
     ParentChild,
 }
 
 /// Metadata about one connected component (family group).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FamilyGroupMeta {
     pub id: usize,
     pub size: usize,
@@ -46,11 +47,30 @@ pub struct FamilyGroupMeta {
 }
 
 /// Complete graph data ready for serialization.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct GraphData {
     pub nodes: Vec<PersonNode>,
     pub links: Vec<FamilyLink>,
     pub family_groups: Vec<FamilyGroupMeta>,
+}
+
+/// A person selected for export.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SelectedPerson {
+    pub handle: String,
+    pub name: String,
+    pub birth_date: Option<String>,
+    pub death_date: Option<String>,
+    pub gender: String,
+    pub family_group: usize,
+}
+
+/// Export payload for selected persons.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SelectionExport {
+    pub exported_at: String,
+    pub file: String,
+    pub selections: Vec<SelectedPerson>,
 }
 
 /// Build a `GraphData` from extracted person and family records.

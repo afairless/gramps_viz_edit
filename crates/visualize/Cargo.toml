@@ -22,3 +22,6 @@ tauri-build = { version = "2" }
 name = "gramps-gen-visualize"
 path = "src/main.rs"
 required-features = ["visualize"]
+
+[dev-dependencies]
+tempfile = "3"
