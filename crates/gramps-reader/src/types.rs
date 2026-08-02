@@ -18,6 +18,18 @@ pub struct ParsedPerson {
     pub gender: Option<String>,
 }
 
+/// Raw extracted family data from streaming XML parse.
+///
+/// Produced by [`crate::xml::extract::extract_families`]; consumed by
+/// visualization graph data adapters.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ParsedFamily {
+    pub handle: String,
+    pub father_handle: Option<String>,
+    pub mother_handle: Option<String>,
+    pub child_handles: Vec<String>,
+}
+
 /// A record of a single nuclear family's parent and child handles.
 ///
 /// During the streaming pass, `parent_handles` collects `father`/`mother`

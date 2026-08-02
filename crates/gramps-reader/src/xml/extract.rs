@@ -6,8 +6,8 @@
 //! can be unit-tested without filesystem access.
 
 use crate::error::Error;
-use crate::types::ParsedPerson;
-use crate::xml::{read_handle_attr, strip_prefix};
+use crate::types::{ParsedFamily, ParsedPerson};
+use crate::xml::{read_handle_attr, read_hlink_attr, strip_prefix};
 
 /// Extract all persons from a `.gramps` XML document.
 ///
@@ -158,6 +158,110 @@ pub fn extract_persons(content: &str) -> Result<Vec<ParsedPerson>, Error> {
         }
     }
     Ok(persons)
+}
+
+/// Extract all families from a `.gramps` XML document.
+///
+/// Returns a `Vec<ParsedFamily>` with father/mother/child handles for
+/// every `<family>` element. Dangling `hlink` references (handles without
+/// a matching `<person>`) are kept as-is — deduplication against persons
+/// is the caller's responsibility.
+pub fn extract_families(content: &str) -> Result<Vec<ParsedFamily>, Error> {
+    use quick_xml::events::Event;
+    use quick_xml::Reader;
+
+    let mut reader = Reader::from_str(content);
+    reader.config_mut().trim_text(true);
+
+    let mut families = Vec::new();
+    let mut current: Option<ParsedFamily> = None;
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(ref e)) => {
+                let raw = e.name().as_ref().to_vec();
+                let name = strip_prefix(&raw);
+                match name {
+                    b"family" => {
+                        let handle = read_handle_attr(e).unwrap_or_default();
+                        current = Some(ParsedFamily {
+                            handle,
+                            ..ParsedFamily::default()
+                        });
+                    }
+                    b"father" | b"mother" => {
+                        if let Some(ref mut fam) = current {
+                            if let Some(h) = read_hlink_attr(e) {
+                                if name == b"father" {
+                                    fam.father_handle = Some(h);
+                                } else {
+                                    fam.mother_handle = Some(h);
+                                }
+                            }
+                        }
+                    }
+                    b"childref" => {
+                        if let Some(ref mut fam) = current {
+                            if let Some(h) = read_hlink_attr(e) {
+                                fam.child_handles.push(h);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Empty(ref e)) => {
+                let raw = e.name().as_ref().to_vec();
+                let name = strip_prefix(&raw);
+                match name {
+                    b"family" => {
+                        // Self-closing family with handle only
+                        let handle = read_handle_attr(e).unwrap_or_default();
+                        families.push(ParsedFamily {
+                            handle,
+                            ..ParsedFamily::default()
+                        });
+                    }
+                    b"father" | b"mother" => {
+                        if let Some(ref mut fam) = current {
+                            if let Some(h) = read_hlink_attr(e) {
+                                if name == b"father" {
+                                    fam.father_handle = Some(h);
+                                } else {
+                                    fam.mother_handle = Some(h);
+                                }
+                            }
+                        }
+                    }
+                    b"childref" => {
+                        if let Some(ref mut fam) = current {
+                            if let Some(h) = read_hlink_attr(e) {
+                                fam.child_handles.push(h);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::End(ref e)) => {
+                let raw = e.name().as_ref().to_vec();
+                let name = strip_prefix(&raw);
+                if name == b"family" {
+                    if let Some(fam) = current.take() {
+                        families.push(fam);
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(e) => {
+                return Err(Error::XmlParseError {
+                    message: format!("{} at byte {}", e, reader.error_position()),
+                });
+            }
+        }
+    }
+    Ok(families)
 }
 
 /// Read the `val` attribute from a `<dateval>` element.
@@ -402,5 +506,164 @@ mod tests {
         assert_eq!(ps.len(), 2);
         assert_eq!(ps[0].given_name.as_deref(), Some("A"));
         assert_eq!(ps[1].given_name.as_deref(), Some("B"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Family extraction helpers
+    // -----------------------------------------------------------------------
+
+    fn families_from(xml: &str) -> Vec<ParsedFamily> {
+        extract_families(xml).unwrap()
+    }
+
+    fn single_family(xml: &str) -> ParsedFamily {
+        let mut fs = families_from(xml);
+        assert_eq!(fs.len(), 1, "expected exactly one family");
+        fs.remove(0)
+    }
+
+    // -----------------------------------------------------------------------
+    // Full family with parents and children
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn extract_family_full() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <families>
+    <family handle="f0001">
+      <father hlink="p0001"/>
+      <mother hlink="p0002"/>
+      <childref hlink="p0003"/>
+      <childref hlink="p0004"/>
+    </family>
+  </families>
+</database>"#;
+        let f = single_family(xml);
+        assert_eq!(f.handle, "f0001");
+        assert_eq!(f.father_handle.as_deref(), Some("p0001"));
+        assert_eq!(f.mother_handle.as_deref(), Some("p0002"));
+        assert_eq!(f.child_handles, vec!["p0003", "p0004"]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Empty family (no parents, no children)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn extract_family_empty() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <families>
+    <family handle="f0001">
+    </family>
+  </families>
+</database>"#;
+        let f = single_family(xml);
+        assert_eq!(f.handle, "f0001");
+        assert!(f.father_handle.is_none());
+        assert!(f.mother_handle.is_none());
+        assert!(f.child_handles.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Self-closing family
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn extract_family_self_closing() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <families>
+    <family handle="f0001"/>
+  </families>
+</database>"#;
+        let f = single_family(xml);
+        assert_eq!(f.handle, "f0001");
+        assert!(f.father_handle.is_none());
+        assert!(f.child_handles.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Multiple childref elements
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn extract_family_multi_childref() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <families>
+    <family handle="f0001">
+      <childref hlink="c1"/>
+      <childref hlink="c2"/>
+      <childref hlink="c3"/>
+    </family>
+  </families>
+</database>"#;
+        let f = single_family(xml);
+        assert_eq!(f.child_handles, vec!["c1", "c2", "c3"]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Dangling hlink (handle that doesn't exist)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn extract_family_dangling_hlink() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <families>
+    <family handle="f0001">
+      <father hlink="missing_person"/>
+    </family>
+  </families>
+</database>"#;
+        let f = single_family(xml);
+        // The hlink is captured even if the person doesn't exist
+        assert_eq!(f.father_handle.as_deref(), Some("missing_person"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Namespace-prefixed family
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn extract_family_namespace_prefixed() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ns:database xmlns:ns="http://gramps-project.org/xml/1.7.2/">
+  <ns:families>
+    <ns:family ns:handle="f0001">
+      <ns:father ns:hlink="p0001"/>
+      <ns:mother ns:hlink="p0002"/>
+      <ns:childref ns:hlink="p0003"/>
+    </ns:family>
+  </ns:families>
+</ns:database>"#;
+        let f = single_family(xml);
+        assert_eq!(f.handle, "f0001");
+        assert_eq!(f.father_handle.as_deref(), Some("p0001"));
+        assert_eq!(f.mother_handle.as_deref(), Some("p0002"));
+        assert_eq!(f.child_handles, vec!["p0003"]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Multiple families
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn extract_families_multiple() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <families>
+    <family handle="f1"><father hlink="p1"/></family>
+    <family handle="f2"><mother hlink="p2"/></family>
+  </families>
+</database>"#;
+        let fs = families_from(xml);
+        assert_eq!(fs.len(), 2);
+        assert_eq!(fs[0].handle, "f1");
+        assert_eq!(fs[0].father_handle.as_deref(), Some("p1"));
+        assert_eq!(fs[1].handle, "f2");
+        assert_eq!(fs[1].mother_handle.as_deref(), Some("p2"));
     }
 }
