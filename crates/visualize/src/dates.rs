@@ -16,7 +16,7 @@ use crate::graph_data::{FamilyLink, PersonNode};
 /// group using the formula:
 ///
 /// ```text
-/// imputed_year = source_year + (source_generation - target_generation) × gap
+/// imputed_year = source_year + (target_generation - source_generation) × gap
 /// ```
 ///
 /// When a node is reachable from multiple dated sources at the same BFS
