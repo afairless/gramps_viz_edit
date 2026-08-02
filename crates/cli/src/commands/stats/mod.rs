@@ -2,14 +2,15 @@
 //!
 //! This module implements the `gramps-gen stats <file>` command, which
 //! performs a single streaming pass over a `.gramps` file to count
-//! primary object types, compute family-size distribution, and report
-//! people not in any family.
+//! primary object types, compute family-size distribution, report
+//! people not in any family, and tabulate the family-size ×
+//! generation-span contingency table.
 
 pub mod count;
 
 use crate::error::CliError;
 use clap::Args;
-use count::{count_gramps_xml, StatsReport};
+use count::{count_gramps_xml, FamilyGenerationTable, StatsReport};
 
 /// Arguments for the `stats` subcommand.
 #[derive(Args, Clone, Debug)]
@@ -20,6 +21,10 @@ pub struct StatsArgs {
     /// Emit machine-readable JSON instead of a formatted table
     #[arg(long)]
     pub json: bool,
+
+    /// Use ASCII characters instead of Unicode box-drawing in text output
+    #[arg(long)]
+    pub no_unicode: bool,
 }
 
 /// Run the stats command.
@@ -37,21 +42,21 @@ pub fn run(args: StatsArgs) -> Result<(), CliError> {
     report.file = file_path.clone();
 
     // Output
-    print!("{}", render(&report, args.json));
+    print!("{}", render(&report, args.json, args.no_unicode));
     Ok(())
 }
 
 /// Render a `StatsReport` as text or JSON.
-fn render(report: &StatsReport, json: bool) -> String {
+fn render(report: &StatsReport, json: bool, no_unicode: bool) -> String {
     if json {
         serde_json::to_string_pretty(report).unwrap()
     } else {
-        format_text_report(report)
+        format_text_report(report, no_unicode)
     }
 }
 
 /// Format a `StatsReport` as human-readable text.
-fn format_text_report(report: &StatsReport) -> String {
+fn format_text_report(report: &StatsReport, no_unicode: bool) -> String {
     let mut out = String::new();
 
     out.push_str(&format!("File: {}\n\n", report.file));
@@ -96,6 +101,16 @@ fn format_text_report(report: &StatsReport) -> String {
         }
     }
 
+    // Family size × generation table
+    out.push('\n');
+    if no_unicode {
+        out.push_str(&render_generation_table_ascii(
+            &report.family_generation_table,
+        ));
+    } else {
+        out.push_str(&render_generation_table(&report.family_generation_table));
+    }
+
     // People not in family / dangling refs
     out.push_str(&format!(
         "\nPeople not in any family: {}\n",
@@ -105,6 +120,183 @@ fn format_text_report(report: &StatsReport) -> String {
         "Dangling family refs:     {}\n",
         report.dangling_refs
     ));
+
+    // Warnings (cycle detection, etc.)
+    if !report.warnings.is_empty() {
+        out.push_str("\nWarnings:\n");
+        for warning in &report.warnings {
+            out.push_str(&format!("  - {}\n", warning));
+        }
+    }
+
+    out
+}
+
+/// Render the family-size × generation-span contingency table using
+/// Unicode box-drawing characters.
+fn render_generation_table(table: &FamilyGenerationTable) -> String {
+    render_generation_table_inner(table, true)
+}
+
+/// Render the family-size × generation-span contingency table using
+/// pure ASCII characters.
+fn render_generation_table_ascii(table: &FamilyGenerationTable) -> String {
+    render_generation_table_inner(table, false)
+}
+
+/// Shared table renderer. `unicode` selects box-drawing characters;
+/// ASCII mode falls back to `|`, `-`, `+`.
+fn render_generation_table_inner(table: &FamilyGenerationTable, unicode: bool) -> String {
+    let (vline, hline, cross, title) = if unicode {
+        ("│", "─", "┼", "Family size × generation table")
+    } else {
+        ("|", "-", "+", "Family size x generation table")
+    };
+
+    if table.is_empty() {
+        return format!("{}\n  (no data)\n", title);
+    }
+
+    // Numeric keys, sorted ascending.
+    let mut sizes: Vec<usize> = table.keys().filter_map(|k| k.parse().ok()).collect();
+    sizes.sort_unstable();
+    let mut spans: Vec<usize> = table
+        .values()
+        .flat_map(|row| row.keys())
+        .filter_map(|k| k.parse().ok())
+        .collect();
+    spans.sort_unstable();
+    spans.dedup();
+
+    // Row labels: "# people" header on the first row, sizes below.
+    let mut labels: Vec<String> = Vec::with_capacity(sizes.len());
+    for (i, size) in sizes.iter().enumerate() {
+        if i == 0 {
+            labels.push(format!("# people {}", size));
+        } else {
+            labels.push(size.to_string());
+        }
+    }
+
+    // Column labels: span columns plus the "total" marginal.
+    let mut col_labels: Vec<String> = spans.iter().map(|s| s.to_string()).collect();
+    col_labels.push("total".to_string());
+
+    // Column and row marginals.
+    let col_totals: Vec<usize> = spans
+        .iter()
+        .map(|span| {
+            table
+                .values()
+                .filter_map(|row| row.get(&span.to_string()))
+                .sum()
+        })
+        .collect();
+    let row_totals: Vec<usize> = sizes
+        .iter()
+        .map(|size| {
+            table
+                .get(&size.to_string())
+                .and_then(|row| row.get("total"))
+                .copied()
+                .unwrap_or(0)
+        })
+        .collect();
+    let grand_total: usize = row_totals.iter().sum();
+
+    // Column widths fit header, cells, and column totals.
+    let mut col_widths: Vec<usize> = Vec::with_capacity(col_labels.len());
+    for (j, span) in spans.iter().enumerate() {
+        let mut w = col_labels[j].len().max(col_totals[j].to_string().len());
+        for size in &sizes {
+            if let Some(row) = table.get(&size.to_string()) {
+                if let Some(c) = row.get(&span.to_string()) {
+                    w = w.max(c.to_string().len());
+                }
+            }
+        }
+        col_widths.push(w);
+    }
+    let total_col_w = "total".len().max(grand_total.to_string().len()).max(
+        row_totals
+            .iter()
+            .map(|t| t.to_string().len())
+            .max()
+            .unwrap_or(0),
+    );
+    col_widths.push(total_col_w);
+
+    // Left label column width.
+    let mut label_w = "# generations".len();
+    for label in &labels {
+        label_w = label_w.max(label.len());
+    }
+    label_w = label_w.max("total".len());
+
+    let right_w: usize = col_widths.iter().sum::<usize>() + 2 * (col_widths.len() - 1);
+    let separator = format!(
+        "  {}{}{}\n",
+        hline.repeat(label_w + 1),
+        cross,
+        hline.repeat(right_w),
+    );
+
+    let mut out = String::new();
+    out.push_str(title);
+    out.push('\n');
+
+    // Header row
+    out.push_str("  ");
+    out.push_str(&format!("{:<w$}", "# generations", w = label_w));
+    out.push(' ');
+    out.push_str(vline);
+    for (j, label) in col_labels.iter().enumerate() {
+        if j > 0 {
+            out.push_str("  ");
+        }
+        out.push_str(&format!("{:>w$}", label, w = col_widths[j]));
+    }
+    out.push('\n');
+    out.push_str(&separator);
+
+    // Data rows
+    for (i, size) in sizes.iter().enumerate() {
+        out.push_str("  ");
+        out.push_str(&format!("{:<w$}", labels[i], w = label_w));
+        out.push(' ');
+        out.push_str(vline);
+        for (j, span) in spans.iter().enumerate() {
+            if j > 0 {
+                out.push_str("  ");
+            }
+            let val = table
+                .get(&size.to_string())
+                .and_then(|row| row.get(&span.to_string()))
+                .copied()
+                .unwrap_or(0);
+            out.push_str(&format!("{:>w$}", val, w = col_widths[j]));
+        }
+        out.push_str("  ");
+        out.push_str(&format!("{:>w$}", row_totals[i], w = total_col_w));
+        out.push('\n');
+    }
+
+    out.push_str(&separator);
+
+    // Total row
+    out.push_str("  ");
+    out.push_str(&format!("{:<w$}", "total", w = label_w));
+    out.push(' ');
+    out.push_str(vline);
+    for (j, _span) in spans.iter().enumerate() {
+        if j > 0 {
+            out.push_str("  ");
+        }
+        out.push_str(&format!("{:>w$}", col_totals[j], w = col_widths[j]));
+    }
+    out.push_str("  ");
+    out.push_str(&format!("{:>w$}", grand_total, w = total_col_w));
+    out.push('\n');
 
     out
 }
@@ -121,6 +313,7 @@ mod tests {
         let args = StatsArgs {
             file: "/nonexistent/stats-test.gramps".to_string(),
             json: false,
+            no_unicode: false,
         };
         let result = run(args);
         match result {
@@ -143,6 +336,7 @@ mod tests {
         let args = StatsArgs {
             file: path,
             json: false,
+            no_unicode: false,
         };
         let result = run(args);
         match result {
@@ -163,6 +357,7 @@ mod tests {
         let args = StatsArgs {
             file: path,
             json: false,
+            no_unicode: false,
         };
         let result = run(args);
         assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
@@ -191,7 +386,7 @@ mod tests {
             warnings: vec![],
         };
 
-        let text = format_text_report(&report);
+        let text = format_text_report(&report, false);
 
         // Check key parts of the output
         assert!(text.contains("File: family.gramps"));
@@ -228,7 +423,7 @@ mod tests {
             warnings: vec![],
         };
 
-        let text = format_text_report(&report);
+        let text = format_text_report(&report, false);
         assert!(text.contains("size  0: 2 empty families"));
         assert!(text.contains("People not in any family: 5"));
         assert!(text.contains("Dangling family refs:     1"));
@@ -278,7 +473,7 @@ mod tests {
             warnings: vec!["a warning".to_string()],
         };
 
-        let json = render(&report, true);
+        let json = render(&report, true, false);
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
         assert_eq!(parsed["file"], "test.gramps");
@@ -288,5 +483,146 @@ mod tests {
         assert_eq!(parsed["people_not_in_family"], 2);
         assert_eq!(parsed["dangling_refs"], 0);
         assert!(parsed["warnings"].is_array());
+    }
+
+    #[test]
+    fn render_generation_table_empty() {
+        let table: FamilyGenerationTable = BTreeMap::new();
+        let text = render_generation_table(&table);
+        assert!(text.contains("Family size × generation table"));
+        assert!(text.contains("(no data)"));
+    }
+
+    #[test]
+    fn render_generation_table_single_row() {
+        let table: FamilyGenerationTable = BTreeMap::from([(
+            "2".to_string(),
+            BTreeMap::from([("1".to_string(), 3), ("total".to_string(), 3)]),
+        )]);
+        let text = render_generation_table(&table);
+        assert!(text.contains("Family size × generation table"));
+        assert!(text.contains("# generations"));
+        assert!(text.contains("# people"));
+        assert!(text.contains("total"));
+        assert!(text.lines().any(|l| l.contains("│") && l.contains("3")));
+    }
+
+    #[test]
+    fn render_generation_table_multi_row() {
+        let mut table: FamilyGenerationTable = BTreeMap::new();
+        table.insert(
+            "1".to_string(),
+            BTreeMap::from([
+                ("1".to_string(), 5),
+                ("2".to_string(), 0),
+                ("3".to_string(), 0),
+                ("total".to_string(), 5),
+            ]),
+        );
+        table.insert(
+            "2".to_string(),
+            BTreeMap::from([
+                ("1".to_string(), 4),
+                ("2".to_string(), 2),
+                ("3".to_string(), 0),
+                ("total".to_string(), 6),
+            ]),
+        );
+        table.insert(
+            "3".to_string(),
+            BTreeMap::from([
+                ("1".to_string(), 1),
+                ("2".to_string(), 8),
+                ("3".to_string(), 2),
+                ("total".to_string(), 11),
+            ]),
+        );
+
+        let text = render_generation_table(&table);
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(lines[0].contains("Family size × generation table"));
+        assert!(lines[1].contains("# generations"));
+        // Total row: 10, 10, 2, 22
+        assert!(
+            lines.last().unwrap().contains("10") && lines.last().unwrap().contains("22"),
+            "Total row wrong: {}",
+            lines.last().unwrap()
+        );
+        // Row totals appear
+        assert!(text.contains("5"));
+        assert!(text.contains("11"));
+    }
+
+    #[test]
+    fn render_generation_table_unicode_ascii() {
+        let mut table: FamilyGenerationTable = BTreeMap::new();
+        table.insert(
+            "2".to_string(),
+            BTreeMap::from([("1".to_string(), 3), ("total".to_string(), 3)]),
+        );
+
+        let unicode_text = render_generation_table(&table);
+        let ascii_text = render_generation_table_ascii(&table);
+
+        assert!(unicode_text.contains('│'));
+        assert!(!ascii_text.contains('│'));
+        assert!(ascii_text.contains('|'));
+        assert!(ascii_text.contains('+'));
+        // Both contain the same data
+        assert!(ascii_text.contains("3"));
+        assert!(unicode_text.contains("3"));
+    }
+
+    #[test]
+    fn format_text_report_contains_generation_table_section() {
+        let mut table: FamilyGenerationTable = BTreeMap::new();
+        table.insert(
+            "3".to_string(),
+            BTreeMap::from([("2".to_string(), 1), ("total".to_string(), 1)]),
+        );
+        let report = StatsReport {
+            file: "family.gramps".to_string(),
+            counts: PrimaryTypeCounts {
+                families: 1,
+                ..PrimaryTypeCounts::default()
+            },
+            family_size_distribution: BTreeMap::from([(3, 1)]),
+            family_generation_table: table,
+            people_not_in_family: 0,
+            dangling_refs: 0,
+            warnings: vec![],
+        };
+
+        let text = format_text_report(&report, false);
+        assert!(text.contains("Family size distribution"));
+        assert!(text.contains("Family size × generation table"));
+        assert!(text.contains("# generations"));
+        // Section appears below distribution, above dangling refs
+        let dist_pos = text.find("Family size distribution").unwrap();
+        let table_pos = text.find("Family size × generation table").unwrap();
+        let people_pos = text.find("People not in any family").unwrap();
+        assert!(dist_pos < table_pos);
+        assert!(table_pos < people_pos);
+    }
+
+    #[test]
+    fn format_text_report_warnings() {
+        let report = StatsReport {
+            file: "test.gramps".to_string(),
+            counts: PrimaryTypeCounts::default(),
+            family_size_distribution: BTreeMap::new(),
+            family_generation_table: BTreeMap::new(),
+            people_not_in_family: 0,
+            dangling_refs: 0,
+            warnings: vec![
+                "WARNING: detected 1 cycle(s) in the family graph; generation layering may be approximate"
+                    .to_string(),
+            ],
+        };
+
+        let text = format_text_report(&report, false);
+        assert!(text.contains("Warnings:"));
+        assert!(text.contains("WARNING: detected 1 cycle(s)"));
+        assert!(text.contains("  - WARNING: detected 1 cycle(s)"));
     }
 }
