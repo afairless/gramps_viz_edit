@@ -43,7 +43,12 @@ fn largest_connected_person_component(graph: &typed_graph::Graph) -> usize {
             }
             // Add children: find FamilyChildRef edges targeting this family
             for edge in graph.iter_edges() {
-                if let typed_graph::Edge::FamilyChildRef { ref source, ref target, .. } = edge {
+                if let typed_graph::Edge::FamilyChildRef {
+                    ref source,
+                    ref target,
+                    ..
+                } = edge
+                {
                     if source == &family.handle && person_handles.contains(target) {
                         members.push(target.clone());
                     }
@@ -52,8 +57,14 @@ fn largest_connected_person_component(graph: &typed_graph::Graph) -> usize {
             // Connect all members in a clique
             for i in 0..members.len() {
                 for j in (i + 1)..members.len() {
-                    person_adj.get_mut(&members[i]).unwrap().push(members[j].clone());
-                    person_adj.get_mut(&members[j]).unwrap().push(members[i].clone());
+                    person_adj
+                        .get_mut(&members[i])
+                        .unwrap()
+                        .push(members[j].clone());
+                    person_adj
+                        .get_mut(&members[j])
+                        .unwrap()
+                        .push(members[i].clone());
                 }
             }
         }
@@ -116,7 +127,8 @@ fn generate_small_family_tree() {
     };
     let adv_config = typed_graph::generate::AdversarialConfig::default();
 
-    let mut result = typed_graph::generate::generate_random(&config, &adv_config, None, &schema).unwrap();
+    let mut result =
+        typed_graph::generate::generate_random(&config, &adv_config, None, &schema).unwrap();
     assert_eq!(result.stats.person_count, 10);
     assert!(result.stats.family_count <= 5);
     assert!(result.stats.event_count > 0);
@@ -152,7 +164,8 @@ fn generate_single_person() {
     };
     let adv_config = typed_graph::generate::AdversarialConfig::default();
 
-    let mut result = typed_graph::generate::generate_random(&config, &adv_config, None, &schema).unwrap();
+    let mut result =
+        typed_graph::generate::generate_random(&config, &adv_config, None, &schema).unwrap();
     assert_eq!(result.stats.person_count, 1);
     assert!(result.stats.family_count == 0);
 
@@ -225,7 +238,8 @@ fn generate_with_adversarial_all_preserves_validity() {
     };
 
     // Generate with adversarial strategies
-    let result = typed_graph::generate::generate_random(&config, &adv_config, None, &schema).unwrap();
+    let result =
+        typed_graph::generate::generate_random(&config, &adv_config, None, &schema).unwrap();
 
     // Apply Category B transforms
     let mut graph =
@@ -269,7 +283,8 @@ fn generate_serialize_and_validate_roundtrip() {
     };
     let adv_config = typed_graph::generate::AdversarialConfig::default();
 
-    let result = typed_graph::generate::generate_random(&config, &adv_config, None, &schema).unwrap();
+    let result =
+        typed_graph::generate::generate_random(&config, &adv_config, None, &schema).unwrap();
 
     // Serialize
     let map = output::SerializationMap::new();
@@ -552,10 +567,10 @@ fn generate_depth_4_produces_deep_tree() {
 /// Integration test: count_gramps_xml on a known graph through serialization.
 #[test]
 fn stats_count_known_graph() {
-    use std::io::BufWriter;
     use cli::commands::stats::count::count_gramps_xml;
     use output::GraphXmlWriter;
     use output::SerializationMap;
+    use std::io::BufWriter;
     use typed_graph::generate::GraphBuilder;
 
     let mut graph = typed_graph::Graph::new();
@@ -618,4 +633,17 @@ fn stats_count_known_graph() {
     // Dana is not in any family
     assert_eq!(report.people_not_in_family, 1);
     assert_eq!(report.dangling_refs, 0);
+
+    // Generation table: size 3, span 2 (parents gen 0, child gen 1)
+    let table = &report.family_generation_table;
+    assert_eq!(
+        table.get("3").and_then(|r| r.get("2")),
+        Some(&1),
+        "Expected 1 family of size 3 with span 2"
+    );
+    assert_eq!(
+        table.get("3").and_then(|r| r.get("total")),
+        Some(&1),
+        "Expected row total 1"
+    );
 }
