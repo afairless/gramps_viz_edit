@@ -101,14 +101,30 @@ fn format_text_report(report: &StatsReport, no_unicode: bool) -> String {
         }
     }
 
-    // Family size × generation table
+    // Family group distribution
+    if !report.family_group_distribution.is_empty() {
+        out.push_str("\nFamily group distribution\n");
+        for (size, groups) in &report.family_group_distribution {
+            let people = size * groups;
+            let group_word = if *groups == 1 { "group" } else { "groups" };
+            let people_word = if people == 1 { "person" } else { "people" };
+            out.push_str(&format!(
+                "  size {:>2}: {} {} ({} {})\n",
+                size, groups, group_word, people, people_word
+            ));
+        }
+    }
+
+    // Family group size × generation table
     out.push('\n');
     if no_unicode {
-        out.push_str(&render_generation_table_ascii(
+        out.push_str(&render_family_group_table_ascii(
             &report.family_group_generation_table,
         ));
     } else {
-        out.push_str(&render_generation_table(&report.family_group_generation_table));
+        out.push_str(&render_family_group_table(
+            &report.family_group_generation_table,
+        ));
     }
 
     // People not in family / dangling refs
@@ -132,25 +148,25 @@ fn format_text_report(report: &StatsReport, no_unicode: bool) -> String {
     out
 }
 
-/// Render the family-size × generation-span contingency table using
+/// Render the family-group-size × generation-span contingency table using
 /// Unicode box-drawing characters.
-fn render_generation_table(table: &FamilyGroupGenerationTable) -> String {
-    render_generation_table_inner(table, true)
+fn render_family_group_table(table: &FamilyGroupGenerationTable) -> String {
+    render_family_group_table_inner(table, true)
 }
 
-/// Render the family-size × generation-span contingency table using
+/// Render the family-group-size × generation-span contingency table using
 /// pure ASCII characters.
-fn render_generation_table_ascii(table: &FamilyGroupGenerationTable) -> String {
-    render_generation_table_inner(table, false)
+fn render_family_group_table_ascii(table: &FamilyGroupGenerationTable) -> String {
+    render_family_group_table_inner(table, false)
 }
 
 /// Shared table renderer. `unicode` selects box-drawing characters;
 /// ASCII mode falls back to `|`, `-`, `+`.
-fn render_generation_table_inner(table: &FamilyGroupGenerationTable, unicode: bool) -> String {
+fn render_family_group_table_inner(table: &FamilyGroupGenerationTable, unicode: bool) -> String {
     let (vline, hline, cross, title) = if unicode {
-        ("│", "─", "┼", "Family size × generation table")
+        ("│", "─", "┼", "Family group size × generation table")
     } else {
-        ("|", "-", "+", "Family size x generation table")
+        ("|", "-", "+", "Family group size x generation table")
     };
 
     if table.is_empty() {
@@ -490,21 +506,21 @@ mod tests {
     }
 
     #[test]
-    fn render_generation_table_empty() {
+    fn render_family_group_table_empty() {
         let table: FamilyGroupGenerationTable = BTreeMap::new();
-        let text = render_generation_table(&table);
-        assert!(text.contains("Family size × generation table"));
+        let text = render_family_group_table(&table);
+        assert!(text.contains("Family group size × generation table"));
         assert!(text.contains("(no data)"));
     }
 
     #[test]
-    fn render_generation_table_single_row() {
+    fn render_family_group_table_single_row() {
         let table: FamilyGroupGenerationTable = BTreeMap::from([(
             "2".to_string(),
             BTreeMap::from([("1".to_string(), 3), ("total".to_string(), 3)]),
         )]);
-        let text = render_generation_table(&table);
-        assert!(text.contains("Family size × generation table"));
+        let text = render_family_group_table(&table);
+        assert!(text.contains("Family group size × generation table"));
         assert!(text.contains("# generations"));
         assert!(text.contains("# people"));
         assert!(text.contains("total"));
@@ -512,7 +528,7 @@ mod tests {
     }
 
     #[test]
-    fn render_generation_table_multi_row() {
+    fn render_family_group_table_multi_row() {
         let mut table: FamilyGroupGenerationTable = BTreeMap::new();
         table.insert(
             "1".to_string(),
@@ -542,9 +558,9 @@ mod tests {
             ]),
         );
 
-        let text = render_generation_table(&table);
+        let text = render_family_group_table(&table);
         let lines: Vec<&str> = text.lines().collect();
-        assert!(lines[0].contains("Family size × generation table"));
+        assert!(lines[0].contains("Family group size × generation table"));
         assert!(lines[1].contains("# generations"));
         // Total row: 10, 10, 2, 22
         assert!(
@@ -558,15 +574,15 @@ mod tests {
     }
 
     #[test]
-    fn render_generation_table_unicode_ascii() {
+    fn render_family_group_table_unicode_ascii() {
         let mut table: FamilyGroupGenerationTable = BTreeMap::new();
         table.insert(
             "2".to_string(),
             BTreeMap::from([("1".to_string(), 3), ("total".to_string(), 3)]),
         );
 
-        let unicode_text = render_generation_table(&table);
-        let ascii_text = render_generation_table_ascii(&table);
+        let unicode_text = render_family_group_table(&table);
+        let ascii_text = render_family_group_table_ascii(&table);
 
         assert!(unicode_text.contains('│'));
         assert!(!ascii_text.contains('│'));
@@ -600,11 +616,11 @@ mod tests {
 
         let text = format_text_report(&report, false);
         assert!(text.contains("Family size distribution"));
-        assert!(text.contains("Family size × generation table"));
+        assert!(text.contains("Family group size × generation table"));
         assert!(text.contains("# generations"));
         // Section appears below distribution, above dangling refs
         let dist_pos = text.find("Family size distribution").unwrap();
-        let table_pos = text.find("Family size × generation table").unwrap();
+        let table_pos = text.find("Family group size × generation table").unwrap();
         let people_pos = text.find("People not in any family").unwrap();
         assert!(dist_pos < table_pos);
         assert!(table_pos < people_pos);

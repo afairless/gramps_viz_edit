@@ -496,12 +496,16 @@ fn e2e_stats_text_output() {
         "Should contain family size distribution"
     );
     assert!(
-        stdout.contains("Family size × generation table"),
-        "Should contain generation table section"
+        stdout.contains("Family group size × generation table"),
+        "Should contain family group generation table section"
     );
     assert!(
         stdout.contains("# generations"),
         "Should contain generation table header"
+    );
+    assert!(
+        stdout.contains("Family group distribution"),
+        "Should contain family group distribution section"
     );
     assert!(
         stdout.contains("People not in any family"),
