@@ -274,7 +274,11 @@ pub fn compute_generations(
 pub fn compute_generation_table(
     family_records: &[FamilyRecord],
     all_handles: &HashSet<String>,
-) -> (FamilyGroupGenerationTable, BTreeMap<usize, usize>, Vec<String>) {
+) -> (
+    FamilyGroupGenerationTable,
+    BTreeMap<usize, usize>,
+    Vec<String>,
+) {
     let analysis = analyze_generations(family_records, all_handles);
     let GenerationAnalysis {
         components,
@@ -615,10 +619,7 @@ mod tests {
     #[test]
     fn compute_generations_chain() {
         // p1+p2 → p3 → p4 (3 levels: 0, 0, 1, 2)
-        let records = vec![
-            rec(&["p1", "p2"], &["p3"]),
-            rec(&["p3"], &["p4"]),
-        ];
+        let records = vec![rec(&["p1", "p2"], &["p3"]), rec(&["p3"], &["p4"])];
         let all = collect_handles(&records);
         let gens = gen_map(&records, &all);
         assert_eq!(gens.get("p1"), Some(&0));
@@ -659,10 +660,7 @@ mod tests {
     #[test]
     fn compute_generations_matches_table_span() {
         // The max generation + 1 per component must equal the table span.
-        let records = vec![
-            rec(&["p1", "p2"], &["p3"]),
-            rec(&["p3", "p4"], &["p5"]),
-        ];
+        let records = vec![rec(&["p1", "p2"], &["p3"]), rec(&["p3", "p4"], &["p5"])];
         let all = collect_handles(&records);
         let gens = gen_map(&records, &all);
         let (table, _dist, _warnings) = compute_generation_table(&records, &all);

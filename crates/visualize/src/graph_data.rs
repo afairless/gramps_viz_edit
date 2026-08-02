@@ -83,10 +83,7 @@ pub struct SelectionExport {
 ///    parent-child between each parent and each child).
 /// 3. Runs DSU + generation layering via `gramps_reader::compute_generations`.
 /// 4. Assigns family-group IDs and assembles the final `GraphData`.
-pub fn build_graph_data(
-    persons: &[ParsedPerson],
-    families: &[ParsedFamily],
-) -> GraphData {
+pub fn build_graph_data(persons: &[ParsedPerson], families: &[ParsedFamily]) -> GraphData {
     // ---- 1. Convert persons to nodes ----
     let mut nodes: Vec<PersonNode> = persons.iter().map(person_to_node).collect();
 
@@ -152,11 +149,8 @@ pub fn build_graph_data(
     let mut roots: Vec<&str> = component_of.values().map(|s| s.as_str()).collect();
     roots.sort_unstable();
     roots.dedup();
-    let component_id: HashMap<&str, usize> = roots
-        .iter()
-        .enumerate()
-        .map(|(i, r)| (*r, i))
-        .collect();
+    let component_id: HashMap<&str, usize> =
+        roots.iter().enumerate().map(|(i, r)| (*r, i)).collect();
 
     // ---- 5. Apply generations and component IDs to nodes ----
     for node in &mut nodes {
@@ -340,7 +334,12 @@ mod tests {
     // build_graph_data — integration
     // -----------------------------------------------------------------------
 
-    fn p(handle: &str, given: Option<&str>, surname: Option<&str>, gender: Option<&str>) -> ParsedPerson {
+    fn p(
+        handle: &str,
+        given: Option<&str>,
+        surname: Option<&str>,
+        _gender: Option<&str>,
+    ) -> ParsedPerson {
         ParsedPerson {
             handle: handle.to_string(),
             given_name: given.map(|s| s.to_string()),
@@ -377,7 +376,11 @@ mod tests {
         assert_eq!(gd.links.len(), 3); // 1 spouse + 2 parent-child
 
         // Check spouse link
-        let spouse_link = gd.links.iter().find(|l| l.link_type == LinkType::Spouse).unwrap();
+        let spouse_link = gd
+            .links
+            .iter()
+            .find(|l| l.link_type == LinkType::Spouse)
+            .unwrap();
         assert_eq!(spouse_link.source, "p1");
         assert_eq!(spouse_link.target, "p2");
 
@@ -388,8 +391,12 @@ mod tests {
             .filter(|l| l.link_type == LinkType::ParentChild)
             .collect();
         assert_eq!(pc_links.len(), 2);
-        assert!(pc_links.iter().any(|l| l.source == "p1" && l.target == "p3"));
-        assert!(pc_links.iter().any(|l| l.source == "p2" && l.target == "p3"));
+        assert!(pc_links
+            .iter()
+            .any(|l| l.source == "p1" && l.target == "p3"));
+        assert!(pc_links
+            .iter()
+            .any(|l| l.source == "p2" && l.target == "p3"));
 
         // Check generations
         let p1 = gd.nodes.iter().find(|n| n.handle == "p1").unwrap();
@@ -413,23 +420,34 @@ mod tests {
             p("p3", Some("C"), None, Some("M")),
             p("p4", Some("D"), None, None), // isolated
         ];
-        let families = vec![
-            f("f1", Some("p1"), Some("p2"), &["p3"]),
-        ];
+        let families = vec![f("f1", Some("p1"), Some("p2"), &["p3"])];
 
         let gd = build_graph_data(&persons, &families);
         assert_eq!(gd.nodes.len(), 4);
         assert_eq!(gd.family_groups.len(), 2);
 
         // p1, p2, p3 are in one group; p4 isolated
-        let p1_g = gd.nodes.iter().find(|n| n.handle == "p1").unwrap().family_group;
-        let p4_g = gd.nodes.iter().find(|n| n.handle == "p4").unwrap().family_group;
+        let p1_g = gd
+            .nodes
+            .iter()
+            .find(|n| n.handle == "p1")
+            .unwrap()
+            .family_group;
+        let p4_g = gd
+            .nodes
+            .iter()
+            .find(|n| n.handle == "p4")
+            .unwrap()
+            .family_group;
         assert_ne!(p1_g, p4_g);
     }
 
     #[test]
     fn build_graph_data_no_families() {
-        let persons = vec![p("p1", Some("A"), None, None), p("p2", Some("B"), None, None)];
+        let persons = vec![
+            p("p1", Some("A"), None, None),
+            p("p2", Some("B"), None, None),
+        ];
         let families: Vec<ParsedFamily> = vec![];
 
         let gd = build_graph_data(&persons, &families);

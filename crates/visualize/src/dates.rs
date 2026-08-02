@@ -214,10 +214,7 @@ mod tests {
     #[test]
     fn impute_known_ancestor() {
         // Parent (gen 0, born 1900) → child (gen 1, unknown)
-        let persons = vec![
-            node("p1", Some(1900), 0, 0),
-            node("p2", None, 1, 0),
-        ];
+        let persons = vec![node("p1", Some(1900), 0, 0), node("p2", None, 1, 0)];
         let links = vec![parent_child("p1", "p2")];
 
         let result = impute_dates(&persons, &links, 25, false);
@@ -301,10 +298,7 @@ mod tests {
     #[test]
     fn impute_known_descendant() {
         // Child (gen 1, born 1950) → parent (gen 0, unknown)
-        let persons = vec![
-            node("p1", None, 0, 0),
-            node("p2", Some(1950), 1, 0),
-        ];
+        let persons = vec![node("p1", None, 0, 0), node("p2", Some(1950), 1, 0)];
         let links = vec![parent_child("p1", "p2")];
 
         let result = impute_dates(&persons, &links, 25, false);
@@ -354,10 +348,7 @@ mod tests {
     #[test]
     fn impute_no_reachable_date() {
         // Two persons, neither dated, same family group.
-        let persons = vec![
-            node("p1", None, 0, 0),
-            node("p2", None, 1, 0),
-        ];
+        let persons = vec![node("p1", None, 0, 0), node("p2", None, 1, 0)];
         let links = vec![parent_child("p1", "p2")];
 
         let result = impute_dates(&persons, &links, 25, false);
@@ -371,10 +362,7 @@ mod tests {
 
     #[test]
     fn impute_gap_zero() {
-        let persons = vec![
-            node("p1", Some(1900), 0, 0),
-            node("p2", None, 1, 0),
-        ];
+        let persons = vec![node("p1", Some(1900), 0, 0), node("p2", None, 1, 0)];
         let links = vec![parent_child("p1", "p2")];
 
         let result = impute_dates(&persons, &links, 0, false);
@@ -388,10 +376,7 @@ mod tests {
 
     #[test]
     fn impute_fully_dated_no_op() {
-        let persons = vec![
-            node("p1", Some(1900), 0, 0),
-            node("p2", Some(1925), 1, 0),
-        ];
+        let persons = vec![node("p1", Some(1900), 0, 0), node("p2", Some(1925), 1, 0)];
         let links = vec![parent_child("p1", "p2")];
 
         let result = impute_dates(&persons, &links, 25, false);
@@ -405,10 +390,7 @@ mod tests {
 
     #[test]
     fn impute_no_impute_flag() {
-        let persons = vec![
-            node("p1", Some(1900), 0, 0),
-            node("p2", None, 1, 0),
-        ];
+        let persons = vec![node("p1", Some(1900), 0, 0), node("p2", None, 1, 0)];
         let links = vec![parent_child("p1", "p2")];
 
         let result = impute_dates(&persons, &links, 25, true);
@@ -423,10 +405,7 @@ mod tests {
 
     #[test]
     fn impute_determinism() {
-        let persons = vec![
-            node("p1", Some(1900), 0, 0),
-            node("p2", None, 1, 0),
-        ];
+        let persons = vec![node("p1", Some(1900), 0, 0), node("p2", None, 1, 0)];
         let links = vec![parent_child("p1", "p2")];
 
         let r1 = impute_dates(&persons, &links, 25, false);
@@ -446,10 +425,7 @@ mod tests {
             node("p", None, 1, 0),
             node("c", None, 2, 0),
         ];
-        let links = vec![
-            parent_child("gp", "p"),
-            parent_child("p", "c"),
-        ];
+        let links = vec![parent_child("gp", "p"), parent_child("p", "c")];
 
         let result = impute_dates(&persons, &links, 25, false);
         let gp = result.get("gp").unwrap().unwrap();
@@ -465,10 +441,7 @@ mod tests {
 
     #[test]
     fn impute_custom_gap() {
-        let persons = vec![
-            node("p1", Some(1900), 0, 0),
-            node("p2", None, 1, 0),
-        ];
+        let persons = vec![node("p1", Some(1900), 0, 0), node("p2", None, 1, 0)];
         let links = vec![parent_child("p1", "p2")];
 
         let result = impute_dates(&persons, &links, 30, false);

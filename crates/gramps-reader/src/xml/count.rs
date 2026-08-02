@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
 use crate::graph::{compute_generation_table, FamilyGroupGenerationTable};
-use crate::xml::{read_hlink_attr, read_handle_attr, strip_prefix};
+use crate::xml::{read_handle_attr, read_hlink_attr, strip_prefix};
 
 /// Statistics collected from a single `.gramps` XML document.
 ///

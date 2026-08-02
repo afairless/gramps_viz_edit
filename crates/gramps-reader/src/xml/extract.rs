@@ -110,12 +110,11 @@ pub fn extract_persons(content: &str) -> Result<Vec<ParsedPerson>, Error> {
             Ok(Event::Text(ref e)) => {
                 if let Ok(text) = e.unescape() {
                     let text = text.trim();
-                    if !text.is_empty()
-                        && in_gender {
-                            if let Some(ref mut person) = current {
-                                person.gender = Some(text.to_string());
-                            }
+                    if !text.is_empty() && in_gender {
+                        if let Some(ref mut person) = current {
+                            person.gender = Some(text.to_string());
                         }
+                    }
                 }
             }
             Ok(Event::End(ref e)) => {

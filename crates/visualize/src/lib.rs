@@ -31,8 +31,8 @@ pub fn load_graph_data(
     no_impute: bool,
     generation_gap: u32,
 ) -> Result<GraphData, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("Cannot read file '{}': {}", path, e))?;
+    let content =
+        std::fs::read_to_string(path).map_err(|e| format!("Cannot read file '{}': {}", path, e))?;
 
     let persons = gramps_reader::extract_persons(&content)
         .map_err(|e| format!("Not a valid Gramps XML file: {}", e))?;
