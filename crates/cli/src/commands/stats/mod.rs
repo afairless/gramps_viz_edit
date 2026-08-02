@@ -10,7 +10,7 @@ pub mod count;
 
 use crate::error::CliError;
 use clap::Args;
-use count::{count_gramps_xml, FamilyGroupGenerationTable, StatsReport};
+use gramps_reader::{count_gramps_xml, FamilyGroupGenerationTable, StatsReport};
 
 /// Arguments for the `stats` subcommand.
 #[derive(Args, Clone, Debug)]

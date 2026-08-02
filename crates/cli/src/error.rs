@@ -124,6 +124,14 @@ impl From<crate::scenario::ScenarioError> for CliError {
     }
 }
 
+impl From<gramps_reader::Error> for CliError {
+    fn from(err: gramps_reader::Error) -> Self {
+        match err {
+            gramps_reader::Error::XmlParseError { message } => CliError::XmlParseError { message },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

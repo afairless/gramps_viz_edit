@@ -1,0 +1,13 @@
+[package]
+name = "gramps-reader"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+quick-xml = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+typed-graph = { path = "../typed-graph" }
+output = { path = "../output" }
+serde_json = { workspace = true }

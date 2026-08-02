@@ -1,0 +1,588 @@
+//! Streaming counting logic for the `stats` command.
+//!
+//! `count_gramps_xml` scans a `.gramps` XML document in a single
+//! streaming pass and produces a [`StatsReport`] without
+//! reconstructing the full typed graph. It is a pure function over
+//! `&str` so it can be unit-tested without filesystem access.
+
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+use serde::{Deserialize, Serialize};
+
+use crate::error::Error;
+use crate::graph::{compute_generation_table, FamilyGroupGenerationTable};
+use crate::xml::{read_hlink_attr, read_handle_attr, strip_prefix};
+
+/// Statistics collected from a single `.gramps` XML document.
+///
+/// # Gramps families vs. family groups
+///
+/// Throughout this report, two related but distinct concepts share the word
+/// "family":
+///
+/// - **Gramps families** — nuclear families represented by `<family>` XML
+///   elements (parents + children). Counted by `family_size_distribution`.
+/// - **Family groups** — connected components of the person graph, built by
+///   linking people across all `<family>` elements. Tabulated by
+///   `family_group_generation_table` and `family_group_distribution`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct StatsReport {
+    /// Path of the analyzed file (filled in by the CLI).
+    pub file: String,
+    /// Counts per primary object type.
+    pub counts: PrimaryTypeCounts,
+    /// Gramps-family size → number of families, ascending by size.
+    /// Counts `<family>` XML elements by nuclear-family size.
+    pub family_size_distribution: BTreeMap<usize, usize>,
+    /// Family-group-size × generation-span contingency table.
+    /// Each row is a connected component (family group) of the person graph.
+    pub family_group_generation_table: FamilyGroupGenerationTable,
+    /// Family-group size → number of groups (connected components).
+    /// Populated during the same component iteration that builds the
+    /// generation table.
+    pub family_group_distribution: BTreeMap<usize, usize>,
+    /// People whose handle never appears in any family.
+    pub people_not_in_family: usize,
+    /// Family `ref` handles without a matching `<person>`.
+    pub dangling_refs: usize,
+    /// Non-fatal warnings emitted during the scan.
+    pub warnings: Vec<String>,
+}
+
+/// Counts for the ten primary object types.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct PrimaryTypeCounts {
+    pub people: usize,
+    pub families: usize,
+    pub events: usize,
+    pub places: usize,
+    pub sources: usize,
+    pub citations: usize,
+    pub repositories: usize,
+    pub media: usize,
+    pub notes: usize,
+    pub tags: usize,
+}
+
+/// Scan a `.gramps` XML document and produce a [`StatsReport`].
+///
+/// Returns `Err(Error::XmlParseError)` when the content is not
+/// well-formed XML.
+pub fn count_gramps_xml(content: &str) -> Result<StatsReport, Error> {
+    use quick_xml::events::Event;
+    use quick_xml::Reader;
+
+    let mut reader = Reader::from_str(content);
+    reader.config_mut().trim_text(true);
+
+    let mut report = StatsReport::default();
+    let mut all_handles: HashSet<String> = HashSet::new();
+    let mut ref_handles: HashSet<String> = HashSet::new();
+    let mut family_records: Vec<crate::types::FamilyRecord> = Vec::new();
+    let mut completed_records: Vec<crate::types::FamilyRecord> = Vec::new();
+    let mut histogram: HashMap<usize, usize> = HashMap::new();
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(ref e)) => {
+                let name = e.name().as_ref().to_vec();
+                let name = strip_prefix(&name);
+                match name {
+                    b"person" => {
+                        report.counts.people += 1;
+                        if let Some(h) = read_handle_attr(e) {
+                            all_handles.insert(h);
+                        }
+                    }
+                    b"family" => {
+                        report.counts.families += 1;
+                        family_records.push(crate::types::FamilyRecord {
+                            parent_handles: Vec::new(),
+                            child_handles: Vec::new(),
+                        });
+                    }
+                    b"event" => report.counts.events += 1,
+                    b"placeobj" => report.counts.places += 1,
+                    b"source" => report.counts.sources += 1,
+                    b"citation" => report.counts.citations += 1,
+                    b"repository" => report.counts.repositories += 1,
+                    b"object" => report.counts.media += 1,
+                    b"note" => report.counts.notes += 1,
+                    b"tag" => report.counts.tags += 1,
+                    b"father" | b"mother" => {
+                        if let Some(ref_handle) = read_hlink_attr(e) {
+                            if let Some(current) = family_records.last_mut() {
+                                current.parent_handles.push(ref_handle.clone());
+                            }
+                            ref_handles.insert(ref_handle);
+                        }
+                    }
+                    b"childref" => {
+                        if let Some(ref_handle) = read_hlink_attr(e) {
+                            if let Some(current) = family_records.last_mut() {
+                                current.child_handles.push(ref_handle.clone());
+                            }
+                            ref_handles.insert(ref_handle);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Empty(ref e)) => {
+                let name = e.name().as_ref().to_vec();
+                let name = strip_prefix(&name);
+                match name {
+                    b"person" => {
+                        report.counts.people += 1;
+                        if let Some(h) = read_handle_attr(e) {
+                            all_handles.insert(h);
+                        }
+                    }
+                    b"family" => {
+                        report.counts.families += 1;
+                        // Self-closing family: size 0
+                        completed_records.push(crate::types::FamilyRecord {
+                            parent_handles: Vec::new(),
+                            child_handles: Vec::new(),
+                        });
+                        *histogram.entry(0).or_insert(0) += 1;
+                    }
+                    b"event" => report.counts.events += 1,
+                    b"placeobj" => report.counts.places += 1,
+                    b"source" => report.counts.sources += 1,
+                    b"citation" => report.counts.citations += 1,
+                    b"repository" => report.counts.repositories += 1,
+                    b"object" => report.counts.media += 1,
+                    b"note" => report.counts.notes += 1,
+                    b"tag" => report.counts.tags += 1,
+                    b"father" | b"mother" => {
+                        if let Some(ref_handle) = read_hlink_attr(e) {
+                            if let Some(current) = family_records.last_mut() {
+                                current.parent_handles.push(ref_handle.clone());
+                            }
+                            ref_handles.insert(ref_handle);
+                        }
+                    }
+                    b"childref" => {
+                        if let Some(ref_handle) = read_hlink_attr(e) {
+                            if let Some(current) = family_records.last_mut() {
+                                current.child_handles.push(ref_handle.clone());
+                            }
+                            ref_handles.insert(ref_handle);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::End(ref e)) => {
+                let name = e.name().as_ref().to_vec();
+                let name = strip_prefix(&name);
+                if name == b"family" {
+                    if let Some(record) = family_records.pop() {
+                        let size = record.size();
+                        *histogram.entry(size).or_insert(0) += 1;
+                        completed_records.push(record);
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(e) => {
+                return Err(Error::XmlParseError {
+                    message: format!("{} at byte {}", e, reader.error_position()),
+                });
+            }
+        }
+    }
+
+    // Build sorted histogram
+    let mut sizes: Vec<usize> = histogram.keys().copied().collect();
+    sizes.sort();
+    for size in sizes {
+        report
+            .family_size_distribution
+            .insert(size, histogram[&size]);
+    }
+
+    // Compute people_not_in_family and dangling_refs
+    report.people_not_in_family = all_handles
+        .len()
+        .saturating_sub(ref_handles.intersection(&all_handles).count());
+    report.dangling_refs = ref_handles.len() - ref_handles.intersection(&all_handles).count();
+
+    // Build generation table
+    let (table, distribution, gen_warnings) =
+        compute_generation_table(&completed_records, &all_handles);
+    report.family_group_generation_table = table;
+    report.family_group_distribution = distribution;
+    report.warnings.extend(gen_warnings);
+
+    Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn count_empty_content_returns_zeroed_report() {
+        let report = count_gramps_xml("").unwrap();
+        assert_eq!(report, StatsReport::default());
+        assert_eq!(report.counts.people, 0);
+        assert_eq!(report.counts.families, 0);
+        assert!(report.family_size_distribution.is_empty());
+        assert_eq!(report.people_not_in_family, 0);
+        assert_eq!(report.dangling_refs, 0);
+    }
+
+    #[test]
+    fn count_malformed_xml_returns_xml_parse_error() {
+        let result = count_gramps_xml("<database><person></database>");
+        match result {
+            Err(Error::XmlParseError { .. }) => {}
+            other => panic!("Expected XmlParseError, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn count_all_ten_types() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header><created date="2025-01-01" version="5.2"/></header>
+  <tags><tag handle="t1"/><tag handle="t2"/></tags>
+  <events><event handle="e1"/><event handle="e2"/><event handle="e3"/></events>
+  <people>
+    <person handle="p1"/>
+    <person handle="p2"/>
+    <person handle="p3"/>
+    <person handle="p4"/>
+  </people>
+  <families>
+    <family handle="f1"/>
+    <family handle="f2"/>
+  </families>
+  <citations>
+    <citation handle="c1"/>
+  </citations>
+  <sources>
+    <source handle="s1"/>
+    <source handle="s2"/>
+    <source handle="s3"/>
+  </sources>
+  <places>
+    <placeobj handle="pl1"/>
+  </places>
+  <objects>
+    <object handle="o1"/>
+    <object handle="o2"/>
+    <object handle="o3"/>
+    <object handle="o4"/>
+  </objects>
+  <repositories>
+    <repository handle="r1"/>
+  </repositories>
+  <notes>
+    <note handle="n1"/>
+    <note handle="n2"/>
+  </notes>
+</database>"#;
+        let report = count_gramps_xml(xml).unwrap();
+        assert_eq!(report.counts.people, 4);
+        assert_eq!(report.counts.families, 2);
+        assert_eq!(report.counts.events, 3);
+        assert_eq!(report.counts.places, 1);
+        assert_eq!(report.counts.sources, 3);
+        assert_eq!(report.counts.citations, 1);
+        assert_eq!(report.counts.repositories, 1);
+        assert_eq!(report.counts.media, 4);
+        assert_eq!(report.counts.notes, 2);
+        assert_eq!(report.counts.tags, 2);
+    }
+
+    #[test]
+    fn count_empty_database_returns_zero() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header><created date="2025-01-01" version="5.2"/></header>
+</database>"#;
+        let report = count_gramps_xml(xml).unwrap();
+        let zero = PrimaryTypeCounts::default();
+        assert_eq!(report.counts, zero);
+    }
+
+    #[test]
+    fn count_self_closing_elements() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <people>
+    <person handle="p1"/>
+  </people>
+</database>"#;
+        let report = count_gramps_xml(xml).unwrap();
+        assert_eq!(report.counts.people, 1);
+    }
+
+    #[test]
+    fn count_namespace_prefixed_input() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ns:database xmlns:ns="http://gramps-project.org/xml/1.7.2/">
+  <ns:header><ns:created date="2025-01-01" version="5.2"/></ns:header>
+  <ns:people>
+    <ns:person handle="p1"/>
+    <ns:person handle="p2"/>
+  </ns:people>
+  <ns:families>
+    <ns:family handle="f1"/>
+  </ns:families>
+</ns:database>"#;
+        let report = count_gramps_xml(xml).unwrap();
+        assert_eq!(report.counts.people, 2);
+        assert_eq!(report.counts.families, 1);
+    }
+
+    #[test]
+    fn count_family_histogram_example_scenario() {
+        // 7 families: sizes 10, 10, 3, 3, 3, 3, 3
+        // 15 isolated people (not in any family)
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header><created date="2025-01-01" version="5.2"/></header>
+  <people>
+    <person handle="p01"/><person handle="p02"/><person handle="p03"/>
+    <person handle="p04"/><person handle="p05"/><person handle="p06"/>
+    <person handle="p07"/><person handle="p08"/><person handle="p09"/>
+    <person handle="p10"/><person handle="p11"/><person handle="p12"/>
+    <person handle="p13"/><person handle="p14"/><person handle="p15"/>
+    <person handle="p16"/><person handle="p17"/><person handle="p18"/>
+    <person handle="p19"/><person handle="p20"/><person handle="p21"/>
+    <person handle="p22"/><person handle="p23"/><person handle="p24"/>
+    <person handle="p25"/><person handle="p26"/><person handle="p27"/>
+    <person handle="p28"/><person handle="p29"/><person handle="p30"/>
+    <person handle="p31"/><person handle="p32"/><person handle="p33"/>
+    <person handle="p34"/><person handle="p35"/><person handle="p36"/>
+    <person handle="p37"/><person handle="p38"/><person handle="p39"/>
+    <person handle="p40"/><person handle="p41"/><person handle="p42"/>
+    <person handle="p43"/><person handle="p44"/><person handle="p45"/>
+    <person handle="p46"/><person handle="p47"/><person handle="p48"/>
+    <person handle="p49"/><person handle="p50"/>
+  </people>
+  <families>
+    <!-- Family size 10 -->
+    <family handle="f01">
+      <father hlink="p01"/><mother hlink="p02"/>
+      <childref hlink="p03"/><childref hlink="p04"/><childref hlink="p05"/>
+      <childref hlink="p06"/><childref hlink="p07"/><childref hlink="p08"/>
+      <childref hlink="p09"/><childref hlink="p10"/>
+    </family>
+    <!-- Family size 10 -->
+    <family handle="f02">
+      <father hlink="p11"/><mother hlink="p12"/>
+      <childref hlink="p13"/><childref hlink="p14"/><childref hlink="p15"/>
+      <childref hlink="p16"/><childref hlink="p17"/><childref hlink="p18"/>
+      <childref hlink="p19"/><childref hlink="p20"/>
+    </family>
+    <!-- Family size 3 -->
+    <family handle="f03"><father hlink="p21"/><mother hlink="p22"/><childref hlink="p23"/></family>
+    <!-- Family size 3 -->
+    <family handle="f04"><father hlink="p24"/><mother hlink="p25"/><childref hlink="p26"/></family>
+    <!-- Family size 3 -->
+    <family handle="f05"><father hlink="p27"/><mother hlink="p28"/><childref hlink="p29"/></family>
+    <!-- Family size 3 -->
+    <family handle="f06"><father hlink="p30"/><mother hlink="p31"/><childref hlink="p32"/></family>
+    <!-- Family size 3 -->
+    <family handle="f07"><father hlink="p33"/><mother hlink="p34"/><childref hlink="p35"/></family>
+  </families>
+</database>"#;
+        let report = count_gramps_xml(xml).unwrap();
+
+        // 35 people in families (p01-p35), 15 isolated (p36-p50)
+        assert_eq!(report.counts.people, 50);
+        assert_eq!(report.counts.families, 7);
+
+        // Histogram: size 10: 2 families, size 3: 5 families
+        assert_eq!(report.family_size_distribution.len(), 2);
+        assert_eq!(report.family_size_distribution.get(&3), Some(&5));
+        assert_eq!(report.family_size_distribution.get(&10), Some(&2));
+
+        // 15 people not in any family (p36-p50)
+        assert_eq!(report.people_not_in_family, 15);
+        assert_eq!(report.dangling_refs, 0);
+    }
+
+    #[test]
+    fn count_family_duplicate_refs_counted_once() {
+        // Same handle appears as both father and childref
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header><created date="2025-01-01" version="5.2"/></header>
+  <people>
+    <person handle="p1"/><person handle="p2"/><person handle="p3"/>
+  </people>
+  <families>
+    <family handle="f1">
+      <father hlink="p1"/><mother hlink="p2"/>
+      <childref hlink="p1"/>
+      <childref hlink="p1"/>
+      <childref hlink="p3"/>
+    </family>
+  </families>
+</database>"#;
+        let report = count_gramps_xml(xml).unwrap();
+
+        // Size 3: p1, p2, p3 (p1 counted once)
+        assert_eq!(report.family_size_distribution.len(), 1);
+        assert_eq!(report.family_size_distribution.get(&3), Some(&1));
+
+        // All 3 people are in families
+        assert_eq!(report.people_not_in_family, 0);
+        assert_eq!(report.dangling_refs, 0);
+    }
+
+    #[test]
+    fn count_empty_family_size_zero() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header><created date="2025-01-01" version="5.2"/></header>
+  <people><person handle="p1"/></people>
+  <families>
+    <!-- Empty family with no refs -->
+    <family handle="f1">
+    </family>
+  </families>
+</database>"#;
+        let report = count_gramps_xml(xml).unwrap();
+
+        assert_eq!(report.family_size_distribution.len(), 1);
+        assert_eq!(report.family_size_distribution.get(&0), Some(&1));
+
+        // p1 is not in any family
+        assert_eq!(report.people_not_in_family, 1);
+    }
+
+    #[test]
+    fn count_dangling_refs_reported() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header><created date="2025-01-01" version="5.2"/></header>
+  <people><person handle="p1"/></people>
+  <families>
+    <family handle="f1">
+      <father hlink="p1"/><mother hlink="p2"/>
+      <childref hlink="p3"/>
+    </family>
+  </families>
+</database>"#;
+        let report = count_gramps_xml(xml).unwrap();
+
+        // p1 is in a family, p2 and p3 are dangling
+        assert_eq!(report.people_not_in_family, 0);
+        assert_eq!(report.dangling_refs, 2);
+
+        // Family size is 3 (p1, p2, p3) even though p2/p3 are dangling
+        assert_eq!(report.family_size_distribution.get(&3), Some(&1));
+    }
+
+    // ---------------------------------------------------------------------
+    // StatsReport wiring tests
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn report_default_empty_table() {
+        let report = StatsReport::default();
+        assert!(report.family_group_generation_table.is_empty());
+        assert!(report.family_group_distribution.is_empty());
+    }
+
+    #[test]
+    fn json_output_contains_generation_table() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header><created date="2025-01-01" version="5.2"/></header>
+  <people>
+    <person handle="p1"/><person handle="p2"/><person handle="p3"/>
+  </people>
+  <families>
+    <family handle="f1">
+      <father hlink="p1"/><mother hlink="p2"/>
+      <childref hlink="p3"/>
+    </family>
+  </families>
+</database>"#;
+        let report = count_gramps_xml(xml).unwrap();
+
+        // count_gramps_xml populates the table: size 3, span 2.
+        let table = &report.family_group_generation_table;
+        let row = table.get("3").expect("row exists");
+        assert_eq!(row.get("2"), Some(&1));
+        assert_eq!(row.get("total"), Some(&1));
+
+        // JSON round-trip includes the new field.
+        let json = serde_json::to_string(&report).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed["family_group_generation_table"].is_object());
+        assert_eq!(parsed["family_group_generation_table"]["3"]["2"], 1);
+        assert_eq!(parsed["family_group_generation_table"]["3"]["total"], 1);
+
+        let back: StatsReport = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, report);
+    }
+
+    #[test]
+    fn generation_table_integration() {
+        use output::GraphXmlWriter;
+        use output::SerializationMap;
+        use typed_graph::generate::GraphBuilder;
+
+        let mut graph = typed_graph::Graph::new();
+        let mut builder = GraphBuilder::new(&mut graph);
+
+        // Alice + Bob (parents) + Charlie (child); Dana isolated.
+        let alice = builder
+            .add_person_auto()
+            .with_name("Alice", "Smith")
+            .with_gender(1)
+            .build()
+            .unwrap();
+        let bob = builder
+            .add_person_auto()
+            .with_name("Bob", "Smith")
+            .with_gender(0)
+            .build()
+            .unwrap();
+        let charlie = builder
+            .add_person_auto()
+            .with_name("Charlie", "Smith")
+            .build()
+            .unwrap();
+        let _dana = builder
+            .add_person_auto()
+            .with_name("Dana", "Smith")
+            .build()
+            .unwrap();
+
+        let _ = builder
+            .add_family_auto()
+            .with_father(&alice)
+            .with_mother(&bob)
+            .add_child_birth(&charlie)
+            .build()
+            .unwrap();
+
+        let _ = builder.into_graph();
+
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map, "5.2.0");
+        let mut buffer = Vec::new();
+        writer
+            .write(&graph, &mut std::io::BufWriter::new(&mut buffer))
+            .unwrap();
+        let xml = String::from_utf8(buffer).unwrap();
+
+        let report = count_gramps_xml(&xml).unwrap();
+        assert_eq!(report.counts.families, 1);
+        let table = &report.family_group_generation_table;
+        let row = table.get("3").expect("row exists");
+        assert_eq!(row.get("2"), Some(&1));
+        assert_eq!(row.get("total"), Some(&1));
+    }
+}
