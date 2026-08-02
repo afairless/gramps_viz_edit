@@ -4,6 +4,7 @@
 import { renderGraph, validateGraphData } from './graph';
 import type { GraphController } from './graph';
 import type { GraphData } from './types';
+import { createHoverHandler } from './tooltip';
 
 function showError(container: HTMLElement, message: string): void {
   container.textContent = '';
@@ -90,6 +91,10 @@ async function main(): Promise<void> {
   }
 
   const controller = renderGraph(container, graphData);
+
+  // Wire up hover tooltip
+  const hoverHandler = createHoverHandler(graphData);
+  controller.onNodeHover(hoverHandler);
 
   // Store controller for dev console access
   (window as unknown as Record<string, GraphController>).__GRAPH_CONTROLLER__ =
