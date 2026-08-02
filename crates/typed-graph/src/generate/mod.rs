@@ -5,7 +5,9 @@
 
 pub mod adversarial;
 pub mod builder;
+pub mod densify;
 pub mod random;
 pub use adversarial::*;
 pub use builder::*;
+pub use densify::*;
 pub use random::*;
