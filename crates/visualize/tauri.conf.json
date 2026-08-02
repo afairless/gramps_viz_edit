@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "dev.grampsgen.visualize",
   "build": {
-    "frontendDist": "../frontend/dist"
+    "frontendDist": "./frontend/dist"
   },
   "app": {
     "windows": [

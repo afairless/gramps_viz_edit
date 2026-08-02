@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use gramps_reader::{compute_generations, FamilyRecord, ParsedFamily, ParsedPerson};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// A single person node in the force-directed graph.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -55,7 +55,7 @@ pub struct GraphData {
 }
 
 /// A person selected for export.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SelectedPerson {
     pub handle: String,
     pub name: String,
