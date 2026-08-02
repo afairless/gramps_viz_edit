@@ -121,12 +121,23 @@ gramps-gen validate output.gramps
 gramps-gen validate output.gramps --strict
 ```
 
+### Inspect a `.gramps` file
+
+```bash
+# Human-readable summary
+gramps-gen stats output.gramps
+
+# Machine-readable JSON
+gramps-gen stats --json output.gramps
+```
+
 ## Commands
 
 | Command | Description |
 |---|---|
 | `generate` | Generate a random family tree dataset in `.gramps` format |
 | `validate` | Validate the XML structure and namespace of a `.gramps` file |
+| `stats` | Summarize the contents of a `.gramps` file (counts, families, etc.) |
 | `extract-schema` | Extract the Gramps schema from a local Gramps source checkout (stub) |
 | `schema list` | List local and available Gramps schemas |
 | `schema download` | Download a schema from Gramps GitHub |

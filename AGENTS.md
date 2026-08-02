@@ -46,6 +46,7 @@ gramps_viz_edit/
 │       │   └── commands/
 │       │       ├── mod.rs
 │       │       ├── generate.rs   # Full 5-stage pipeline
+│       │       ├── stats/        # Streaming count & report (stats command)
 │       │       ├── validate.rs   # Minimal XML structure check
 │       │       └── extract_schema.rs # Stub
 │       └── tests/
