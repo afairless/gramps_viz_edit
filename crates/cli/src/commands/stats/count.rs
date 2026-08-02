@@ -5,27 +5,21 @@
 //! reconstructing the full typed graph. It is a pure function over
 //! `&str` so it can be unit-tested without filesystem access.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+use serde::{Deserialize, Serialize};
 
 use crate::error::CliError;
 
-/// One histogram bucket: how many families of a given size exist.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FamilySizeBucket {
-    /// Number of families of this size.
-    pub families: usize,
-    /// Total people across those families (size × families).
-    pub people: usize,
-}
-
 /// Statistics collected from a single `.gramps` XML document.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct StatsReport {
+    /// Path of the analyzed file (filled in by the CLI).
+    pub file: String,
     /// Counts per primary object type.
     pub counts: PrimaryTypeCounts,
-    /// Families grouped by member count, ascending by size.
-    pub family_size_distribution: Vec<(usize, FamilySizeBucket)>,
+    /// Family size → number of families, ascending by size.
+    pub family_size_distribution: BTreeMap<usize, usize>,
     /// People whose handle never appears in any family.
     pub people_not_in_family: usize,
     /// Family `ref` handles without a matching `<person>`.
@@ -35,8 +29,7 @@ pub struct StatsReport {
 }
 
 /// Counts for the ten primary object types.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct PrimaryTypeCounts {
     pub people: usize,
     pub families: usize,
@@ -169,12 +162,7 @@ pub fn count_gramps_xml(content: &str) -> Result<StatsReport, CliError> {
     let mut sizes: Vec<usize> = histogram.keys().copied().collect();
     sizes.sort();
     for size in sizes {
-        let families = histogram[&size];
-        let people = size * families;
-        report.family_size_distribution.push((
-            size,
-            FamilySizeBucket { families, people },
-        ));
+        report.family_size_distribution.insert(size, histogram[&size]);
     }
 
     // Compute people_not_in_family and dangling_refs
@@ -389,12 +377,14 @@ mod tests {
 
         // Histogram: size 10: 2 families, size 3: 5 families
         assert_eq!(report.family_size_distribution.len(), 2);
-        assert_eq!(report.family_size_distribution[0].0, 3);
-        assert_eq!(report.family_size_distribution[0].1.families, 5);
-        assert_eq!(report.family_size_distribution[0].1.people, 15);
-        assert_eq!(report.family_size_distribution[1].0, 10);
-        assert_eq!(report.family_size_distribution[1].1.families, 2);
-        assert_eq!(report.family_size_distribution[1].1.people, 20);
+        assert_eq!(
+            report.family_size_distribution.get(&3),
+            Some(&5)
+        );
+        assert_eq!(
+            report.family_size_distribution.get(&10),
+            Some(&2)
+        );
 
         // 15 people not in any family (p36-p50)
         assert_eq!(report.people_not_in_family, 15);
@@ -423,8 +413,7 @@ mod tests {
 
         // Size 3: p1, p2, p3 (p1 counted once)
         assert_eq!(report.family_size_distribution.len(), 1);
-        assert_eq!(report.family_size_distribution[0].0, 3);
-        assert_eq!(report.family_size_distribution[0].1.families, 1);
+        assert_eq!(report.family_size_distribution.get(&3), Some(&1));
 
         // All 3 people are in families
         assert_eq!(report.people_not_in_family, 0);
@@ -446,9 +435,7 @@ mod tests {
         let report = count_gramps_xml(xml).unwrap();
 
         assert_eq!(report.family_size_distribution.len(), 1);
-        assert_eq!(report.family_size_distribution[0].0, 0);
-        assert_eq!(report.family_size_distribution[0].1.families, 1);
-        assert_eq!(report.family_size_distribution[0].1.people, 0);
+        assert_eq!(report.family_size_distribution.get(&0), Some(&1));
 
         // p1 is not in any family
         assert_eq!(report.people_not_in_family, 1);
@@ -474,6 +461,6 @@ mod tests {
         assert_eq!(report.dangling_refs, 2);
 
         // Family size is 3 (p1, p2, p3) even though p2/p3 are dangling
-        assert_eq!(report.family_size_distribution[0].0, 3);
+        assert_eq!(report.family_size_distribution.get(&3), Some(&1));
     }
 }
