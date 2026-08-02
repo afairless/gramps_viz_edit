@@ -107,7 +107,7 @@ pub struct GenerateArgs {
 /// Run the generate command with the full five-stage pipeline.
 pub fn run(args: GenerateArgs) -> Result<(), crate::error::CliError> {
     // Stage 0: Build config
-    let (config, adversarial_config, output_path) = build_config(&args)?;
+    let (config, adversarial_config, densify_config, output_path) = build_config(&args)?;
 
     // Report seed
     let seed_msg = match config.seed {
@@ -154,7 +154,7 @@ pub fn run(args: GenerateArgs) -> Result<(), crate::error::CliError> {
     };
 
     // Stage 1: Generate
-    let mut result = generate_random(&config, &adversarial_config, build_densify_config(&args).as_ref(), schema)?;
+    let mut result = generate_random(&config, &adversarial_config, densify_config.as_ref(), schema)?;
     progress.finish();
     eprintln!(
         "Generated {} persons, {} families, {} events",
@@ -249,7 +249,7 @@ fn check_validation_errors(
 /// Build configuration from CLI args or scenario file.
 fn build_config(
     args: &GenerateArgs,
-) -> Result<(RandomConfig, AdversarialConfig, String), crate::error::CliError> {
+) -> Result<(RandomConfig, AdversarialConfig, Option<DensifyConfig>, String), crate::error::CliError> {
     // If a config file is specified, load from YAML
     if let Some(ref config_path) = args.config {
         let scenario = crate::scenario::load_scenario(config_path)?;
@@ -257,6 +257,7 @@ fn build_config(
         return Ok((
             scenario.to_random_config(),
             scenario.to_adversarial_config(),
+            scenario.to_densify_config(),
             output_path,
         ));
     }
@@ -303,14 +304,14 @@ fn build_config(
     // Parse adversarial flag
     let adversarial_config = parse_adversarial_flag(&args.adversarial)?;
 
-    Ok((config, adversarial_config, args.output.clone()))
+    Ok((config, adversarial_config, build_densify_config(args), args.output.clone()))
 }
 
 /// Build the densify configuration from CLI args.
 ///
 /// Returns `None` when `--no-densify` is set, allowing the pipeline
 /// to skip densification entirely.
-fn build_densify_config(args: &GenerateArgs) -> Option<DensifyConfig> {
+pub(crate) fn build_densify_config(args: &GenerateArgs) -> Option<DensifyConfig> {
     if args.no_densify {
         return None;
     }
@@ -429,7 +430,7 @@ mod tests {
             connectivity_target: 0.85,
             densify_max_parent_roles: 3,
         };
-        let (config, adv_config, output) = build_config(&args).unwrap();
+        let (config, adv_config, _densify_config, output) = build_config(&args).unwrap();
         assert_eq!(config.person_count, 50);
         assert_eq!(config.generations, 3);
         assert_eq!(config.seed, Some(42));
@@ -513,7 +514,7 @@ mod tests {
             connectivity_target: 0.85,
             densify_max_parent_roles: 3,
         };
-        let (config, _, _) = build_config(&args).unwrap();
+        let (config, _, _densify_cfg, _) = build_config(&args).unwrap();
         // person_count is 0, generation should fail
         let schema = Schema::default();
         let adv_config = AdversarialConfig::default();

@@ -22,6 +22,7 @@ pub struct Scenario {
     pub with_tags: Option<bool>,
     pub seed: Option<u64>,
     pub adversarial: Option<AdversarialScenarioConfig>,
+    pub densify: Option<DensifyScenarioConfig>,
 }
 
 /// Generation depth configuration.
@@ -51,6 +52,14 @@ pub struct DateRangeConfig {
 pub struct AdversarialScenarioConfig {
     pub enabled: Option<bool>,
     pub strategies: Option<Vec<String>>,
+}
+
+/// Densification configuration in a scenario file.
+#[derive(Debug, Deserialize)]
+pub struct DensifyScenarioConfig {
+    pub enabled: Option<bool>,
+    pub target_connectivity: Option<f64>,
+    pub max_parent_roles: Option<usize>,
 }
 
 /// Errors that can occur during scenario file loading.
@@ -210,6 +219,25 @@ impl Scenario {
             }
         }
         base
+    }
+
+    /// Convert this scenario's densify section to a `DensifyConfig`.
+    ///
+    /// Returns `None` when the `densify` section is absent or has
+    /// `enabled: false`.
+    pub fn to_densify_config(&self) -> Option<typed_graph::generate::densify::DensifyConfig> {
+        let densify = self.densify.as_ref()?;
+        if !densify.enabled.unwrap_or(true) {
+            return None;
+        }
+        let base = typed_graph::generate::densify::DensifyConfig::default();
+        Some(typed_graph::generate::densify::DensifyConfig {
+            target_connectivity: densify
+                .target_connectivity
+                .unwrap_or(base.target_connectivity),
+            max_parent_roles: densify.max_parent_roles.unwrap_or(base.max_parent_roles),
+            ..base
+        })
     }
 }
 
