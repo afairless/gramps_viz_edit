@@ -8,6 +8,7 @@ use clap::Subcommand;
 use cli::commands::extract_schema;
 use cli::commands::generate::GenerateArgs;
 use cli::commands::schema::SchemaCommand;
+use cli::commands::stats::StatsArgs;
 use cli::commands::validate::ValidateArgs;
 use cli::error::CliError;
 
@@ -23,6 +24,8 @@ struct Cli {
 enum Command {
     /// Generate a random family tree dataset
     Generate(GenerateArgs),
+    /// Summarize the contents of a .gramps file
+    Stats(StatsArgs),
     /// Validate a .gramps file
     Validate(ValidateArgs),
     /// Extract the schema from a Gramps installation
@@ -40,6 +43,7 @@ fn main() -> Result<(), CliError> {
     let cli = Cli::parse();
     match cli.command {
         Command::Generate(args) => cli::commands::generate::run(args)?,
+        Command::Stats(args) => cli::commands::stats::run(args)?,
         Command::Validate(args) => cli::commands::validate::run(args)?,
         Command::ExtractSchema(args) => extract_schema::run(args)?,
         Command::Schema(args) => cli::commands::schema::run(args)?,
