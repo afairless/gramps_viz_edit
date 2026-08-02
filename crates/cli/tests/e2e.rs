@@ -596,3 +596,114 @@ fn e2e_stats_nonexistent_file_fails() {
         stderr
     );
 }
+
+// ---------------------------------------------------------------------------
+// visualize subcommand
+// ---------------------------------------------------------------------------
+
+#[test]
+fn e2e_visualize_nonexistent_file() {
+    let (_stdout, stderr, code) = gramps_gen(&["visualize", "/nonexistent/path.gramps"]);
+    assert!(code != Some(0), "visualize should fail on nonexistent file");
+    assert!(
+        stderr.contains("I/O error")
+            || stderr.contains("No such file")
+            || stderr.contains("Cannot read"),
+        "Should mention file not found, got: {}",
+        stderr
+    );
+}
+
+#[test]
+fn e2e_visualize_non_gramps_extension() {
+    use std::io::Write;
+    let path = "/tmp/gramps_gen_e2e_visualize_bad_ext.txt";
+    let mut f = std::fs::File::create(path).unwrap();
+    write!(f, "<database/>").unwrap();
+
+    let (_stdout, stderr, code) = gramps_gen(&["visualize", path]);
+    assert!(
+        code != Some(0),
+        "visualize should fail on non-.gramps extension"
+    );
+    assert!(
+        stderr.contains("gramps") || stderr.contains("extension") || stderr.contains("ConfigError"),
+        "Should mention .gramps extension, got: {}",
+        stderr
+    );
+
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn e2e_visualize_gap_out_of_range() {
+    use std::io::Write;
+    let path = "/tmp/gramps_gen_e2e_visualize_gap_range.gramps";
+    let mut f = std::fs::File::create(path).unwrap();
+    write!(f, "<database/>").unwrap();
+
+    let (_stdout, stderr, code) = gramps_gen(&["visualize", path, "--generation-gap", "200"]);
+    assert!(code != Some(0), "visualize should fail on gap out of range");
+    assert!(
+        stderr.contains("gap") || stderr.contains("1..=100") || stderr.contains("ConfigError"),
+        "Should mention gap validation, got: {}",
+        stderr
+    );
+
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn e2e_visualize_gap_zero() {
+    use std::io::Write;
+    let path = "/tmp/gramps_gen_e2e_visualize_gap_zero.gramps";
+    let mut f = std::fs::File::create(path).unwrap();
+    write!(f, "<database/>").unwrap();
+
+    let (_stdout, stderr, code) = gramps_gen(&["visualize", path, "--generation-gap", "0"]);
+    assert!(code != Some(0), "visualize should fail on gap 0");
+    assert!(
+        stderr.contains("gap") || stderr.contains("1..=100"),
+        "Should mention gap validation, got: {}",
+        stderr
+    );
+
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn e2e_visualize_sibling_binary_not_found() {
+    // When gramps-gen-visualize is not installed alongside gramps-gen,
+    // the visualize command should fail gracefully with a clear error.
+    // We use a valid .gramps file to ensure we get past path validation
+    // but hit the sibling binary lookup failure.
+    use std::io::Write;
+    let path = "/tmp/gramps_gen_e2e_visualize_sibling.gramps";
+    let mut f = std::fs::File::create(path).unwrap();
+    write!(
+        f,
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <people>
+    <person handle="p1"><name><first>Test</first><surname>User</surname></name></person>
+  </people>
+</database>"#
+    )
+    .unwrap();
+
+    let (_stdout, stderr, code) = gramps_gen(&["visualize", path]);
+    assert!(
+        code != Some(0),
+        "visualize should fail when sibling binary is missing"
+    );
+    assert!(
+        stderr.contains("gramps-gen-visualize")
+            || stderr.contains("sibling")
+            || stderr.contains("binary")
+            || stderr.contains("No such file"),
+        "Should mention missing sibling binary, got: {}",
+        stderr
+    );
+
+    let _ = std::fs::remove_file(path);
+}
