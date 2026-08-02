@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["crates/typed-graph", "crates/output", "crates/cli", "crates/gramps-reader"]
+members = ["crates/typed-graph", "crates/output", "crates/cli", "crates/gramps-reader", "crates/visualize"]
+
+default-members = ["crates/typed-graph", "crates/output", "crates/cli", "crates/gramps-reader"]
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

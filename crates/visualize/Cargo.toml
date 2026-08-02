@@ -1,0 +1,24 @@
+[package]
+name = "visualize"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+# Enables the Tauri desktop shell. Without this feature the crate compiles
+# as a plain library — no WebKit2GTK / WebView2 system dependencies needed.
+visualize = ["dep:tauri"]
+
+[dependencies]
+gramps-reader = { path = "../gramps-reader" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tauri = { version = "2", optional = true }
+
+[build-dependencies]
+tauri-build = { version = "2" }
+
+[[bin]]
+name = "gramps-gen-visualize"
+path = "src/main.rs"
+required-features = ["visualize"]
