@@ -1,36 +1,13 @@
-# Implementation Plan: Connection Densifier
+# Implementation Plan: `gramps-gen stats` subcommand
 
-Source: `docs/research/connection-densifier.md`
+Source: `docs/research/gramps-file-stats.md`
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `feat: define DensifyConfig and DensifyResult structs` | Config & result types | `crates/typed-graph/src/generate/densify.rs` (new), `crates/typed-graph/src/generate/mod.rs` (re-export) | Unit |
-| 2 | `feat: implement connected-component finding in densifier` | Component finding (Pass 1) | `crates/typed-graph/src/generate/densify.rs` | Unit |
-| 3 | `feat: implement cross-component marriage (Pass 2)` | Cross-component marriage | `crates/typed-graph/src/generate/densify.rs` | Unit, integration (schema validation) |
-| 4 | `feat: implement orphan adoption (Pass 3)` | Orphan adoption | `crates/typed-graph/src/generate/densify.rs` | Unit, integration (schema validation) |
-| 5 | `feat: implement single-parent upgrade and remarriage (Pass 4)` | Single-parent upgrade + remarriage | `crates/typed-graph/src/generate/densify.rs` | Unit, integration (schema validation) |
-| 6 | `feat: implement top-level densify_connections orchestrator` | Orchestration | `crates/typed-graph/src/generate/densify.rs` | Unit, integration |
-| 7 | `test: add property-based tests for densifier` | Property-based tests | `crates/typed-graph/src/generate/densify.rs` | Property-based |
-| 8 | `feat: integrate densifier into generate_random and GenerationResult` | Pipeline integration | `crates/typed-graph/src/generate/random.rs` | Unit, integration |
-| 9 | `feat: add CLI flags for connection densifier` | CLI flags | `crates/cli/src/commands/generate.rs` | Smoke, E2E |
-| 10 | `feat: add scenario YAML support for densifier` | Scenario YAML | `crates/cli/src/scenario.rs` | Unit |
-| 11 | `chore: run full test suite and manual smoke tests` | Verification | — | — |
-
-## Key design notes from the source document
-
-### Known discrepancies corrected in the design doc
-
-1. **`FamilyBuilder` does NOT automatically add `PersonFamily` edges or update `family_list`** — after creating a family via `GraphBuilder::add_family(handle)`, the densifier must manually add `Edge::PersonFamily` edges for both parents and push the family handle onto each parent's `family_list` via `graph.get_node_mut()`.
-
-2. **`GraphBuilder::family()` API** — the correct method is `GraphBuilder::add_family(handle)`, which returns a `FamilyBuilder`. Call `.build()` to insert the family into the graph.
-
-3. **Seed constant** — use `0xD3NS1F1ER` (valid hex) instead of the original `0xDEAD_DENS1FY` (invalid hex containing 'N', 'S', 'Y').
-
-4. **`get_person_birth_year` and `collect_stats` are private** in `random.rs` — they must be changed to `pub(crate)` in Step 8 for the densifier to use them.
-
-### Key helpers
-
-- `gender_value()` / `into_gender_field()` — version-safe gender access (from `graph.rs`)
-- `make_child_ref()` / `make_event_ref()` — version-safe ref struct creation (from `graph.rs`)
-- `event_type_eq()` — version-safe event type comparison (from `graph.rs`)
-- `GraphBuilder::add_family(handle)` — creates a family with required-field init (from `builder.rs`)
+| 1 | `feat: add XmlParseError variant to CliError` | XmlParseError variant | `crates/cli/src/error.rs` — add `XmlParseError` variant, Display impl, `std::error::Error::source`, unit tests | Unit |
+| 2 | `feat: add StatsArgs, command skeleton, and CLI wiring` | Command skeleton | `crates/cli/src/commands/stats/mod.rs` (StatsArgs, stub `run()`), `crates/cli/src/commands/stats/count.rs` (stub StatsReport, stub `count_gramps_xml`), `crates/cli/src/commands/mod.rs` (pub mod stats), `crates/cli/src/main.rs` (Command::Stats) | Unit — file-not-found → Io, malformed XML → XmlParseError, empty content → zeroed report |
+| 3 | `feat: implement streaming counters for all 10 primary types` | Primary-type counters | `crates/cli/src/commands/stats/count.rs` — full streaming scan for `person`, `family`, `event`, `place`, `source`, `citation`, `repository`, `object`, `note`, `tag`; namespace-prefix stripping | Unit — all 10 types counted, zero counts in empty `<database/>`, self-closing `<person/>`, namespace-prefixed input |
+| 4 | `feat: implement family-size histogram and people-not-in-family` | Family-size & ref tracking | `crates/cli/src/commands/stats/count.rs` — `HashSet<String>` tracking for person handles, family-ref union, per-family size histogram, `people_not_in_family`, `dangling_refs` | Unit — example scenario (families of 10,10,3,3,3,3,3 + 8 isolated), duplicate refs, empty family (size 0), dangling refs |
+| 5 | `feat: implement human-readable report formatting and --json output` | Report formatting | `crates/cli/src/commands/stats/mod.rs` — text formatter (aligned columns, plural-aware, ascending histogram); `StatsReport` derives Serialize/Deserialize; `run()` branches on `args.json` | Unit — exact text output for a small report, JSON round-trip through serde, `--json` includes all expected fields |
+| 6 | `feat: add integration and E2E tests for stats command` | Integration & E2E tests | `crates/cli/tests/integration.rs` — build graph with GraphBuilder, serialize with GraphXmlWriter, run `count_gramps_xml` on bytes, assert report; `crates/cli/tests/e2e.rs` — subprocess `gramps-gen stats` against generated file, text and `--json` | Integration, Smoke |
+| 7 | `docs: update README and AGENTS.md for stats command` | Documentation | `README.md` — new command in usage section; `AGENTS.md` — workspace structure mentions `stats`, CLI table gains command | — |
