@@ -478,13 +478,7 @@ fn e2e_generate_with_schema_version_unknown() {
 fn e2e_stats_text_output() {
     // Generate a file first
     let output = temp_output_path("stats_text");
-    let (_stdout, stderr, code) = gramps_gen(&[
-        "generate",
-        "--count",
-        "20",
-        "--output",
-        &output,
-    ]);
+    let (_stdout, stderr, code) = gramps_gen(&["generate", "--count", "20", "--output", &output]);
     assert_eq!(code, Some(0), "Generate failed: {}", stderr);
 
     // Run stats in text mode
@@ -493,12 +487,35 @@ fn e2e_stats_text_output() {
 
     // Verify text output contains expected sections
     assert!(stdout.contains("File:"), "Should contain File: header");
-    assert!(stdout.contains("Object counts"), "Should contain Object counts");
-    assert!(stdout.contains("Family size distribution"), "Should contain family size distribution");
-    assert!(stdout.contains("People not in any family"), "Should contain people not in family");
-    assert!(stdout.contains("Dangling family refs"), "Should contain dangling refs");
+    assert!(
+        stdout.contains("Object counts"),
+        "Should contain Object counts"
+    );
+    assert!(
+        stdout.contains("Family size distribution"),
+        "Should contain family size distribution"
+    );
+    assert!(
+        stdout.contains("Family size × generation table"),
+        "Should contain generation table section"
+    );
+    assert!(
+        stdout.contains("# generations"),
+        "Should contain generation table header"
+    );
+    assert!(
+        stdout.contains("People not in any family"),
+        "Should contain people not in family"
+    );
+    assert!(
+        stdout.contains("Dangling family refs"),
+        "Should contain dangling refs"
+    );
     assert!(stdout.contains("People:"), "Should contain People count");
-    assert!(stdout.contains("Families:"), "Should contain Families count");
+    assert!(
+        stdout.contains("Families:"),
+        "Should contain Families count"
+    );
 
     let _ = std::fs::remove_file(&output);
 }
@@ -507,13 +524,7 @@ fn e2e_stats_text_output() {
 fn e2e_stats_json_output() {
     // Generate a file first
     let output = temp_output_path("stats_json");
-    let (_stdout, stderr, code) = gramps_gen(&[
-        "generate",
-        "--count",
-        "20",
-        "--output",
-        &output,
-    ]);
+    let (_stdout, stderr, code) = gramps_gen(&["generate", "--count", "20", "--output", &output]);
     assert_eq!(code, Some(0), "Generate failed: {}", stderr);
 
     // Run stats with --json
@@ -531,6 +542,10 @@ fn e2e_stats_json_output() {
     assert!(
         parsed["family_size_distribution"].is_object(),
         "Should have family_size_distribution"
+    );
+    assert!(
+        parsed["family_generation_table"].is_object(),
+        "Should have family_generation_table"
     );
     assert!(
         parsed["people_not_in_family"].is_i64(),
