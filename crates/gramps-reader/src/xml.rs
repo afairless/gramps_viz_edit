@@ -5,6 +5,7 @@
 //! detail extractors (`xml::extract`).
 
 pub mod count;
+pub mod extract;
 
 /// Strip an optional namespace prefix from an element name.
 ///

@@ -3,6 +3,21 @@
 //! These types are produced by the streaming extractors in [`crate::xml`]
 //! and consumed by downstream crates (`cli` stats, `visualize` graph data).
 
+/// Raw extracted person data from streaming XML parse.
+///
+/// Produced by [`crate::xml::extract::extract_persons`]; consumed by
+/// visualization graph data adapters.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ParsedPerson {
+    pub handle: String,
+    pub given_name: Option<String>,
+    pub surname: Option<String>,
+    pub birth_date: Option<String>,
+    pub death_date: Option<String>,
+    pub birth_year: Option<i32>,
+    pub gender: Option<String>,
+}
+
 /// A record of a single nuclear family's parent and child handles.
 ///
 /// During the streaming pass, `parent_handles` collects `father`/`mother`
