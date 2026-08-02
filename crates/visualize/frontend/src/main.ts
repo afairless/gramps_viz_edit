@@ -8,6 +8,12 @@ import { createHoverHandler } from './tooltip';
 import { createSelectionPanel, exportToFile } from './selection';
 import { renderLegend, buildColorScale } from './colors';
 
+/** Default generation gap in years when not specified via CLI. */
+const DEFAULT_GENERATION_GAP = 25;
+
+/** Default for --no-impute when not specified via CLI. */
+const DEFAULT_NO_IMPUTE = false;
+
 function showError(container: HTMLElement, message: string): void {
   container.textContent = '';
   const div = document.createElement('div');
@@ -85,54 +91,87 @@ function renderFilterDropdown(
   return container;
 }
 
-async function main(): Promise<void> {
-  const container = document.getElementById('graph-container');
-  if (!container) {
-    console.error('graph-container element not found');
+/**
+ * Show a file-open dialog, load the selected .gramps file via Tauri IPC,
+ * and render the graph. Returns `true` if a file was loaded, `false` if cancelled.
+ */
+async function openAndRenderFile(
+  container: HTMLElement,
+  appEl: HTMLElement,
+): Promise<boolean> {
+  const { open } = await import('@tauri-apps/plugin-dialog');
+  const selected = await open({
+    multiple: false,
+    filters: [{ name: 'Gramps XML', extensions: ['gramps'] }],
+  });
+  if (!selected) return false; // user cancelled
+
+  const tauri = await import('@tauri-apps/api/core');
+  let graphData: GraphData;
+  try {
+    const gap: number =
+      (window as unknown as Record<string, number>).__GENERATION_GAP__ ??
+      DEFAULT_GENERATION_GAP;
+    const noImpute: boolean =
+      (window as unknown as Record<string, boolean>).__NO_IMPUTE__ ??
+      DEFAULT_NO_IMPUTE;
+    graphData = await tauri.invoke('load_graph', {
+      path: selected,
+      no_impute: noImpute,
+      generation_gap: gap,
+    });
+  } catch (err) {
+    console.error('Failed to load graph data via Tauri IPC:', err);
+    showError(container, 'Failed to load Gramps data file.');
+    return false;
+  }
+
+  renderGraphFromData(container, appEl, graphData);
+  return true;
+}
+
+/**
+ * Load a .gramps file from an explicit path (e.g. from CLI --path arg)
+ * and render the graph.
+ */
+async function openAndRenderFileFromPath(
+  container: HTMLElement,
+  appEl: HTMLElement,
+  filePath: string,
+): Promise<void> {
+  const tauri = await import('@tauri-apps/api/core');
+
+  const gap: number =
+    (window as unknown as Record<string, number>).__GENERATION_GAP__ ??
+    DEFAULT_GENERATION_GAP;
+  const noImpute: boolean =
+    (window as unknown as Record<string, boolean>).__NO_IMPUTE__ ??
+    DEFAULT_NO_IMPUTE;
+
+  let graphData: GraphData;
+  try {
+    graphData = await tauri.invoke('load_graph', {
+      path: filePath,
+      no_impute: noImpute,
+      generation_gap: gap,
+    });
+  } catch (err) {
+    console.error('Failed to load graph data via Tauri IPC:', err);
+    showError(container, 'Failed to load Gramps data file.');
     return;
   }
 
-  // Try loading data — in dev mode we use a script-injected fixture,
-  // in Tauri mode we invoke the backend.
-  let graphData: GraphData | null = null;
+  renderGraphFromData(container, appEl, graphData);
+}
 
-  // Check if we're running inside Tauri
-  const isTauri =
-    typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-
-  if (isTauri) {
-    try {
-      // Dynamic import to avoid bundling Tauri API in dev builds
-      const tauri = await import('@tauri-apps/api/core');
-      // The path is passed as a CLI arg to the Tauri binary and can be
-      // accessed via window.__GRAMPS_FILE__
-      const filePath: string =
-        (window as unknown as Record<string, string>).__GRAMPS_FILE__ || '';
-      graphData = await tauri.invoke('load_graph', { path: filePath });
-    } catch (err) {
-      console.error('Failed to load graph data via Tauri IPC:', err);
-      showError(container, 'Failed to load Gramps data file.');
-      return;
-    }
-  } else {
-    // Dev mode: try to load from window.__GRAPH_DATA__ (injected by test harness)
-    const devData = (window as unknown as Record<string, unknown>).__GRAPH_DATA__;
-    if (devData && validateGraphData(devData)) {
-      graphData = devData as GraphData;
-    } else {
-      console.warn(
-        'No graph data available. Set window.__GRAPH_DATA__ for dev mode.',
-      );
-      showEmpty(container);
-      return;
-    }
-  }
-
-  // Validate and render
-  if (!graphData) {
-    showEmpty(container);
-    return;
-  }
+/** Render the graph UI from already-loaded GraphData. */
+function renderGraphFromData(
+  container: HTMLElement,
+  appEl: HTMLElement,
+  graphData: GraphData,
+): void {
+  // Clear any previous content (e.g. the open-file prompt)
+  container.textContent = '';
 
   if (graphData.nodes.length === 0) {
     showEmpty(container);
@@ -147,7 +186,6 @@ async function main(): Promise<void> {
 
   // Wire up family group filter dropdown
   const filterDropdown = renderFilterDropdown(graphData, controller);
-  const appEl = document.getElementById('app');
   if (filterDropdown && appEl) {
     appEl.insertBefore(filterDropdown, document.getElementById('legend'));
   }
@@ -156,7 +194,9 @@ async function main(): Promise<void> {
   const legendEl = document.getElementById('legend');
   if (legendEl) {
     const scale = buildColorScale(graphData.nodes.map((n) => n.birth_year));
-    const knownYears = graphData.nodes.map((n) => n.birth_year).filter((y): y is number => y !== null);
+    const knownYears = graphData.nodes
+      .map((n) => n.birth_year)
+      .filter((y): y is number => y !== null);
     renderLegend(legendEl, {
       colorScale: scale,
       minYear: knownYears.length > 0 ? Math.min(...knownYears) : null,
@@ -186,6 +226,104 @@ async function main(): Promise<void> {
   // Store controller for dev console access
   (window as unknown as Record<string, GraphController>).__GRAPH_CONTROLLER__ =
     controller;
+}
+
+/**
+ * Show a welcome screen with a large "Open Gramps File" button.
+ */
+function showWelcomeScreen(container: HTMLElement): void {
+  container.textContent = '';
+
+  const wrapper = document.createElement('div');
+  wrapper.style.display = 'flex';
+  wrapper.style.flexDirection = 'column';
+  wrapper.style.alignItems = 'center';
+  wrapper.style.justifyContent = 'center';
+  wrapper.style.height = '100%';
+  wrapper.style.gap = '16px';
+
+  const title = document.createElement('h2');
+  title.textContent = 'Gramps Family Group Visualization';
+  title.style.color = '#333';
+  title.style.fontSize = '20px';
+  title.style.fontWeight = '600';
+  title.style.margin = '0';
+  wrapper.appendChild(title);
+
+  const subtitle = document.createElement('p');
+  subtitle.textContent = 'Open a Gramps XML (.gramps) file to get started.';
+  subtitle.style.color = '#888';
+  subtitle.style.fontSize = '14px';
+  subtitle.style.margin = '0';
+  wrapper.appendChild(subtitle);
+
+  const btn = document.createElement('button');
+  btn.textContent = 'Open Gramps File';
+  btn.style.padding = '12px 32px';
+  btn.style.fontSize = '16px';
+  btn.style.borderRadius = '6px';
+  btn.style.border = 'none';
+  btn.style.backgroundColor = '#2266aa';
+  btn.style.color = '#fff';
+  btn.style.cursor = 'pointer';
+  btn.style.marginTop = '8px';
+  btn.addEventListener('mouseenter', () => {
+    btn.style.backgroundColor = '#1a4f88';
+  });
+  btn.addEventListener('mouseleave', () => {
+    btn.style.backgroundColor = '#2266aa';
+  });
+  btn.addEventListener('click', async () => {
+    const appEl = document.getElementById('app');
+    if (appEl) {
+      await openAndRenderFile(container, appEl);
+    }
+  });
+  wrapper.appendChild(btn);
+
+  container.appendChild(wrapper);
+}
+
+async function main(): Promise<void> {
+  const container = document.getElementById('graph-container');
+  if (!container) {
+    console.error('graph-container element not found');
+    return;
+  }
+
+  // Check if we're running inside Tauri
+  const isTauri =
+    typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
+  if (isTauri) {
+    // Check if a path was passed via CLI (window.__GRAMPS_FILE__)
+    const cliPath: string | undefined =
+      (window as unknown as Record<string, string | undefined>).__GRAMPS_FILE__;
+    if (cliPath) {
+      // Auto-load the file from the CLI arg
+      const appEl = document.getElementById('app');
+      if (appEl) {
+        await openAndRenderFileFromPath(container, appEl, cliPath);
+      }
+    } else {
+      // Show the welcome screen with an open-file button
+      showWelcomeScreen(container);
+    }
+  } else {
+    // Dev mode: try to load from window.__GRAPH_DATA__ (injected by test harness)
+    const devData = (window as unknown as Record<string, unknown>).__GRAPH_DATA__;
+    if (devData && validateGraphData(devData)) {
+      const appEl = document.getElementById('app');
+      if (appEl) {
+        renderGraphFromData(container, appEl, devData as GraphData);
+      }
+    } else {
+      console.warn(
+        'No graph data available. Set window.__GRAPH_DATA__ for dev mode.',
+      );
+      showEmpty(container);
+    }
+  }
 }
 
 // Boot
