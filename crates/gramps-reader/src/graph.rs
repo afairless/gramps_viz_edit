@@ -138,10 +138,23 @@ fn dfs_cycle<'a>(
 /// references (family refs without a matching `<person>` element) are
 /// skipped, so a family group's generation span reflects only its
 /// existing-person subset. Cycle warnings are appended to `warnings`.
-pub fn compute_generation_table(
+/// Intermediate result of the person-graph analysis shared by
+/// [`compute_generations`] and [`compute_generation_table`].
+struct GenerationAnalysis {
+    /// Existing handles grouped by connected-component root.
+    components: HashMap<String, Vec<String>>,
+    /// Per-handle generation level (longest-path layering, capped).
+    gen: HashMap<String, usize>,
+    /// Number of cyclic connected components.
+    cycle_count: usize,
+}
+
+/// Run the shared person-graph analysis: DSU components over existing
+/// handles, parent→child edges, and longest-path generation layering.
+fn analyze_generations(
     family_records: &[FamilyRecord],
     all_handles: &HashSet<String>,
-) -> (FamilyGroupGenerationTable, BTreeMap<usize, usize>, Vec<String>) {
+) -> GenerationAnalysis {
     // Connected components via DSU over existing person handles.
     let mut dsu = Dsu::new();
     for handle in all_handles {
@@ -228,6 +241,46 @@ pub fn compute_generation_table(
             cycle_count += 1;
         }
     }
+
+    GenerationAnalysis {
+        components,
+        gen,
+        cycle_count,
+    }
+}
+
+/// Compute the per-handle generation level for every person in
+/// `all_handles`, using longest-path layering within each connected
+/// component (capped at [`MAX_GENERATION`]).
+///
+/// Handles that exist in `all_handles` but appear in no family record
+/// (isolated persons) are assigned generation 0. Dangling references
+/// (family refs without a matching handle) are skipped.
+pub fn compute_generations(
+    family_records: &[FamilyRecord],
+    all_handles: &HashSet<String>,
+) -> HashMap<String, usize> {
+    analyze_generations(family_records, all_handles).gen
+}
+
+/// Compute the family-group-size × generation-span contingency table.
+///
+/// Returns `(table, warnings)`. Each row of the table maps a generation span
+/// to a family-group count plus a `"total"` marginal. Connected components
+/// are built over person handles that exist in `all_handles`; dangling
+/// references (family refs without a matching `<person>` element) are
+/// skipped, so a family group's generation span reflects only its
+/// existing-person subset. Cycle warnings are appended to `warnings`.
+pub fn compute_generation_table(
+    family_records: &[FamilyRecord],
+    all_handles: &HashSet<String>,
+) -> (FamilyGroupGenerationTable, BTreeMap<usize, usize>, Vec<String>) {
+    let analysis = analyze_generations(family_records, all_handles);
+    let GenerationAnalysis {
+        components,
+        gen,
+        cycle_count,
+    } = analysis;
 
     let mut warnings = Vec::new();
     if cycle_count > 0 {
@@ -549,5 +602,73 @@ mod tests {
         assert_cell(&table, 1, 1, 1);
         assert_row_total(&table, 1, 1);
         assert_eq!(distribution.get(&1), Some(&1));
+    }
+
+    // ---------------------------------------------------------------------
+    // compute_generations tests
+    // ---------------------------------------------------------------------
+
+    fn gen_map(records: &[FamilyRecord], all: &HashSet<String>) -> HashMap<String, usize> {
+        compute_generations(records, all)
+    }
+
+    #[test]
+    fn compute_generations_chain() {
+        // p1+p2 → p3 → p4 (3 levels: 0, 0, 1, 2)
+        let records = vec![
+            rec(&["p1", "p2"], &["p3"]),
+            rec(&["p3"], &["p4"]),
+        ];
+        let all = collect_handles(&records);
+        let gens = gen_map(&records, &all);
+        assert_eq!(gens.get("p1"), Some(&0));
+        assert_eq!(gens.get("p2"), Some(&0));
+        assert_eq!(gens.get("p3"), Some(&1));
+        assert_eq!(gens.get("p4"), Some(&2));
+    }
+
+    #[test]
+    fn compute_generations_isolated_person() {
+        let records: Vec<FamilyRecord> = Vec::new();
+        let all = HashSet::from(["p1".to_string()]);
+        let gens = gen_map(&records, &all);
+        assert_eq!(gens.get("p1"), Some(&0));
+    }
+
+    #[test]
+    fn compute_generations_child_only_family() {
+        // No parents → both gen 0.
+        let records = vec![rec(&[], &["c1", "c2"])];
+        let all = collect_handles(&records);
+        let gens = gen_map(&records, &all);
+        assert_eq!(gens.get("c1"), Some(&0));
+        assert_eq!(gens.get("c2"), Some(&0));
+    }
+
+    #[test]
+    fn compute_generations_cycle_capped() {
+        // p1 → p2 → p1: layering must not exceed MAX_GENERATION.
+        let records = vec![rec(&["p1"], &["p2"]), rec(&["p2"], &["p1"])];
+        let all = collect_handles(&records);
+        let gens = gen_map(&records, &all);
+        for g in gens.values() {
+            assert!(*g <= MAX_GENERATION, "generation {g} exceeds cap");
+        }
+    }
+
+    #[test]
+    fn compute_generations_matches_table_span() {
+        // The max generation + 1 per component must equal the table span.
+        let records = vec![
+            rec(&["p1", "p2"], &["p3"]),
+            rec(&["p3", "p4"], &["p5"]),
+        ];
+        let all = collect_handles(&records);
+        let gens = gen_map(&records, &all);
+        let (table, _dist, _warnings) = compute_generation_table(&records, &all);
+        let max_gen = gens.values().copied().max().unwrap_or(0);
+        // Single component of 5 → span 3.
+        let row = table.get("5").expect("row exists");
+        assert_eq!(row.get(&(max_gen + 1).to_string()), Some(&1));
     }
 }

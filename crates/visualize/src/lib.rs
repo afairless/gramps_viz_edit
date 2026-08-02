@@ -7,3 +7,6 @@
 //!
 //! Without the `visualize` feature this crate is a plain library —
 //! no WebKit2GTK / WebView2 system dependencies are needed.
+
+pub mod graph_data;
+// `pub mod dates;` — will be added in step 7
