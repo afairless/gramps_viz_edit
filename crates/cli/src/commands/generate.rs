@@ -10,6 +10,7 @@ use output::GraphXmlWriter;
 use output::SerializationMap;
 use typed_graph::generate::AdversarialConfig;
 use typed_graph::generate::AdversarialStrategy;
+use typed_graph::generate::DensifyConfig;
 use typed_graph::generate::RandomConfig;
 use typed_graph::generate::{apply_adversarial_strategies, generate_random};
 use typed_graph::Schema;
@@ -84,6 +85,23 @@ pub struct GenerateArgs {
     /// Setting to 2 allows remarriage/step-families.
     #[arg(long, default_value = "1")]
     pub max_parent_roles: usize,
+
+    /// Disable the connection densifier post-processor.
+    /// When set, the pipeline runs exactly as before (backward compatible).
+    #[arg(long)]
+    pub no_densify: bool,
+
+    /// Fraction of persons to place in the largest connected component.
+    /// The densifier will attempt to merge components until this target
+    /// is reached or no more merges are possible.
+    #[arg(long, default_value = "0.85")]
+    pub connectivity_target: f64,
+
+    /// Maximum number of families a person can be a parent in after
+    /// densification. This overrides the generation-time max-parent-roles
+    /// by allowing additional parent edges during densification.
+    #[arg(long, default_value = "3")]
+    pub densify_max_parent_roles: usize,
 }
 
 /// Run the generate command with the full five-stage pipeline.
@@ -136,7 +154,7 @@ pub fn run(args: GenerateArgs) -> Result<(), crate::error::CliError> {
     };
 
     // Stage 1: Generate
-    let mut result = generate_random(&config, &adversarial_config, None, schema)?;
+    let mut result = generate_random(&config, &adversarial_config, build_densify_config(&args).as_ref(), schema)?;
     progress.finish();
     eprintln!(
         "Generated {} persons, {} families, {} events",
@@ -288,6 +306,22 @@ fn build_config(
     Ok((config, adversarial_config, args.output.clone()))
 }
 
+/// Build the densify configuration from CLI args.
+///
+/// Returns `None` when `--no-densify` is set, allowing the pipeline
+/// to skip densification entirely.
+fn build_densify_config(args: &GenerateArgs) -> Option<DensifyConfig> {
+    if args.no_densify {
+        return None;
+    }
+
+    Some(DensifyConfig {
+        target_connectivity: args.connectivity_target,
+        max_parent_roles: args.densify_max_parent_roles,
+        ..DensifyConfig::default()
+    })
+}
+
 /// Parse the `--adversarial` flag value into an `AdversarialConfig`.
 fn parse_adversarial_flag(
     flag: &Option<String>,
@@ -391,6 +425,9 @@ mod tests {
             schema_version: "default".to_string(),
             family_ratio: 0.5,
             max_parent_roles: 1,
+            no_densify: false,
+            connectivity_target: 0.85,
+            densify_max_parent_roles: 3,
         };
         let (config, adv_config, output) = build_config(&args).unwrap();
         assert_eq!(config.person_count, 50);
@@ -444,6 +481,9 @@ mod tests {
             schema_version: "default".to_string(),
             family_ratio: 0.5,
             max_parent_roles: 1,
+            no_densify: false,
+            connectivity_target: 0.85,
+            densify_max_parent_roles: 3,
         };
         // build_config should succeed even with empty output (it's just a string)
         let result = build_config(&args);
@@ -469,6 +509,9 @@ mod tests {
             schema_version: "default".to_string(),
             family_ratio: 0.5,
             max_parent_roles: 1,
+            no_densify: false,
+            connectivity_target: 0.85,
+            densify_max_parent_roles: 3,
         };
         let (config, _, _) = build_config(&args).unwrap();
         // person_count is 0, generation should fail
