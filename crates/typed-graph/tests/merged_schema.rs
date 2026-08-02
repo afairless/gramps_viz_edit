@@ -81,9 +81,13 @@ fn generate_random_51_only_validates() {
         ..generate::RandomConfig::default()
     };
 
-    let result =
-        generate::generate_random(&config, &generate::AdversarialConfig::default(), None, schema)
-            .expect("generation should succeed");
+    let result = generate::generate_random(
+        &config,
+        &generate::AdversarialConfig::default(),
+        None,
+        schema,
+    )
+    .expect("generation should succeed");
 
     let mut graph = result.graph;
     let validation_errors = graph.validate(schema);
@@ -108,9 +112,13 @@ fn generate_random_merged_validates() {
         ..generate::RandomConfig::default()
     };
 
-    let result =
-        generate::generate_random(&config, &generate::AdversarialConfig::default(), None, &schema)
-            .expect("generation should succeed");
+    let result = generate::generate_random(
+        &config,
+        &generate::AdversarialConfig::default(),
+        None,
+        &schema,
+    )
+    .expect("generation should succeed");
 
     let mut graph = result.graph;
     let validation_errors = graph.validate(&schema);
@@ -232,9 +240,13 @@ fn gender_enum_synthesized_for_51() {
         ..generate::RandomConfig::default()
     };
 
-    let result =
-        generate::generate_random(&config, &generate::AdversarialConfig::default(), None, schema)
-            .expect("generation should succeed");
+    let result = generate::generate_random(
+        &config,
+        &generate::AdversarialConfig::default(),
+        None,
+        schema,
+    )
+    .expect("generation should succeed");
 
     let mut female_count = 0;
     let mut total_count = 0;
@@ -280,9 +292,13 @@ fn families_have_at_least_one_parent_51() {
         ..generate::RandomConfig::default()
     };
 
-    let result =
-        generate::generate_random(&config, &generate::AdversarialConfig::default(), None, schema)
-            .expect("generation should succeed");
+    let result = generate::generate_random(
+        &config,
+        &generate::AdversarialConfig::default(),
+        None,
+        schema,
+    )
+    .expect("generation should succeed");
 
     for family_handle in result.graph.nodes_by_kind(NodeKind::Family) {
         let has_parent = result

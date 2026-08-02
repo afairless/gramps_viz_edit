@@ -35,8 +35,8 @@ use rand::Rng;
 
 use crate::generate::builder::GraphBuilder;
 use crate::Edge;
-use crate::Handle;
 use crate::Graph;
+use crate::Handle;
 use crate::Node;
 
 // ---------------------------------------------------------------------------
@@ -168,7 +168,7 @@ pub fn find_components(graph: &Graph) -> Vec<Vec<Handle>> {
         };
 
         let _ = node_handle; // node handle not needed directly
-        // Collect all person handles associated with this family
+                             // Collect all person handles associated with this family
         let mut family_members: Vec<Handle> = Vec::new();
 
         if let Some(ref fh) = family.father_handle {
@@ -377,8 +377,7 @@ pub(crate) fn merge_components_via_marriage(
     let mut components_skipped = 0usize;
 
     // Build a set of handles in the largest component for fast lookup
-    let _largest_set: std::collections::HashSet<Handle> =
-        largest.iter().cloned().collect();
+    let _largest_set: std::collections::HashSet<Handle> = largest.iter().cloned().collect();
 
     // Iterate over non-largest components (descending size)
     for component in components.iter().skip(1) {
@@ -449,11 +448,12 @@ pub(crate) fn merge_components_via_marriage(
                             female,
                             family_counter,
                             &mut edges_added,
-                        ) {
-                            families_created += 1;
-                            merged = true;
-                            break;
-                        }
+                        )
+                    {
+                        families_created += 1;
+                        merged = true;
+                        break;
+                    }
                 }
                 if merged {
                     break;
@@ -483,11 +483,12 @@ pub(crate) fn merge_components_via_marriage(
                             female,
                             family_counter,
                             &mut edges_added,
-                        ) {
-                            families_created += 1;
-                            merged = true;
-                            break;
-                        }
+                        )
+                    {
+                        families_created += 1;
+                        merged = true;
+                        break;
+                    }
                 }
                 if merged {
                     break;
@@ -630,12 +631,8 @@ fn find_isolated_persons(graph: &Graph) -> Vec<Handle> {
 }
 
 /// Find all two-parent families in the largest component.
-fn find_two_parent_families(
-    graph: &Graph,
-    component: &[Handle],
-) -> Vec<(Handle, Handle, Handle)> {
-    let component_set: std::collections::HashSet<Handle> =
-        component.iter().cloned().collect();
+fn find_two_parent_families(graph: &Graph, component: &[Handle]) -> Vec<(Handle, Handle, Handle)> {
+    let component_set: std::collections::HashSet<Handle> = component.iter().cloned().collect();
     let mut families: Vec<(Handle, Handle, Handle)> = Vec::new();
 
     for (family_handle, node) in graph.iter_nodes() {
@@ -699,10 +696,8 @@ pub(crate) fn adopt_orphans(
         for (family_handle, father, mother) in &shuffled_families {
             if is_compatible_child(graph, orphan, father, mother) {
                 // Add child via FamilyChildRef edge
-                let child_ref = crate::make_child_ref(
-                    orphan.clone(),
-                    Some(crate::ChildRefType::Birth),
-                );
+                let child_ref =
+                    crate::make_child_ref(orphan.clone(), Some(crate::ChildRefType::Birth));
                 graph
                     .add_edge(Edge::FamilyChildRef {
                         source: family_handle.clone(),
@@ -998,10 +993,7 @@ pub fn densify_connections(
     }
 
     let components_before = find_components(graph);
-    let largest_before = components_before
-        .first()
-        .map(|c| c.len())
-        .unwrap_or(0);
+    let largest_before = components_before.first().map(|c| c.len()).unwrap_or(0);
     let components_before_count = components_before.len();
 
     // Clamp target_connectivity to [0.0, 1.0]
@@ -1081,17 +1073,13 @@ pub fn densify_connections(
     }
 
     // Pass 4: Single-parent upgrade + remarriage
-    let (upgraded, upgrade_edges) =
-        upgrade_single_parents(graph, config, rng, &mut family_counter);
+    let (upgraded, upgrade_edges) = upgrade_single_parents(graph, config, rng, &mut family_counter);
     single_parents_upgraded += upgraded;
     edges_added += upgrade_edges;
 
     // Final compute
     let components_after = find_components(graph);
-    let largest_after = components_after
-        .first()
-        .map(|c| c.len())
-        .unwrap_or(0);
+    let largest_after = components_after.first().map(|c| c.len()).unwrap_or(0);
 
     DensifyResult {
         components_before: components_before_count,
@@ -1361,8 +1349,13 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let mut family_counter = 0;
 
-        let (families, edges, skipped) =
-            merge_components_via_marriage(&mut graph, &components, &config, &mut rng, &mut family_counter);
+        let (families, edges, skipped) = merge_components_via_marriage(
+            &mut graph,
+            &components,
+            &config,
+            &mut rng,
+            &mut family_counter,
+        );
 
         // Should have merged the two components
         assert!(families > 0, "Expected at least one marriage to be created");
@@ -1421,12 +1414,20 @@ mod tests {
 
         // Actually let's just test that the function handles the case gracefully
         let components = find_components(&graph2);
-        let (families, _edges, skipped) =
-            merge_components_via_marriage(&mut graph2, &components, &config, &mut rng, &mut family_counter);
+        let (families, _edges, skipped) = merge_components_via_marriage(
+            &mut graph2,
+            &components,
+            &config,
+            &mut rng,
+            &mut family_counter,
+        );
 
         // p3 (male 0) should be able to marry into the family (p2 is female 1)
         // So at least one merge should happen
-        assert!(families > 0 || skipped > 0, "Either merge succeeds or component is skipped");
+        assert!(
+            families > 0 || skipped > 0,
+            "Either merge succeeds or component is skipped"
+        );
     }
 
     #[test]
@@ -1435,7 +1436,12 @@ mod tests {
         create_person(&mut graph, "male", 0, 1970);
         create_person(&mut graph, "female", 1, 1975);
 
-        assert!(is_compatible_pair(&graph, &"male".to_string(), &"female".to_string(), 20));
+        assert!(is_compatible_pair(
+            &graph,
+            &"male".to_string(),
+            &"female".to_string(),
+            20
+        ));
     }
 
     #[test]
@@ -1444,7 +1450,12 @@ mod tests {
         create_person(&mut graph, "male", 0, 1940);
         create_person(&mut graph, "female", 1, 2000);
 
-        assert!(!is_compatible_pair(&graph, &"male".to_string(), &"female".to_string(), 20));
+        assert!(!is_compatible_pair(
+            &graph,
+            &"male".to_string(),
+            &"female".to_string(),
+            20
+        ));
     }
 
     #[test]
@@ -1455,20 +1466,21 @@ mod tests {
             gender: crate::into_gender_field(0),
             ..PersonData::default()
         };
-        graph
-            .add_node("p1".to_string(), Node::Person(p1))
-            .unwrap();
+        graph.add_node("p1".to_string(), Node::Person(p1)).unwrap();
         let p2 = PersonData {
             handle: "p2".to_string(),
             gender: crate::into_gender_field(1),
             ..PersonData::default()
         };
-        graph
-            .add_node("p2".to_string(), Node::Person(p2))
-            .unwrap();
+        graph.add_node("p2".to_string(), Node::Person(p2)).unwrap();
 
         // No birth events, so dates are missing → permissive
-        assert!(is_compatible_pair(&graph, &"p1".to_string(), &"p2".to_string(), 20));
+        assert!(is_compatible_pair(
+            &graph,
+            &"p1".to_string(),
+            &"p2".to_string(),
+            20
+        ));
     }
 
     // -----------------------------------------------------------------------
@@ -1569,7 +1581,10 @@ mod tests {
         let (adopted, _edges) = adopt_orphans(&mut graph, &components, &config, &mut rng);
 
         // Missing dates → permissive, should adopt
-        assert_eq!(adopted, 1, "Child with missing dates should be adopted (permissive)");
+        assert_eq!(
+            adopted, 1,
+            "Child with missing dates should be adopted (permissive)"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1590,7 +1605,8 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let mut family_counter = 0;
 
-        let (upgraded, edges) = upgrade_single_parents(&mut graph, &config, &mut rng, &mut family_counter);
+        let (upgraded, edges) =
+            upgrade_single_parents(&mut graph, &config, &mut rng, &mut family_counter);
 
         assert_eq!(upgraded, 1, "Single father should be upgraded");
         assert!(edges > 0);
@@ -1619,7 +1635,8 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let mut family_counter = 0;
 
-        let (upgraded, _edges) = upgrade_single_parents(&mut graph, &config, &mut rng, &mut family_counter);
+        let (upgraded, _edges) =
+            upgrade_single_parents(&mut graph, &config, &mut rng, &mut family_counter);
 
         assert_eq!(upgraded, 1, "Single mother should be upgraded");
     }
@@ -1670,7 +1687,10 @@ mod tests {
             "Densification should reduce component count"
         );
         assert!(result.families_added > 0, "Should add at least one family");
-        assert!(result.largest_after > result.largest_before, "Largest component should grow");
+        assert!(
+            result.largest_after > result.largest_before,
+            "Largest component should grow"
+        );
     }
 
     #[test]

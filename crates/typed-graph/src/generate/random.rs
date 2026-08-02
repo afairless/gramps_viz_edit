@@ -770,9 +770,7 @@ pub(crate) fn select_parents(
         let adjacent: Vec<_> = persons
             .iter()
             .filter(|(_, s)| {
-                (s.layer == layer
-                    || s.layer == layer + 1
-                    || (layer > 0 && s.layer == layer - 1))
+                (s.layer == layer || s.layer == layer + 1 || (layer > 0 && s.layer == layer - 1))
                     && !s.is_solo
                     && s.parent_count < config.max_parent_roles as u32
             })
@@ -1416,7 +1414,10 @@ pub(crate) fn generate_events(
 }
 
 /// Get the birth year of a person from their birth event in the graph.
-pub(crate) fn get_person_birth_year(graph: &crate::Graph, person_handle: &crate::Handle) -> Option<i32> {
+pub(crate) fn get_person_birth_year(
+    graph: &crate::Graph,
+    person_handle: &crate::Handle,
+) -> Option<i32> {
     let edges = graph.edges_from(person_handle);
     for edge in &edges {
         if let crate::Edge::PersonEventRef { target, .. } = edge {
@@ -1713,13 +1714,17 @@ pub fn generate_random(
     let resolved_family_count = config.resolve_family_count();
     // Cap families to ensure enough parent roles for all families.
     // With max_parent_roles=1, this is equivalent to persons.len() / 2.
-    let families_to_create = resolved_family_count
-        .min(persons.len() * config.max_parent_roles / 2);
+    let families_to_create = resolved_family_count.min(persons.len() * config.max_parent_roles / 2);
     let mut family_handles: Vec<crate::Handle> = Vec::new();
 
     for (family_index, _) in (0..families_to_create).enumerate() {
         // Assign a layer for this family
-        let layer = assign_family_layer(family_index, config.generations, config.layer_linking, &mut rng);
+        let layer = assign_family_layer(
+            family_index,
+            config.generations,
+            config.layer_linking,
+            &mut rng,
+        );
 
         match generate_family(
             &mut graph,
@@ -1791,7 +1796,8 @@ pub fn generate_random(
     let densify_result = if let Some(dc) = densify_config {
         let densify_seed = seed.wrapping_add(0x0D3E_5F1E);
         let mut rng_densify = rand::rngs::StdRng::seed_from_u64(densify_seed);
-        let result = crate::generate::densify::densify_connections(&mut graph, dc, &mut rng_densify);
+        let result =
+            crate::generate::densify::densify_connections(&mut graph, dc, &mut rng_densify);
         Some(result)
     } else {
         None
@@ -2937,22 +2943,54 @@ mod tests {
         }
 
         let mut persons = vec![
-            (p1.clone(), PersonSummary {
-                handle: p1.clone(), birth_year: 1970, gender: 0, layer: 0,
-                parent_count: 0, is_solo: false, is_child: false,
-            }),
-            (p2.clone(), PersonSummary {
-                handle: p2.clone(), birth_year: 1975, gender: 1, layer: 0,
-                parent_count: 0, is_solo: false, is_child: false,
-            }),
-            (p3.clone(), PersonSummary {
-                handle: p3.clone(), birth_year: 1980, gender: 0, layer: 0,
-                parent_count: 0, is_solo: false, is_child: false,
-            }),
-            (p4.clone(), PersonSummary {
-                handle: p4.clone(), birth_year: 1985, gender: 1, layer: 0,
-                parent_count: 0, is_solo: false, is_child: false,
-            }),
+            (
+                p1.clone(),
+                PersonSummary {
+                    handle: p1.clone(),
+                    birth_year: 1970,
+                    gender: 0,
+                    layer: 0,
+                    parent_count: 0,
+                    is_solo: false,
+                    is_child: false,
+                },
+            ),
+            (
+                p2.clone(),
+                PersonSummary {
+                    handle: p2.clone(),
+                    birth_year: 1975,
+                    gender: 1,
+                    layer: 0,
+                    parent_count: 0,
+                    is_solo: false,
+                    is_child: false,
+                },
+            ),
+            (
+                p3.clone(),
+                PersonSummary {
+                    handle: p3.clone(),
+                    birth_year: 1980,
+                    gender: 0,
+                    layer: 0,
+                    parent_count: 0,
+                    is_solo: false,
+                    is_child: false,
+                },
+            ),
+            (
+                p4.clone(),
+                PersonSummary {
+                    handle: p4.clone(),
+                    birth_year: 1985,
+                    gender: 1,
+                    layer: 0,
+                    parent_count: 0,
+                    is_solo: false,
+                    is_child: false,
+                },
+            ),
         ];
 
         // First family
@@ -2968,9 +3006,11 @@ mod tests {
         // After second family, we should have at least one person with parent_count = 2
         // (someone who was a parent in both families)
         let parents_after_second = persons.iter().filter(|(_, s)| s.parent_count == 2).count();
-        assert!(parents_after_second >= 1,
+        assert!(
+            parents_after_second >= 1,
             "At least one person should have parent_count=2 after remarriage, got {}",
-            parents_after_second);
+            parents_after_second
+        );
         // Total parent count increments: 2 + 2 = 4 across all persons
         let total_parent_count: u32 = persons.iter().map(|(_, s)| s.parent_count).sum();
         assert_eq!(total_parent_count, 4, "Total parent count should be 4");
@@ -3010,19 +3050,38 @@ mod tests {
         }
 
         let mut persons = vec![
-            (p1.clone(), PersonSummary {
-                handle: p1.clone(), birth_year: 1970, gender: 0, layer: 0,
-                parent_count: 0, is_solo: true, is_child: false,
-            }),
-            (p2.clone(), PersonSummary {
-                handle: p2.clone(), birth_year: 1975, gender: 1, layer: 0,
-                parent_count: 0, is_solo: false, is_child: false,
-            }),
+            (
+                p1.clone(),
+                PersonSummary {
+                    handle: p1.clone(),
+                    birth_year: 1970,
+                    gender: 0,
+                    layer: 0,
+                    parent_count: 0,
+                    is_solo: true,
+                    is_child: false,
+                },
+            ),
+            (
+                p2.clone(),
+                PersonSummary {
+                    handle: p2.clone(),
+                    birth_year: 1975,
+                    gender: 1,
+                    layer: 0,
+                    parent_count: 0,
+                    is_solo: false,
+                    is_child: false,
+                },
+            ),
         ];
 
         // select_parents should return None because the only male is solo
         let result = select_parents(&persons, &config, 0, &mut rng);
-        assert!(result.is_none(), "Solo person should not be selected as parent");
+        assert!(
+            result.is_none(),
+            "Solo person should not be selected as parent"
+        );
 
         // create_single_parent_family should also skip the solo person
         // and create a family with the non-solo female
@@ -3030,8 +3089,11 @@ mod tests {
         assert!(result.is_ok(), "Should create family with non-solo female");
         let family_handle = result.unwrap();
         if let Some(crate::Node::Family(family)) = graph.get_node(&family_handle) {
-            assert_eq!(family.mother_handle, Some(p2.clone()),
-                "Non-solo female should be the parent");
+            assert_eq!(
+                family.mother_handle,
+                Some(p2.clone()),
+                "Non-solo female should be the parent"
+            );
         } else {
             panic!("Family node should exist");
         }
@@ -3059,8 +3121,8 @@ mod tests {
             strategies: vec![AdversarialStrategy::OneParentFamilies(0.0)],
         };
         let schema = crate::Schema::default();
-        let result =
-            generate_random(&config, &adversarial, None, &schema).expect("generation should succeed");
+        let result = generate_random(&config, &adversarial, None, &schema)
+            .expect("generation should succeed");
 
         // With fraction 0.0, no one-parent families should be created
         // (all families should have both parents if the pair was found)
@@ -3102,8 +3164,8 @@ mod tests {
             strategies: vec![AdversarialStrategy::OneParentFamilies(1.0)],
         };
         let schema = crate::Schema::default();
-        let result =
-            generate_random(&config, &adversarial, None, &schema).expect("generation should succeed");
+        let result = generate_random(&config, &adversarial, None, &schema)
+            .expect("generation should succeed");
 
         // With fraction 1.0, all families should be one-parent
         let mut families = 0;
@@ -3138,8 +3200,8 @@ mod tests {
             strategies: vec![AdversarialStrategy::OneParentFamilies(0.5)],
         };
         let schema = crate::Schema::default();
-        let mut result =
-            generate_random(&config, &adversarial, None, &schema).expect("generation should succeed");
+        let mut result = generate_random(&config, &adversarial, None, &schema)
+            .expect("generation should succeed");
 
         // One-parent families are structurally valid
         let errors = result.graph.validate(&schema);
@@ -3164,8 +3226,8 @@ mod tests {
             strategies: vec![AdversarialStrategy::OneParentFamilies(1.0)],
         };
         let schema = crate::Schema::default();
-        let result =
-            generate_random(&config, &adversarial, None, &schema).expect("generation should succeed");
+        let result = generate_random(&config, &adversarial, None, &schema)
+            .expect("generation should succeed");
 
         // With fraction 1.0, every family should produce a one-parent warning
         let one_parent_warnings: Vec<_> = result
@@ -3219,8 +3281,8 @@ mod tests {
             strategies: vec![AdversarialStrategy::MissingEvents(0.0)],
         };
         let schema = crate::Schema::default();
-        let result =
-            generate_random(&config, &adversarial, None, &schema).expect("generation should succeed");
+        let result = generate_random(&config, &adversarial, None, &schema)
+            .expect("generation should succeed");
 
         // With fraction 0.0, all persons should have events.
         // No missing-events warnings should appear.
@@ -3250,8 +3312,8 @@ mod tests {
             strategies: vec![AdversarialStrategy::MissingEvents(1.0)],
         };
         let schema = crate::Schema::default();
-        let result =
-            generate_random(&config, &adversarial, None, &schema).expect("generation should succeed");
+        let result = generate_random(&config, &adversarial, None, &schema)
+            .expect("generation should succeed");
 
         // With fraction 1.0, all persons should have missing events
         let missing_warnings: Vec<_> = result
@@ -3284,8 +3346,8 @@ mod tests {
             strategies: vec![AdversarialStrategy::MissingEvents(0.5)],
         };
         let schema = crate::Schema::default();
-        let mut result =
-            generate_random(&config, &adversarial, None, &schema).expect("generation should succeed");
+        let mut result = generate_random(&config, &adversarial, None, &schema)
+            .expect("generation should succeed");
 
         // Missing events should still pass validation
         let errors = result.graph.validate(&schema);
@@ -3310,8 +3372,8 @@ mod tests {
             strategies: vec![AdversarialStrategy::MissingEvents(0.5)],
         };
         let schema = crate::Schema::default();
-        let result =
-            generate_random(&config, &adversarial, None, &schema).expect("generation should succeed");
+        let result = generate_random(&config, &adversarial, None, &schema)
+            .expect("generation should succeed");
 
         // With fraction 0.5, roughly half should be missing
         // (statistical, so check for some but not all)
@@ -3344,8 +3406,8 @@ mod tests {
             strategies: vec![AdversarialStrategy::MissingEvents(1.0)],
         };
         let schema = crate::Schema::default();
-        let result =
-            generate_random(&config, &adversarial, None, &schema).expect("generation should succeed");
+        let result = generate_random(&config, &adversarial, None, &schema)
+            .expect("generation should succeed");
 
         // Every warning should mention "missing events"
         let missing_warnings: Vec<_> = result
@@ -4889,8 +4951,14 @@ mod tests {
         )];
 
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-        let family_handle = create_single_parent_family(&mut graph, &mut persons, &RandomConfig::default(), 0, &mut rng)
-            .expect("should create single-parent family");
+        let family_handle = create_single_parent_family(
+            &mut graph,
+            &mut persons,
+            &RandomConfig::default(),
+            0,
+            &mut rng,
+        )
+        .expect("should create single-parent family");
 
         // Verify the family has mother_handle set and father_handle is None
         if let Some(crate::Node::Family(family)) = graph.get_node(&family_handle) {
@@ -4976,8 +5044,14 @@ mod tests {
         )];
 
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-        let family_handle = create_single_parent_family(&mut graph, &mut persons, &RandomConfig::default(), 0, &mut rng)
-            .expect("should create single-parent family");
+        let family_handle = create_single_parent_family(
+            &mut graph,
+            &mut persons,
+            &RandomConfig::default(),
+            0,
+            &mut rng,
+        )
+        .expect("should create single-parent family");
 
         // Verify the family has father_handle set and mother_handle is None
         if let Some(crate::Node::Family(family)) = graph.get_node(&family_handle) {
@@ -5063,8 +5137,14 @@ mod tests {
         )];
 
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-        let family_handle = create_single_parent_family(&mut graph, &mut persons, &RandomConfig::default(), 0, &mut rng)
-            .expect("should create single-parent family");
+        let family_handle = create_single_parent_family(
+            &mut graph,
+            &mut persons,
+            &RandomConfig::default(),
+            0,
+            &mut rng,
+        )
+        .expect("should create single-parent family");
 
         // Verify FamilyFather edge (default for unknown gender)
         if let Some(crate::Node::Family(family)) = graph.get_node(&family_handle) {

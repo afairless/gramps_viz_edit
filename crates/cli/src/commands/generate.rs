@@ -154,7 +154,12 @@ pub fn run(args: GenerateArgs) -> Result<(), crate::error::CliError> {
     };
 
     // Stage 1: Generate
-    let mut result = generate_random(&config, &adversarial_config, densify_config.as_ref(), schema)?;
+    let mut result = generate_random(
+        &config,
+        &adversarial_config,
+        densify_config.as_ref(),
+        schema,
+    )?;
     progress.finish();
     eprintln!(
         "Generated {} persons, {} families, {} events",
@@ -249,7 +254,15 @@ fn check_validation_errors(
 /// Build configuration from CLI args or scenario file.
 fn build_config(
     args: &GenerateArgs,
-) -> Result<(RandomConfig, AdversarialConfig, Option<DensifyConfig>, String), crate::error::CliError> {
+) -> Result<
+    (
+        RandomConfig,
+        AdversarialConfig,
+        Option<DensifyConfig>,
+        String,
+    ),
+    crate::error::CliError,
+> {
     // If a config file is specified, load from YAML
     if let Some(ref config_path) = args.config {
         let scenario = crate::scenario::load_scenario(config_path)?;
@@ -277,9 +290,7 @@ fn build_config(
         )));
     }
 
-    let family_count = (args.count as f64 * args.family_ratio)
-        .round()
-        .max(1.0) as usize;
+    let family_count = (args.count as f64 * args.family_ratio).round().max(1.0) as usize;
 
     let config = RandomConfig {
         person_count: args.count,
@@ -304,7 +315,12 @@ fn build_config(
     // Parse adversarial flag
     let adversarial_config = parse_adversarial_flag(&args.adversarial)?;
 
-    Ok((config, adversarial_config, build_densify_config(args), args.output.clone()))
+    Ok((
+        config,
+        adversarial_config,
+        build_densify_config(args),
+        args.output.clone(),
+    ))
 }
 
 /// Build the densify configuration from CLI args.
