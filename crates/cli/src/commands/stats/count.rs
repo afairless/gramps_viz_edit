@@ -36,6 +36,17 @@ impl FamilyRecord {
     }
 }
 
+/// Cross-classification of nuclear families by size and generation span.
+///
+/// The outer map key is family size (as a string), the inner map key is the
+/// generation span (as a string) plus `"total"` for the row marginal. This
+/// shape serializes directly to JSON:
+///
+/// ```json
+/// { "3": { "2": 1, "total": 1 } }
+/// ```
+pub type FamilyGenerationTable = BTreeMap<String, BTreeMap<String, usize>>;
+
 /// Statistics collected from a single `.gramps` XML document.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct StatsReport {
@@ -222,6 +233,249 @@ pub fn count_gramps_xml(content: &str) -> Result<StatsReport, CliError> {
     report.dangling_refs = ref_handles.len() - ref_handles.intersection(&all_handles).count();
 
     Ok(report)
+}
+
+/// Maximum generation depth before the layering assumes a cycle. Generation
+/// values are clamped to this bound so a pathological cycle cannot produce
+/// unbounded layering; a warning is emitted when a cycle is detected.
+const MAX_GENERATION: usize = 50;
+
+/// Disjoint-set union over person handles (handle → parent handle in the
+/// union tree). Used to find connected components of the person graph.
+struct Dsu {
+    parent: HashMap<String, String>,
+}
+
+impl Dsu {
+    fn new() -> Self {
+        Dsu {
+            parent: HashMap::new(),
+        }
+    }
+
+    /// Ensure `handle` has its own singleton set.
+    fn make_set(&mut self, handle: &str) {
+        self.parent
+            .entry(handle.to_string())
+            .or_insert_with(|| handle.to_string());
+    }
+
+    /// Find the root of `handle`, compressing the path along the way.
+    fn find(&mut self, handle: &str) -> String {
+        let mut root = handle.to_string();
+        while let Some(p) = self.parent.get(&root).cloned() {
+            if p == root {
+                break;
+            }
+            root = p;
+        }
+        let mut current = handle.to_string();
+        while let Some(p) = self.parent.get(&current).cloned() {
+            if p == root {
+                break;
+            }
+            self.parent.insert(current.clone(), root.clone());
+            current = p;
+        }
+        root
+    }
+
+    /// Union the sets containing `a` and `b`.
+    fn union(&mut self, a: &str, b: &str) {
+        self.make_set(a);
+        self.make_set(b);
+        let root_a = self.find(a);
+        let root_b = self.find(b);
+        if root_a != root_b {
+            self.parent.insert(root_b, root_a);
+        }
+    }
+}
+
+/// DFS state for cycle detection.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum VisitState {
+    Unvisited,
+    InProgress,
+    Done,
+}
+
+/// Detect whether the parent→child graph contains a cycle (DFS back edges).
+fn has_cycle(adjacency: &HashMap<&str, Vec<&str>>) -> bool {
+    let mut state: HashMap<&str, VisitState> = adjacency
+        .keys()
+        .map(|k| (*k, VisitState::Unvisited))
+        .collect();
+    for start in adjacency.keys() {
+        if state[*start] == VisitState::Unvisited && dfs_cycle(start, adjacency, &mut state) {
+            return true;
+        }
+    }
+    false
+}
+
+fn dfs_cycle<'a>(
+    node: &'a str,
+    adjacency: &HashMap<&str, Vec<&'a str>>,
+    state: &mut HashMap<&'a str, VisitState>,
+) -> bool {
+    state.insert(node, VisitState::InProgress);
+    if let Some(children) = adjacency.get(node) {
+        for child in children {
+            match state[*child] {
+                VisitState::InProgress => return true, // back edge → cycle
+                VisitState::Done => {}
+                VisitState::Unvisited => {
+                    if dfs_cycle(child, adjacency, state) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    state.insert(node, VisitState::Done);
+    false
+}
+
+/// Compute the family-size × generation-span contingency table.
+///
+/// Returns `(table, warnings)`. Each row of the table maps a generation span
+/// to a family count plus a `"total"` marginal. Connected components are
+/// built over person handles that exist in `all_handles`; dangling references
+/// (family refs without a matching `<person>` element) are skipped, so a
+/// family's generation span reflects only its existing-person subset. Cycle
+/// warnings are appended to `warnings`.
+pub fn compute_generation_table(
+    family_records: &[FamilyRecord],
+    all_handles: &HashSet<String>,
+) -> (FamilyGenerationTable, Vec<String>) {
+    // Connected components via DSU over existing person handles.
+    let mut dsu = Dsu::new();
+    for handle in all_handles {
+        dsu.make_set(handle);
+    }
+    for record in family_records {
+        let mut members: Vec<&str> = Vec::new();
+        for h in &record.parent_handles {
+            if all_handles.contains(h) {
+                members.push(h.as_str());
+            }
+        }
+        for h in &record.child_handles {
+            if all_handles.contains(h) {
+                members.push(h.as_str());
+            }
+        }
+        for i in 1..members.len() {
+            dsu.union(members[0], members[i]);
+        }
+    }
+
+    // Group existing handles by component root.
+    let mut components: HashMap<String, Vec<String>> = HashMap::new();
+    let mut root_of: HashMap<String, String> = HashMap::new();
+    for handle in all_handles {
+        let root = dsu.find(handle);
+        root_of.insert(handle.clone(), root.clone());
+        components.entry(root).or_default().push(handle.clone());
+    }
+
+    // Parent → child edges restricted to existing handles.
+    let mut edges: Vec<(String, String)> = Vec::new();
+    for record in family_records {
+        for p in &record.parent_handles {
+            if !all_handles.contains(p) {
+                continue;
+            }
+            for c in &record.child_handles {
+                if all_handles.contains(c) {
+                    edges.push((p.clone(), c.clone()));
+                }
+            }
+        }
+    }
+
+    // Longest-path layering per component, capped at MAX_GENERATION.
+    let mut gen: HashMap<String, usize> = all_handles.iter().map(|h| (h.clone(), 0)).collect();
+    let mut cycle_count = 0usize;
+
+    for component in components.values() {
+        let component_set: HashSet<&str> = component.iter().map(|s| s.as_str()).collect();
+
+        // Adjacency within this component.
+        let mut adjacency: HashMap<&str, Vec<&str>> = HashMap::new();
+        for person in component {
+            adjacency.insert(person.as_str(), Vec::new());
+        }
+        for (parent, child) in &edges {
+            if component_set.contains(parent.as_str()) && component_set.contains(child.as_str()) {
+                if let Some(children) = adjacency.get_mut(parent.as_str()) {
+                    children.push(child.as_str());
+                }
+            }
+        }
+
+        // Iterative relaxation: gen[child] = max(gen[child], gen[parent] + 1).
+        for _ in 0..=MAX_GENERATION {
+            let mut changed = false;
+            for (parent, children) in &adjacency {
+                let parent_gen = gen[*parent];
+                for child in children {
+                    let new_gen = (parent_gen + 1).min(MAX_GENERATION);
+                    if new_gen > gen[*child] {
+                        gen.insert((*child).to_string(), new_gen);
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+
+        if has_cycle(&adjacency) {
+            cycle_count += 1;
+        }
+    }
+
+    let mut warnings = Vec::new();
+    if cycle_count > 0 {
+        warnings.push(format!(
+            "WARNING: detected {} cycle(s) in the family graph; generation layering may be approximate",
+            cycle_count
+        ));
+    }
+
+    // Generation span per component = max generation + 1.
+    let mut span_by_root: HashMap<String, usize> = HashMap::new();
+    for (root, component) in &components {
+        let max_gen = component.iter().map(|h| gen[h]).max().unwrap_or(0);
+        span_by_root.insert(root.clone(), max_gen + 1);
+    }
+
+    // Tabulate families by (size, span).
+    let mut table: FamilyGenerationTable = BTreeMap::new();
+    for record in family_records {
+        let size = record.size();
+        let mut span: Option<usize> = None;
+        for h in record
+            .parent_handles
+            .iter()
+            .chain(record.child_handles.iter())
+        {
+            if let Some(root) = root_of.get(h) {
+                span = span_by_root.get(root).copied();
+                break;
+            }
+        }
+        if let Some(span) = span {
+            let row = table.entry(size.to_string()).or_default();
+            *row.entry(span.to_string()).or_insert(0) += 1;
+            *row.entry("total".to_string()).or_insert(0) += 1;
+        }
+    }
+
+    (table, warnings)
 }
 
 /// Read the `handle` attribute from an element.
@@ -506,5 +760,245 @@ mod tests {
 
         // Family size is 3 (p1, p2, p3) even though p2/p3 are dangling
         assert_eq!(report.family_size_distribution.get(&3), Some(&1));
+    }
+
+    // ---------------------------------------------------------------------
+    // Generation table tests
+    // ---------------------------------------------------------------------
+
+    fn rec(parents: &[&str], children: &[&str]) -> FamilyRecord {
+        FamilyRecord {
+            parent_handles: parents.iter().map(|s| s.to_string()).collect(),
+            child_handles: children.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    fn collect_handles(records: &[FamilyRecord]) -> HashSet<String> {
+        let mut all = HashSet::new();
+        for r in records {
+            all.extend(r.parent_handles.iter().cloned());
+            all.extend(r.child_handles.iter().cloned());
+        }
+        all
+    }
+
+    fn assert_cell(table: &FamilyGenerationTable, size: usize, span: usize, count: usize) {
+        let row = table.get(&size.to_string()).expect("row exists");
+        assert_eq!(
+            row.get(&span.to_string()),
+            Some(&count),
+            "cell size={size} span={span}"
+        );
+    }
+
+    fn assert_row_total(table: &FamilyGenerationTable, size: usize, total: usize) {
+        let row = table.get(&size.to_string()).expect("row exists");
+        assert_eq!(row.get("total"), Some(&total), "row total size={size}");
+    }
+
+    #[test]
+    fn generation_table_empty() {
+        let records: Vec<FamilyRecord> = Vec::new();
+        let all: HashSet<String> = HashSet::new();
+        let (table, warnings) = compute_generation_table(&records, &all);
+        assert!(table.is_empty());
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn generation_table_single_family_no_children() {
+        let records = vec![rec(&["p1", "p2"], &[])];
+        let all = collect_handles(&records);
+        let (table, warnings) = compute_generation_table(&records, &all);
+        assert!(warnings.is_empty());
+        assert_cell(&table, 2, 1, 1);
+        assert_row_total(&table, 2, 1);
+    }
+
+    #[test]
+    fn generation_table_single_family_with_children() {
+        let records = vec![rec(&["p1", "p2"], &["p3"])];
+        let all = collect_handles(&records);
+        let (table, warnings) = compute_generation_table(&records, &all);
+        assert!(warnings.is_empty());
+        assert_cell(&table, 3, 2, 1);
+        assert_row_total(&table, 3, 1);
+    }
+
+    #[test]
+    fn generation_table_two_family_chain() {
+        // Family A: p1+p2 → p3; Family B: p3+p4 → p5 → 3-generation component.
+        let records = vec![rec(&["p1", "p2"], &["p3"]), rec(&["p3", "p4"], &["p5"])];
+        let all = collect_handles(&records);
+        let (table, warnings) = compute_generation_table(&records, &all);
+        assert!(warnings.is_empty());
+        // Both families have 3 members and sit in a 3-generation component.
+        assert_cell(&table, 3, 3, 2);
+        assert_row_total(&table, 3, 2);
+    }
+
+    #[test]
+    fn generation_table_two_family_chain_with_extra_children() {
+        // Family A: p1+p2 → p3, p4; Family B: p3+p5 → p6.
+        let records = vec![
+            rec(&["p1", "p2"], &["p3", "p4"]),
+            rec(&["p3", "p5"], &["p6"]),
+        ];
+        let all = collect_handles(&records);
+        let (table, warnings) = compute_generation_table(&records, &all);
+        assert!(warnings.is_empty());
+        // Gens: p1,p2,p5 = 0; p3,p4 = 1; p6 = 2 → span 3.
+        assert_cell(&table, 4, 3, 1); // family A: 4 members
+        assert_cell(&table, 3, 3, 1); // family B: 3 members
+        assert_row_total(&table, 4, 1);
+        assert_row_total(&table, 3, 1);
+    }
+
+    #[test]
+    fn generation_table_three_generation_chain() {
+        // grandparent → parent → child → grandchild (4 gens)
+        let records = vec![
+            rec(&["p1", "p2"], &["p3"]),
+            rec(&["p3", "p4"], &["p5"]),
+            rec(&["p5", "p6"], &["p7"]),
+        ];
+        let all = collect_handles(&records);
+        let (table, warnings) = compute_generation_table(&records, &all);
+        assert!(warnings.is_empty());
+        assert_cell(&table, 3, 4, 3);
+        assert_row_total(&table, 3, 3);
+    }
+
+    #[test]
+    fn generation_table_isolated_person() {
+        let records: Vec<FamilyRecord> = Vec::new();
+        let all: HashSet<String> = HashSet::from(["p1".to_string()]);
+        let (table, warnings) = compute_generation_table(&records, &all);
+        assert!(table.is_empty());
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn generation_table_disconnected_components() {
+        let records = vec![
+            rec(&["p1", "p2"], &["p3"]), // size 3, span 2
+            rec(&["p4", "p5"], &[]),     // size 2, span 1
+        ];
+        let all = collect_handles(&records);
+        let (table, warnings) = compute_generation_table(&records, &all);
+        assert!(warnings.is_empty());
+        assert_cell(&table, 3, 2, 1);
+        assert_cell(&table, 2, 1, 1);
+        assert_row_total(&table, 3, 1);
+        assert_row_total(&table, 2, 1);
+    }
+
+    #[test]
+    fn generation_table_pedigree_collapse() {
+        // G1+G2 → P1, P2 (siblings); P1+X → C1; P2+Y → C2; C1+C2 → Z (cousins marry).
+        let records = vec![
+            rec(&["g1", "g2"], &["p1", "p2"]),
+            rec(&["p1", "x"], &["c1"]),
+            rec(&["p2", "y"], &["c2"]),
+            rec(&["c1", "c2"], &["z"]),
+        ];
+        let all = collect_handles(&records);
+        let (table, warnings) = compute_generation_table(&records, &all);
+        assert!(warnings.is_empty());
+        // All families share the 4-generation component.
+        assert_cell(&table, 4, 4, 1); // grandparent family
+        assert_cell(&table, 3, 4, 3); // three 3-person families
+        assert_row_total(&table, 4, 1);
+        assert_row_total(&table, 3, 3);
+    }
+
+    #[test]
+    fn generation_table_cycle() {
+        // Artificial cycle: p1 → p2 → p1.
+        let records = vec![rec(&["p1"], &["p2"]), rec(&["p2"], &["p1"])];
+        let all = collect_handles(&records);
+        let (table, warnings) = compute_generation_table(&records, &all);
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].contains("cycle"),
+            "Expected cycle warning, got: {}",
+            warnings[0]
+        );
+        // Layering is capped: spans must not exceed MAX_GENERATION + 1.
+        for (size, row) in &table {
+            for span in row.keys() {
+                if span == "total" {
+                    continue;
+                }
+                let span: usize = span.parse().unwrap();
+                assert!(
+                    span <= MAX_GENERATION + 1,
+                    "size {} span {} exceeds cap",
+                    size,
+                    span
+                );
+            }
+        }
+        // Both 2-person families land in the cyclic component.
+        assert_cell(&table, 2, MAX_GENERATION + 1, 2);
+        assert_row_total(&table, 2, 2);
+    }
+
+    #[test]
+    fn generation_table_duplicate_handles_across_families() {
+        // p1 is a parent in two families.
+        let records = vec![rec(&["p1", "p2"], &["p3"]), rec(&["p1", "p4"], &["p5"])];
+        let all = collect_handles(&records);
+        let (table, warnings) = compute_generation_table(&records, &all);
+        assert!(warnings.is_empty());
+        // Both families are 3-person families in the same 2-generation component.
+        assert_cell(&table, 3, 2, 2);
+        assert_row_total(&table, 3, 2);
+    }
+
+    #[test]
+    fn generation_table_single_parent_family() {
+        let records = vec![rec(&["p1"], &["p2"])];
+        let all = collect_handles(&records);
+        let (table, warnings) = compute_generation_table(&records, &all);
+        assert!(warnings.is_empty());
+        // p1 gen 0, p2 gen 1 → span 2, size 2.
+        assert_cell(&table, 2, 2, 1);
+        assert_row_total(&table, 2, 1);
+    }
+
+    #[test]
+    fn generation_table_child_only_family() {
+        let records = vec![rec(&[], &["p1", "p2"])];
+        let all = collect_handles(&records);
+        let (table, warnings) = compute_generation_table(&records, &all);
+        assert!(warnings.is_empty());
+        // No parents → both gen 0 → span 1, size 2.
+        assert_cell(&table, 2, 1, 1);
+        assert_row_total(&table, 2, 1);
+    }
+
+    #[test]
+    fn generation_table_single_member_family() {
+        let records = vec![rec(&["p1"], &[])];
+        let all = collect_handles(&records);
+        let (table, warnings) = compute_generation_table(&records, &all);
+        assert!(warnings.is_empty());
+        // One parent, no children → size 1, span 1.
+        assert_cell(&table, 1, 1, 1);
+        assert_row_total(&table, 1, 1);
+    }
+
+    #[test]
+    fn generation_table_dangling_refs_skipped() {
+        // p2 is dangling (not in all_handles); family size still counts it,
+        // but the component is built from p1 only → span 1.
+        let records = vec![rec(&["p1", "p2"], &[])];
+        let mut all = collect_handles(&records);
+        all.remove("p2");
+        let (table, warnings) = compute_generation_table(&records, &all);
+        assert!(warnings.is_empty());
+        assert_cell(&table, 2, 1, 1);
+        assert_row_total(&table, 2, 1);
     }
 }
