@@ -48,7 +48,14 @@ pub struct PrimaryTypeCounts {
     pub tags: usize,
 }
 
-
+/// Strip an optional namespace prefix from an element name.
+///
+/// `prefix:person` → `"person"`, `person` → `"person"`.
+fn strip_prefix(name: &[u8]) -> &[u8] {
+    name.iter()
+        .rposition(|&b| b == b':')
+        .map_or(name, |pos| &name[pos + 1..])
+}
 
 /// Scan a `.gramps` XML document and produce a [`StatsReport`].
 ///
@@ -61,10 +68,27 @@ pub fn count_gramps_xml(content: &str) -> Result<StatsReport, CliError> {
     let mut reader = Reader::from_str(content);
     reader.config_mut().trim_text(true);
 
-    let report = StatsReport::default();
+    let mut report = StatsReport::default();
 
     loop {
         match reader.read_event() {
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
+                let name = e.name().as_ref().to_vec();
+                let name = strip_prefix(&name);
+                match name {
+                    b"person" => report.counts.people += 1,
+                    b"family" => report.counts.families += 1,
+                    b"event" => report.counts.events += 1,
+                    b"placeobj" => report.counts.places += 1,
+                    b"source" => report.counts.sources += 1,
+                    b"citation" => report.counts.citations += 1,
+                    b"repository" => report.counts.repositories += 1,
+                    b"object" => report.counts.media += 1,
+                    b"note" => report.counts.notes += 1,
+                    b"tag" => report.counts.tags += 1,
+                    _ => {}
+                }
+            }
             Ok(Event::Eof) => break,
             Ok(_) => {}
             Err(e) => {
@@ -100,5 +124,101 @@ mod tests {
             Err(CliError::XmlParseError { .. }) => {}
             other => panic!("Expected XmlParseError, got: {:?}", other),
         }
+    }
+
+    #[test]
+    fn count_all_ten_types() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header><created date="2025-01-01" version="5.2"/></header>
+  <tags><tag handle="t1"/><tag handle="t2"/></tags>
+  <events><event handle="e1"/><event handle="e2"/><event handle="e3"/></events>
+  <people>
+    <person handle="p1"/>
+    <person handle="p2"/>
+    <person handle="p3"/>
+    <person handle="p4"/>
+  </people>
+  <families>
+    <family handle="f1"/>
+    <family handle="f2"/>
+  </families>
+  <citations>
+    <citation handle="c1"/>
+  </citations>
+  <sources>
+    <source handle="s1"/>
+    <source handle="s2"/>
+    <source handle="s3"/>
+  </sources>
+  <places>
+    <placeobj handle="pl1"/>
+  </places>
+  <objects>
+    <object handle="o1"/>
+    <object handle="o2"/>
+    <object handle="o3"/>
+    <object handle="o4"/>
+  </objects>
+  <repositories>
+    <repository handle="r1"/>
+  </repositories>
+  <notes>
+    <note handle="n1"/>
+    <note handle="n2"/>
+  </notes>
+</database>"#;
+        let report = count_gramps_xml(xml).unwrap();
+        assert_eq!(report.counts.people, 4);
+        assert_eq!(report.counts.families, 2);
+        assert_eq!(report.counts.events, 3);
+        assert_eq!(report.counts.places, 1);
+        assert_eq!(report.counts.sources, 3);
+        assert_eq!(report.counts.citations, 1);
+        assert_eq!(report.counts.repositories, 1);
+        assert_eq!(report.counts.media, 4);
+        assert_eq!(report.counts.notes, 2);
+        assert_eq!(report.counts.tags, 2);
+    }
+
+    #[test]
+    fn count_empty_database_returns_zero() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header><created date="2025-01-01" version="5.2"/></header>
+</database>"#;
+        let report = count_gramps_xml(xml).unwrap();
+        let zero = PrimaryTypeCounts::default();
+        assert_eq!(report.counts, zero);
+    }
+
+    #[test]
+    fn count_self_closing_elements() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <people>
+    <person handle="p1"/>
+  </people>
+</database>"#;
+        let report = count_gramps_xml(xml).unwrap();
+        assert_eq!(report.counts.people, 1);
+    }
+
+    #[test]
+    fn count_namespace_prefixed_input() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ns:database xmlns:ns="http://gramps-project.org/xml/1.7.2/">
+  <ns:header><ns:created date="2025-01-01" version="5.2"/></ns:header>
+  <ns:people>
+    <ns:person handle="p1"/>
+    <ns:person handle="p2"/>
+  </ns:people>
+  <ns:families>
+    <ns:family handle="f1"/>
+  </ns:families>
+</ns:database>"#;
+        let report = count_gramps_xml(xml).unwrap();
+        assert_eq!(report.counts.people, 2);
+        assert_eq!(report.counts.families, 1);
     }
 }
