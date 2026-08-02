@@ -30,6 +30,12 @@ pub enum CliError {
     SchemaDownloadError(String),
     /// Python 3 not available.
     PythonNotFound,
+
+    /// XML parse error with descriptive message.
+    XmlParseError {
+        /// Human-readable error message with byte position.
+        message: String,
+    },
 }
 
 impl fmt::Display for CliError {
@@ -71,6 +77,9 @@ impl fmt::Display for CliError {
                     "Python 3 not found. Install Python 3 or manually place a schema file."
                 )
             }
+            CliError::XmlParseError { message } => {
+                write!(f, "XML parse error: {}", message)
+            }
         }
     }
 }
@@ -82,6 +91,7 @@ impl std::error::Error for CliError {
             CliError::GenerationFailed(e) => Some(e),
             CliError::SerializationFailed(e) => Some(e),
             CliError::ScenarioError(e) => Some(e),
+            CliError::XmlParseError { .. } => None,
             _ => None,
         }
     }
@@ -179,6 +189,25 @@ mod tests {
             CliError::Io { .. } => {}
             _ => panic!("Expected Io variant"),
         }
+    }
+
+    #[test]
+    fn cli_error_xml_parse_display() {
+        let err = CliError::XmlParseError {
+            message: "Unexpected end of input at byte 42".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("XML parse error"));
+        assert!(display.contains("byte 42"));
+    }
+
+    #[test]
+    fn cli_error_xml_parse_source_is_none() {
+        use std::error::Error;
+        let err = CliError::XmlParseError {
+            message: "test error".to_string(),
+        };
+        assert!(err.source().is_none());
     }
 
     #[test]
