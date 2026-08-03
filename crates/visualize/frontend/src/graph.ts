@@ -37,6 +37,8 @@ export interface GraphController {
   getVisibleNodes(): string[];
   /** Reset all node positions and re-run the force layout. */
   resetLayout(): void;
+  /** Update force configuration and reheat the simulation. */
+  setForceConfig(config: ForceConfig): void;
 }
 
 // Internal node/link types for D3 simulation.
@@ -317,7 +319,7 @@ export function renderGraph(
 ): GraphController {
   // --- state ---
   let currentFilter: number | null = null;
-  const currentConfig: ForceConfig = { ...DEFAULT_FORCE_CONFIG };
+  let currentConfig: ForceConfig = { ...DEFAULT_FORCE_CONFIG };
   let highlighted = new Set<string>();
   let nodeClickCb: ((handle: string) => void) | null = null;
   let nodeHoverCb: ((handle: string | null, event: MouseEvent) => void) | null =
@@ -601,6 +603,22 @@ export function renderGraph(
         zoom.transform,
         d3.zoomIdentity,
       );
+    },
+
+    setForceConfig(config: ForceConfig) {
+      currentConfig = { ...config };
+      // Use the *active* node set so the computed generation range matches
+      // what the simulation is actually running on (handles filtered views).
+      const activeNodes =
+        currentFilter === null
+          ? simNodes
+          : simNodes.filter((n) => n.family_group === currentFilter);
+      if (activeNodes.length === 0) return; // nothing to configure
+      const spacing = computeGenerationSpacing(activeNodes, getSvgHeight());
+      const minGen = Math.min(...activeNodes.map((n) => n.generation));
+      const targetY = (d: SimNode) => (d.generation - minGen) * spacing;
+      applyForceConfig(simulation, currentConfig, targetY);
+      simulation.alpha(0.3).restart();
     },
   };
 
