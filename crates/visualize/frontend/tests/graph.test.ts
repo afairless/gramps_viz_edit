@@ -622,10 +622,25 @@ describe('createSimulationForces', () => {
 });
 
 describe('restartSimulation', () => {
-  it('restarts without throwing when called after renderGraph', () => {
+  it('setForceConfig computes spacing from filtered node set', () => {
+    // Two family groups with different generation spans:
+    //   Group 1: generations 0-1 (2 gens → spacing = 420 for height 600)
+    //   Group 2: generations 0-3 (4 gens → spacing = 140 for height 600)
     const data = makeGraph(
-      [makeNode('p1', { family_group: 1, generation: 0 }), makeNode('p2', { family_group: 1, generation: 1 })],
-      [{ source: 'p1', target: 'p2', link_type: 'ParentChild' }],
+      [
+        makeNode('p1', { family_group: 1, generation: 0 }),
+        makeNode('p2', { family_group: 1, generation: 1 }),
+        makeNode('p3', { family_group: 2, generation: 0 }),
+        makeNode('p4', { family_group: 2, generation: 1 }),
+        makeNode('p5', { family_group: 2, generation: 2 }),
+        makeNode('p6', { family_group: 2, generation: 3 }),
+      ],
+      [
+        { source: 'p1', target: 'p2', link_type: 'ParentChild' },
+        { source: 'p3', target: 'p4', link_type: 'ParentChild' },
+        { source: 'p4', target: 'p5', link_type: 'ParentChild' },
+        { source: 'p5', target: 'p6', link_type: 'ParentChild' },
+      ],
     );
 
     const container = document.createElement('div');
@@ -635,10 +650,13 @@ describe('restartSimulation', () => {
 
     const controller = renderGraph(container, data);
 
-    // Filter change triggers restartSimulation
+    // Filter to group 1 (generations 0-1, 2 nodes)
+    controller.setFamilyGroupFilter(1);
+
+    // Apply a non-default config — should not throw
+    const testConfig: ForceConfig = { generationPull: 0.5, spouseStrength: 0.5, parentChildStrength: 0.5 };
     expect(() => {
-      controller.setFamilyGroupFilter(1);
-      controller.setFamilyGroupFilter(null);
+      controller.setForceConfig(testConfig);
     }).not.toThrow();
 
     controller.destroy();
