@@ -168,6 +168,13 @@ pub fn extract_persons(content: &str) -> Result<Vec<ParsedPerson>, Error> {
                             }
                         }
                     }
+                    b"eventref" if current.is_some() => {
+                        if let Some(h) = read_hlink_attr(e) {
+                            if let Some(ref mut person) = current {
+                                person.event_refs.push(h);
+                            }
+                        }
+                    }
                     b"gender" if current.is_some() => in_gender = true,
                     _ => {}
                 }
@@ -193,6 +200,13 @@ pub fn extract_persons(content: &str) -> Result<Vec<ParsedPerson>, Error> {
                                 person.birth_year = year;
                             } else {
                                 person.death_date = display;
+                            }
+                        }
+                    }
+                    b"eventref" => {
+                        if let Some(h) = read_hlink_attr(e) {
+                            if let Some(ref mut person) = current {
+                                person.event_refs.push(h);
                             }
                         }
                     }
@@ -597,6 +611,101 @@ mod tests {
         assert_eq!(ps.len(), 2);
         assert_eq!(ps[0].given_name.as_deref(), Some("A"));
         assert_eq!(ps[1].given_name.as_deref(), Some("B"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Eventref capture in extract_persons
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn extract_person_with_eventrefs() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <people>
+    <person handle="p1">
+      <name><first>John</first><surname>Smith</surname></name>
+      <eventref hlink="e1"/>
+      <eventref hlink="e2"/>
+    </person>
+  </people>
+</database>"#;
+        let p = single_person(xml);
+        assert_eq!(p.handle, "p1");
+        assert_eq!(p.event_refs, vec!["e1", "e2"]);
+    }
+
+    #[test]
+    fn extract_person_mixed_inline_and_eventrefs() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <people>
+    <person handle="p1">
+      <name><first>John</first><surname>Smith</surname></name>
+      <birth><dateval val="1850-03-15"/></birth>
+      <eventref hlink="e1"/>
+      <eventref hlink="e2"/>
+    </person>
+  </people>
+</database>"#;
+        let p = single_person(xml);
+        assert_eq!(p.handle, "p1");
+        assert_eq!(p.birth_date.as_deref(), Some("1850-03-15"));
+        assert_eq!(p.birth_year, Some(1850));
+        assert_eq!(p.event_refs, vec!["e1", "e2"]);
+    }
+
+    #[test]
+    fn extract_person_eventref_no_hlink() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <people>
+    <person handle="p1">
+      <name><first>John</first><surname>Smith</surname></name>
+      <eventref hlink="e1"/>
+      <eventref/>
+      <eventref hlink="e3"/>
+    </person>
+  </people>
+</database>"#;
+        let p = single_person(xml);
+        // eventref without hlink is silently skipped (no None entry)
+        assert_eq!(p.event_refs, vec!["e1", "e3"]);
+    }
+
+    #[test]
+    fn extract_person_eventref_namespace_prefixed() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ns:database xmlns:ns="http://gramps-project.org/xml/1.7.2/">
+  <ns:people>
+    <ns:person ns:handle="p1">
+      <ns:name><ns:first>John</ns:first><ns:surname>Smith</ns:surname></ns:name>
+      <ns:eventref ns:hlink="e1"/>
+      <ns:eventref ns:hlink="e2"/>
+    </ns:person>
+  </ns:people>
+</ns:database>"#;
+        let p = single_person(xml);
+        assert_eq!(p.event_refs, vec!["e1", "e2"]);
+    }
+
+    #[test]
+    fn extract_person_eventref_inline_birth_still_works() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <people>
+    <person handle="p1">
+      <name><first>John</first><surname>Smith</surname></name>
+      <birth><dateval val="1850-03-15"/></birth>
+      <death><dateval val="1920-07-01"/></death>
+      <eventref hlink="e1"/>
+    </person>
+  </people>
+</database>"#;
+        let p = single_person(xml);
+        assert_eq!(p.birth_date.as_deref(), Some("1850-03-15"));
+        assert_eq!(p.birth_year, Some(1850));
+        assert_eq!(p.death_date.as_deref(), Some("1920-07-01"));
+        assert_eq!(p.event_refs, vec!["e1"]);
     }
 
     // -----------------------------------------------------------------------
