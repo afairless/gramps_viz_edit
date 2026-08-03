@@ -12,6 +12,7 @@ import {
   onDrag,
   onDragEnd,
   validateGraphData,
+  resetNodePositions,
 } from '../src/graph';
 import type { SimNode } from '../src/graph';
 import type { GraphData, PersonNode, FamilyLink } from '../src/types';
@@ -375,6 +376,59 @@ describe('drag handlers', () => {
     });
   });
 });
+
+describe('resetNodePositions', () => {
+  it('clears fx/fy on all nodes', () => {
+    const nodes = buildSimNodes(makeGraph(
+      [makeNode('p1'), makeNode('p2')],
+      [],
+    ));
+    nodes[0].fx = 100; nodes[0].fy = 200;
+    nodes[1].fx = 300; nodes[1].fy = 400;
+
+    const mockSim = { alpha: vi.fn().mockReturnThis(), restart: vi.fn() } as unknown as d3.Simulation<SimNode, undefined>;
+    resetNodePositions(nodes, mockSim);
+
+    expect(nodes[0].fx).toBeNull();
+    expect(nodes[0].fy).toBeNull();
+    expect(nodes[1].fx).toBeNull();
+    expect(nodes[1].fy).toBeNull();
+  });
+
+  it('reheats the simulation', () => {
+    const nodes = buildSimNodes(makeGraph([makeNode('p1')], []));
+    const mockAlpha = vi.fn().mockReturnThis();
+    const mockRestart = vi.fn();
+    const mockSim = { alpha: mockAlpha, restart: mockRestart } as unknown as d3.Simulation<SimNode, undefined>;
+
+    resetNodePositions(nodes, mockSim);
+
+    expect(mockAlpha).toHaveBeenCalledWith(1);
+    expect(mockRestart).toHaveBeenCalledTimes(1);
+  });
+
+  it('handles empty node list', () => {
+    const mockSim = { alpha: vi.fn().mockReturnThis(), restart: vi.fn() } as unknown as d3.Simulation<SimNode, undefined>;
+    expect(() => resetNodePositions([], mockSim)).not.toThrow();
+  });
+
+  it('is idempotent (second call is a no-op)', () => {
+    const nodes = buildSimNodes(makeGraph([makeNode('p1')], []));
+    nodes[0].fx = 100; nodes[0].fy = 200;
+    const mockAlpha = vi.fn().mockReturnThis();
+    const mockRestart = vi.fn();
+    const mockSim = { alpha: mockAlpha, restart: mockRestart } as unknown as d3.Simulation<SimNode, undefined>;
+
+    resetNodePositions(nodes, mockSim);
+    resetNodePositions(nodes, mockSim); // second call
+
+    expect(nodes[0].fx).toBeNull();
+    expect(nodes[0].fy).toBeNull();
+    expect(mockAlpha).toHaveBeenCalledTimes(2);
+    expect(mockRestart).toHaveBeenCalledTimes(2);
+  });
+});
+
 
 describe('force simulation configuration shape', () => {
   it('simulation node objects are valid SimulationNodeDatum (have index/x/y optional)', () => {

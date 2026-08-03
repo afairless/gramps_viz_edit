@@ -34,6 +34,8 @@ export interface GraphController {
   setFamilyGroupFilter(groupId: number | null): void;
   /** Get all visible node handles. */
   getVisibleNodes(): string[];
+  /** Reset all node positions and re-run the force layout. */
+  resetLayout(): void;
 }
 
 // Internal node/link types for D3 simulation.
@@ -171,6 +173,18 @@ export function onDragEnd(
     'cursor',
     'grab',
   );
+}
+
+/** Reset all pinned positions and reheat the simulation. */
+export function resetNodePositions(
+  nodes: SimNode[],
+  simulation: d3.Simulation<SimNode, undefined>,
+): void {
+  for (const node of nodes) {
+    node.fx = null;
+    node.fy = null;
+  }
+  simulation.alpha(1).restart();
 }
 
 export function createDragBehavior(
@@ -442,6 +456,15 @@ export function renderGraph(
           ? simNodes
           : simNodes.filter((n: SimNode) => n.family_group === currentFilter);
       return filtered.map((n: SimNode) => n.handle);
+    },
+
+    resetLayout() {
+      if (svg.node()?.ownerDocument === null) return;
+      resetNodePositions(simNodes, simulation);
+      svg.transition().duration(500).call(
+        zoom.transform,
+        d3.zoomIdentity,
+      );
     },
   };
 
