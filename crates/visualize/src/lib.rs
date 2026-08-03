@@ -12,7 +12,7 @@ pub mod args;
 pub mod dates;
 pub mod graph_data;
 
-pub use args::{CliArgs, parse_cli_args};
+pub use args::{parse_cli_args, CliArgs};
 pub use graph_data::{
     FamilyGroupMeta, FamilyLink, GraphData, LinkType, PersonNode, SelectedPerson, SelectionExport,
 };

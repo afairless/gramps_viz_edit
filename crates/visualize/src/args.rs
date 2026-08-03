@@ -133,10 +133,7 @@ mod tests {
 
     #[test]
     fn flags_before_path() {
-        let args: Vec<String> = vec![
-            "--no-impute".into(),
-            "/path/to/file.gramps".into(),
-        ];
+        let args: Vec<String> = vec!["--no-impute".into(), "/path/to/file.gramps".into()];
         let result = parse_cli_args(&args);
         assert_eq!(
             result,
@@ -150,11 +147,7 @@ mod tests {
 
     #[test]
     fn invalid_generation_gap_uses_default() {
-        let args: Vec<String> = vec![
-            "--generation-gap".into(),
-            "abc".into(),
-            "/p.gramps".into(),
-        ];
+        let args: Vec<String> = vec!["--generation-gap".into(), "abc".into(), "/p.gramps".into()];
         let result = parse_cli_args(&args);
         assert_eq!(
             result,
@@ -201,10 +194,7 @@ mod tests {
 
     #[test]
     fn unknown_flag_is_ignored() {
-        let args: Vec<String> = vec![
-            "/path/to/file.gramps".into(),
-            "--unknown-flag".into(),
-        ];
+        let args: Vec<String> = vec!["/path/to/file.gramps".into(), "--unknown-flag".into()];
         let result = parse_cli_args(&args);
         assert_eq!(
             result,
@@ -218,10 +208,7 @@ mod tests {
 
     #[test]
     fn extra_positional_is_ignored() {
-        let args: Vec<String> = vec![
-            "/path/to/file.gramps".into(),
-            "extra_arg".into(),
-        ];
+        let args: Vec<String> = vec!["/path/to/file.gramps".into(), "extra_arg".into()];
         let result = parse_cli_args(&args);
         assert_eq!(
             result,

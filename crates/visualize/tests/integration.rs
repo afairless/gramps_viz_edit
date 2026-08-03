@@ -280,8 +280,8 @@ fn custom_generation_gap_affects_imputation() {
 
 #[test]
 fn exp01_fixture_counts() {
-    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/exp01.gramps");
+    let path =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/exp01.gramps");
     let gd = visualize::load_graph_data(path.to_str().unwrap(), false, 25).unwrap();
 
     // Expected: 64 persons, 49 families
