@@ -169,6 +169,58 @@ async function openAndRenderFileFromPath(
   renderGraphFromData(container, appEl, graphData);
 }
 
+/**
+ * Render a toolbar containing the family group filter dropdown and a reset layout button.
+ */
+export function renderToolbar(
+  graphData: GraphData,
+  controller: GraphController,
+): HTMLElement {
+  const toolbar = document.createElement('div');
+  toolbar.id = 'toolbar';
+  toolbar.style.position = 'absolute';
+  toolbar.style.top = '20px';
+  toolbar.style.left = '20px';
+  toolbar.style.zIndex = '500';
+  toolbar.style.display = 'flex';
+  toolbar.style.alignItems = 'center';
+  toolbar.style.gap = '8px';
+
+  // Family group filter dropdown
+  const filterDropdown = renderFilterDropdown(graphData, controller);
+  if (filterDropdown) {
+    filterDropdown.style.position = 'relative';
+    filterDropdown.style.top = 'auto';
+    filterDropdown.style.left = 'auto';
+    filterDropdown.style.zIndex = 'auto';
+    toolbar.appendChild(filterDropdown);
+  }
+
+  // Reset layout button
+  const resetBtn = document.createElement('button');
+  resetBtn.textContent = '↺ Reset';
+  resetBtn.title = 'Reset node positions to force-directed layout';
+  resetBtn.style.padding = '4px 10px';
+  resetBtn.style.fontSize = '12px';
+  resetBtn.style.borderRadius = '4px';
+  resetBtn.style.border = '1px solid #ccc';
+  resetBtn.style.background = '#fff';
+  resetBtn.style.cursor = 'pointer';
+  resetBtn.style.color = '#333';
+  resetBtn.addEventListener('mouseenter', () => {
+    resetBtn.style.background = '#eee';
+  });
+  resetBtn.addEventListener('mouseleave', () => {
+    resetBtn.style.background = '#fff';
+  });
+  resetBtn.addEventListener('click', () => {
+    controller.resetLayout();
+  });
+  toolbar.appendChild(resetBtn);
+
+  return toolbar;
+}
+
 /** Render the graph UI from already-loaded GraphData. */
 function renderGraphFromData(
   container: HTMLElement,
@@ -189,10 +241,10 @@ function renderGraphFromData(
   const hoverHandler = createHoverHandler(graphData);
   controller.onNodeHover(hoverHandler);
 
-  // Wire up family group filter dropdown
-  const filterDropdown = renderFilterDropdown(graphData, controller);
-  if (filterDropdown && appEl) {
-    appEl.insertBefore(filterDropdown, document.getElementById('legend'));
+  // Wire up toolbar (filter dropdown + reset button)
+  const toolbar = renderToolbar(graphData, controller);
+  if (appEl) {
+    appEl.insertBefore(toolbar, document.getElementById('legend'));
   }
 
   // Wire up color legend
