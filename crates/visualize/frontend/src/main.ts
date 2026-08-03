@@ -122,7 +122,12 @@ async function openAndRenderFile(
     });
   } catch (err) {
     console.error('Failed to load graph data via Tauri IPC:', err);
-    showError(container, 'Failed to load Gramps data file.');
+    // Differentiate between IPC permission errors and data errors
+    const message =
+      err instanceof Error && err.message?.includes('not allowed')
+        ? 'Permission denied: could not open the file dialog. Try reinstalling the application.'
+        : 'Failed to load Gramps data file. The file may be corrupted or not a valid Gramps XML file.';
+    showError(container, message);
     return false;
   }
 
