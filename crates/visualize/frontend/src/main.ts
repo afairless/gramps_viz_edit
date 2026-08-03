@@ -117,8 +117,8 @@ async function openAndRenderFile(
       DEFAULT_NO_IMPUTE;
     graphData = await tauri.invoke('load_graph', {
       path: selected,
-      no_impute: noImpute,
-      generation_gap: gap,
+      noImpute: noImpute,
+      generationGap: gap,
     });
   } catch (err) {
     console.error('Failed to load graph data via Tauri IPC:', err);
@@ -152,8 +152,8 @@ async function openAndRenderFileFromPath(
   try {
     graphData = await tauri.invoke('load_graph', {
       path: filePath,
-      no_impute: noImpute,
-      generation_gap: gap,
+      noImpute: noImpute,
+      generationGap: gap,
     });
   } catch (err) {
     console.error('Failed to load graph data via Tauri IPC:', err);

@@ -31,7 +31,7 @@ fn main() {
                         .unwrap_or_else(|_| "false".into());
                     let gap_json = serde_json::to_string(&cli_args.generation_gap)
                         .unwrap_or_else(|_| "25".into());
-                    window.eval(&format!(
+                    window.eval(format!(
                         "window.__GRAMPS_FILE__ = {}; window.__NO_IMPUTE__ = {}; window.__GENERATION_GAP__ = {};",
                         path_json, no_impute_json, gap_json,
                     ))?;

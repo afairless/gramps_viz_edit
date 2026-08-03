@@ -14,10 +14,7 @@
         "height": 800,
         "resizable": true
       }
-    ],
-    "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
-    }
+    ]
   },
   "bundle": {
     "active": true,
