@@ -1,51 +1,113 @@
-# Implementation Plan: Draggable Nodes in the Force-Directed Graph
+# Implementation Plan: Layout Reset Button
 
-Source: `docs/research/drag-nodes-in-graph.md`
+Source: `docs/research/layout-reset-button.md`
+
+## Overview
+
+Add a `resetLayout()` method to the `GraphController` interface that clears all pinned node positions (`fx`/`fy`) and reheats the force simulation, then wire a "Reset Layout" button in the toolbar next to the existing filter dropdown. The toolbar is a new container that groups the filter dropdown and reset button together.
+
+## Step ordering
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `feat: add d3.drag behavior to force-directed graph nodes` | Drag behavior + extractable handlers | `crates/visualize/frontend/src/graph.ts` | Unit |
-| 2 | `test: add tests for drag handler logic and fx/fy mutation` | Drag handler tests | `crates/visualize/frontend/tests/graph.test.ts` | Unit |
-| 3 | `feat: verify drag-nodes feature manually in browser` | Manual verification | — | — |
+| 1 | `feat: add resetNodePositions helper and resetLayout controller method` | Reset helper + controller method | `crates/visualize/frontend/src/graph.ts` | Unit |
+| 2 | `feat: add toolbar with reset button and integrate filter dropdown` | Toolbar UI wiring | `crates/visualize/frontend/src/main.ts` | Unit |
+| 3 | `chore: update test harness to use resetLayout` | Test harness cleanup | `crates/visualize/frontend/test-harness.html` | — |
+| 4 | `docs: add manual verification instructions` | Manual verification | _(manual — no files changed)_ | — |
 
-## Step Details
+## Step details
 
-### Step 1 — Add drag behavior to `graph.ts`
+### Step 1 — `resetNodePositions` helper + `resetLayout()` controller method
 
-**Code changes:**
+**What:** Add an exported `resetNodePositions(nodes, simulation)` pure function that clears `fx`/`fy` on every `SimNode` and calls `simulation.alpha(1).restart()`. Add a `resetLayout()` method to the `GraphController` interface and the controller object that delegates to the helper and also resets the zoom transform with a 500ms animated transition.
 
-- Inside `restartSimulation()`, after the `nodeEnter` chain, define a `d3.drag<SVGGElement, SimNode>()` behavior with `start`/`drag`/`end` handlers.
-- In the `start` handler: call `simulation.alphaTarget(0.3).restart()` (guarded by `!event.active`), set `d.fx = d.x` / `d.fy = d.y`, and set cursor to `'grabbing'` via `d3.select(event.sourceEvent.currentTarget).style('cursor', 'grabbing')`.
-- In the `drag` handler: convert zoom coordinates to base SVG space via `d3.zoomTransform(svg.node()).invert([event.x, event.y])`, set `d.fx`/`d.fy` to the inverted coordinates.
-- In the `end` handler: call `simulation.alphaTarget(0)` (guarded by `!event.active`), set cursor to `'grab'` via `d3.select(event.sourceEvent.currentTarget).style('cursor', 'grab')`. Do **not** clear `fx`/`fy` (pin behavior).
-- Apply drag via `nodeGroup.call(drag)` (not `nodeEnter.call(drag)`) to re-bind existing nodes with the current simulation reference.
-- Extract drag handler logic into standalone exported functions (`onDragStart`, `onDrag`, `onDragEnd`) for testability. Each function takes `(d: SimNode, event: D3DragEvent, simulation: Simulation, svg: SVGSVGElement)` and returns `{ fx, fy }` or works via mutation.
-- Change node cursor from `'pointer'` to `'grab'` in the `nodeEnter` `.attr('cursor', ...)`.
+**Files to modify:**
 
-**Files modified:** `crates/visualize/frontend/src/graph.ts`
+- `crates/visualize/frontend/src/graph.ts`
 
-**Tests:** Unit tests for the extracted handler functions (fx/fy mutation, coordinate conversion, pin behavior). These can be written in the same step or deferred to Step 2.
+**Changes to `graph.ts`:**
 
-### Step 2 — Write tests for drag handler logic
+1. Add `resetNodePositions` export — iterates `SimNode[]`, sets `fx = null, fy = null`, calls `simulation.alpha(1).restart()`
+2. Add `resetLayout(): void` to `GraphController` interface
+3. Add `resetLayout` method to the controller object:
+   - Guard: `if (svg.node()?.ownerDocument === null) return;`
+   - Call `resetNodePositions(simNodes, simulation)`
+   - Animate zoom reset: `svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity)`
 
-**Test coverage:**
+**Tests (in `crates/visualize/frontend/tests/graph.test.ts`):**
 
-- **`onDragStart`**: Given a `SimNode` with `x=100, y=200`, verify `fx=100, fy=200` after calling the handler.
-- **`onDrag`** (identity zoom): Given a zoom transform at identity, verify `fx`/`fy` match the event coordinates.
-- **`onDrag`** (with zoom): Given a zoom transform of `scale(2)`, verify `fx`/`fy` are correctly inverted from the zoomed coordinates.
-- **`onDragEnd`**: Verify `fx`/`fy` remain unchanged (not cleared) — pin behavior.
-- **Handler shape**: Verify that the drag behavior has `start`/`drag`/`end` handlers that are functions.
+- `resetNodePositions` clears `fx`/`fy` on all nodes
+- `resetNodePositions` calls `simulation.alpha(1)` and `.restart()`
+- `resetNodePositions` handles empty node list (no panic)
+- `resetNodePositions` is idempotent (second call is a no-op)
 
-**Files modified:** `crates/visualize/frontend/tests/graph.test.ts`
+### Step 2 — Toolbar + reset button in `main.ts`
 
-### Step 3 — Manual verification
+**What:** Create a `renderToolbar()` function that renders a horizontal toolbar container (`position: absolute`, top-left) containing the filter dropdown and the reset button. Replace the standalone `renderFilterDropdown` call in `renderGraphFromData()` with `renderToolbar()`. The reset button calls `controller.resetLayout()` on click, styled consistently with the filter dropdown.
 
-Build and run the frontend, then verify:
+**Files to modify:**
 
-- Nodes are draggable with `'grab'`/`'grabbing'` cursor feedback
-- Other nodes move responsively during drag (simulation reheats)
-- Node stays pinned after drag ends
-- Filtering preserves pinned positions (fx/fy not cleared on filter change)
-- Click (without drag) still triggers selection
-- Zoom/pan on background still works
+- `crates/visualize/frontend/src/main.ts`
+
+**Changes to `main.ts`:**
+
+1. Add `renderToolbar(graphData, controller): HTMLElement` function:
+   - Creates a `<div id="toolbar">` with `position: absolute; top: 20px; left: 20px; z-index: 500; display: flex; align-items: center; gap: 8px`
+   - Calls `renderFilterDropdown(graphData, controller)`, overrides its inline positioning to work within flex layout, appends to toolbar
+   - Creates a `<button>` with text `↺ Reset`, title `Reset node positions to force-directed layout`
+   - Button styles: padding `4px 10px`, font-size `12px`, border-radius `4px`, border `1px solid #ccc`, background `#fff`, cursor `pointer`, color `#333`
+   - Hover: background `#eee`
+   - Click handler: `controller.resetLayout()`
+   - Returns the toolbar element
+2. In `renderGraphFromData()`, replace:
+
+   ```ts
+   const filterDropdown = renderFilterDropdown(graphData, controller);
+   if (filterDropdown && appEl) {
+     appEl.insertBefore(filterDropdown, document.getElementById('legend'));
+   }
+   ```
+
+   with:
+
+   ```ts
+   const toolbar = renderToolbar(graphData, controller);
+   if (appEl) {
+     appEl.insertBefore(toolbar, document.getElementById('legend'));
+   }
+   ```
+
+**Tests (in `crates/visualize/frontend/tests/graph.test.ts`):**
+
+- `renderToolbar` returns a toolbar element with a reset button containing `↺`
+- `renderToolbar` includes a `<select>` element (filter dropdown)
+- Reset button click handler calls `controller.resetLayout()` (via spy)
+
+### Step 3 — Update test harness
+
+**What:** Change the test harness's "Reset layout" button to call `controller.resetLayout()` instead of `controller.updateData(data)`.
+
+**Files to modify:**
+
+- `crates/visualize/frontend/test-harness.html`
+
+**Change:**
+
+```js
+// Before:
+document.getElementById('btn-reset')?.addEventListener('click', () => { controller.updateData(data); });
+// After:
+document.getElementById('btn-reset')?.addEventListener('click', () => { controller.resetLayout(); });
+```
+
+### Step 4 — Manual verification
+
+**What:** Build the frontend and verify the following in the browser:
+
+- "Reset Layout" button is visible in the toolbar (top-left, next to the filter dropdown)
+- Dragging a node pins it; clicking "Reset Layout" unpins all nodes
+- Simulation visibly re-settles into a fresh layout
+- Zoom is reset smoothly (animated zoom-out over ~500ms)
+- Filter state is preserved (active filter still applies after reset)
+- Selection / highlights are preserved (not cleared by reset)
 - `npm test` passes
