@@ -13,10 +13,14 @@ import {
   onDragEnd,
   validateGraphData,
   resetNodePositions,
+  computeGenerationSpacing,
+  createSimulationForces,
+  applyForceConfig,
+  renderGraph,
 } from '../src/graph';
 import type { SimNode } from '../src/graph';
 import type { GraphData, PersonNode, FamilyLink } from '../src/types';
-import { DEFAULT_FORCE_CONFIG } from '../src/types';
+import { DEFAULT_FORCE_CONFIG, type ForceConfig } from '../src/types';
 
 function makeNode(handle: string, overrides: Partial<PersonNode> = {}): PersonNode {
   return {
@@ -467,6 +471,178 @@ describe('DEFAULT_FORCE_CONFIG', () => {
     expect(cfg.generationPull).toBeGreaterThan(0);
     expect(cfg.spouseStrength).toBeGreaterThan(0);
     expect(cfg.parentChildStrength).toBeGreaterThan(0);
+  });
+});
+
+describe('computeGenerationSpacing', () => {
+  function makeNode(generation: number): SimNode {
+    return {
+      handle: 'h',
+      name: 'N',
+      birth_date: null,
+      death_date: null,
+      birth_year: null,
+      is_imputed: false,
+      gender: 'unknown',
+      family_group: 0,
+      generation,
+      index: undefined,
+      x: undefined,
+      y: undefined,
+      vx: undefined,
+      vy: undefined,
+    };
+  }
+
+  it('returns 0 for empty node list', () => {
+    expect(computeGenerationSpacing([], 600)).toBe(0);
+  });
+
+  it('returns 0 for single generation', () => {
+    expect(computeGenerationSpacing([makeNode(0), makeNode(0)], 600)).toBe(0);
+  });
+
+  it('returns 0 for uniform generation (all same value)', () => {
+    expect(computeGenerationSpacing([makeNode(2), makeNode(2), makeNode(2)], 600)).toBe(0);
+  });
+
+  it('computes spacing for two generations', () => {
+    const spacing = computeGenerationSpacing([makeNode(0), makeNode(1)], 600);
+    // 600 * 0.7 / 1 = 420
+    expect(spacing).toBe(420);
+  });
+
+  it('computes spacing for five generations', () => {
+    const spacing = computeGenerationSpacing(
+      [makeNode(0), makeNode(1), makeNode(2), makeNode(3), makeNode(4)],
+      1000,
+    );
+    // 1000 * 0.7 / 4 = 175
+    expect(spacing).toBe(175);
+  });
+
+  it('returns 0 for non-positive height', () => {
+    expect(computeGenerationSpacing([makeNode(0), makeNode(1)], 0)).toBe(0);
+    expect(computeGenerationSpacing([makeNode(0), makeNode(1)], -100)).toBe(0);
+  });
+
+  it('applies the 40px minimum floor for very deep trees', () => {
+    // 100 gens in 600px: 600 * 0.7 / 99 ≈ 4.2 → clamped to 40
+    const nodes = Array.from({ length: 100 }, (_, i) => makeNode(i));
+    expect(computeGenerationSpacing(nodes, 600)).toBe(40);
+  });
+
+  it('returns NaN for NaN generation values (contract violation)', () => {
+    const nodes = [makeNode(NaN), makeNode(1)];
+    expect(computeGenerationSpacing(nodes, 600)).toBeNaN();
+  });
+});
+
+describe('applyForceConfig roundtrip', () => {
+  it('mutates link strengths and gen-field strength on an existing simulation', () => {
+    // Create a bare simulation with registerable forces
+    const sim = d3.forceSimulation<SimNode>([]);
+    const genY = () => 0;
+    const config1: ForceConfig = {
+      generationPull: 0.3,
+      spouseStrength: 0.8,
+      parentChildStrength: 0.5,
+    };
+    const config2: ForceConfig = {
+      generationPull: 1.5,
+      spouseStrength: 0.2,
+      parentChildStrength: 0.9,
+    };
+
+    // Register forces with config1
+    createSimulationForces(sim, config1, genY, [], [], 800, 600);
+
+    // Mutate to config2
+    applyForceConfig(sim, config2, genY);
+
+    // Read back the values
+    const spouseLink = sim.force('spouse-link') as d3.ForceLink<SimNode, d3.SimulationLinkDatum<SimNode>>;
+    expect(spouseLink.strength()(null as unknown as d3.SimulationLinkDatum<SimNode>, 0, [])).toBe(0.2);
+
+    const pcLink = sim.force('pc-link') as d3.ForceLink<SimNode, d3.SimulationLinkDatum<SimNode>>;
+    expect(pcLink.strength()(null as unknown as d3.SimulationLinkDatum<SimNode>, 0, [])).toBe(0.9);
+
+    const genField = sim.force('gen-field') as d3.ForceY<SimNode>;
+    expect(genField.strength()(null as unknown as SimNode, 0, [])).toBe(1.5);
+
+    // Clean up
+    sim.stop();
+  });
+
+  it('handles missing forces gracefully (no-op)', () => {
+    const sim = d3.forceSimulation<SimNode>([]);
+    // Call applyForceConfig on a simulation with NO forces registered
+    expect(() => {
+      applyForceConfig(sim, DEFAULT_FORCE_CONFIG, () => 0);
+    }).not.toThrow();
+    sim.stop();
+  });
+});
+
+describe('createSimulationForces', () => {
+  it('registers all six named forces', () => {
+    const sim = d3.forceSimulation<SimNode>([]);
+    createSimulationForces(sim, DEFAULT_FORCE_CONFIG, () => 0, [], [], 800, 600);
+
+    expect(sim.force('spouse-link')).toBeTruthy();
+    expect(sim.force('pc-link')).toBeTruthy();
+    expect(sim.force('gen-field')).toBeTruthy();
+    expect(sim.force('charge')).toBeTruthy();
+    expect(sim.force('collision')).toBeTruthy();
+    expect(sim.force('center')).toBeTruthy();
+
+    sim.stop();
+  });
+
+  it('uses the provided config values for force strengths', () => {
+    const config: ForceConfig = {
+      generationPull: 0.5,
+      spouseStrength: 0.6,
+      parentChildStrength: 0.7,
+    };
+    const sim = d3.forceSimulation<SimNode>([]);
+    createSimulationForces(sim, config, () => 0, [], [], 800, 600);
+
+    const spouseLink = sim.force('spouse-link') as d3.ForceLink<SimNode, d3.SimulationLinkDatum<SimNode>>;
+    expect(spouseLink.strength()(null as unknown as d3.SimulationLinkDatum<SimNode>, 0, [])).toBe(0.6);
+
+    const pcLink = sim.force('pc-link') as d3.ForceLink<SimNode, d3.SimulationLinkDatum<SimNode>>;
+    expect(pcLink.strength()(null as unknown as d3.SimulationLinkDatum<SimNode>, 0, [])).toBe(0.7);
+
+    const genField = sim.force('gen-field') as d3.ForceY<SimNode>;
+    expect(genField.strength()(null as unknown as SimNode, 0, [])).toBe(0.5);
+
+    sim.stop();
+  });
+});
+
+describe('restartSimulation', () => {
+  it('restarts without throwing when called after renderGraph', () => {
+    const data = makeGraph(
+      [makeNode('p1', { family_group: 1, generation: 0 }), makeNode('p2', { family_group: 1, generation: 1 })],
+      [{ source: 'p1', target: 'p2', link_type: 'ParentChild' }],
+    );
+
+    const container = document.createElement('div');
+    container.style.width = '800px';
+    container.style.height = '600px';
+    document.body.appendChild(container);
+
+    const controller = renderGraph(container, data);
+
+    // Filter change triggers restartSimulation
+    expect(() => {
+      controller.setFamilyGroupFilter(1);
+      controller.setFamilyGroupFilter(null);
+    }).not.toThrow();
+
+    controller.destroy();
+    document.body.removeChild(container);
   });
 });
 

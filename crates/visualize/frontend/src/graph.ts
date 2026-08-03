@@ -3,6 +3,7 @@
 
 import * as d3 from 'd3';
 import type { GraphData, LinkType } from './types';
+import { DEFAULT_FORCE_CONFIG, type ForceConfig } from './types';
 import {
   buildColorScale,
   getNodeColor,
@@ -64,6 +65,18 @@ interface SimLink {
 
 const NODE_RADIUS = 8;
 const SELECTED_STROKE_WIDTH = 3;
+
+// Force simulation parameters (module-level so tests can import them)
+/** Spouse links are short — couples should be visually cohesive. */
+const SPOUSE_BASE_DISTANCE = 40;
+/** Parent-child links span generations and need vertical room. */
+const PC_BASE_DISTANCE = 120;
+/** Unchanged from the previous layout: repulsion between all nodes. */
+const CHARGE_STRENGTH = -300;
+/** Unchanged from the previous layout: node collision radius. */
+const COLLIDE_RADIUS = 18;
+/** Weak X-centering only — the gen-field handles vertical placement. */
+const CENTER_STRENGTH = 0.05;
 
 // ---------------------------------------------------------------------------
 // Validation
@@ -205,6 +218,96 @@ export function createDragBehavior(
 }
 
 // ---------------------------------------------------------------------------
+// Force configuration helpers (exported for testing)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the vertical spacing between generation bands.
+ *
+ * Uses ~70% of the canvas height across (numGens - 1) gaps, with a 40px
+ * floor so very deep trees don't collapse onto a single band. Returns 0 for
+ * empty node sets, a single generation, or non-positive canvas heights.
+ */
+export function computeGenerationSpacing(
+  nodes: SimNode[],
+  canvasHeight: number,
+): number {
+  // Guard: non-positive height means no viewport area — nothing to space.
+  if (canvasHeight <= 0) return 0;
+  const gens = nodes.map((n) => n.generation);
+  if (gens.length === 0) return 0;
+  const minGen = Math.min(...gens);
+  const maxGen = Math.max(...gens);
+  const numGens = maxGen - minGen + 1;
+  if (numGens <= 1) return 0;
+  // Use ~70% of the canvas height, leaving top/bottom margin. The
+  // Math.max(40, …) floor ensures minimum spacing for very deep trees.
+  return Math.max(40, (canvasHeight * 0.7) / (numGens - 1));
+}
+
+/**
+ * Register all four named forces on a fresh simulation.
+ *
+ * Spouse and parent-child links get separate forces with their own base
+ * distances; a generation field force pulls nodes toward their generation
+ * band; weak centering keeps the layout in view horizontally.
+ */
+export function createSimulationForces(
+  sim: d3.Simulation<SimNode, undefined>,
+  config: ForceConfig,
+  genY: (d: SimNode) => number,
+  spouseLinks: d3.SimulationLinkDatum<SimNode>[],
+  pcLinks: d3.SimulationLinkDatum<SimNode>[],
+  width: number,
+  height: number,
+): void {
+  sim
+    .force(
+      'spouse-link',
+      d3
+        .forceLink<SimNode, d3.SimulationLinkDatum<SimNode>>(spouseLinks)
+        .id((d: SimNode) => d.handle)
+        .distance(SPOUSE_BASE_DISTANCE)
+        .strength(config.spouseStrength),
+    )
+    .force(
+      'pc-link',
+      d3
+        .forceLink<SimNode, d3.SimulationLinkDatum<SimNode>>(pcLinks)
+        .id((d: SimNode) => d.handle)
+        .distance(PC_BASE_DISTANCE)
+        .strength(config.parentChildStrength),
+    )
+    .force('gen-field', d3.forceY<SimNode>().y(genY).strength(config.generationPull))
+    .force('charge', d3.forceManyBody().strength(CHARGE_STRENGTH))
+    .force('collision', d3.forceCollide(COLLIDE_RADIUS))
+    .force('center', d3.forceCenter(width / 2, height / 2).strength(CENTER_STRENGTH));
+}
+
+/**
+ * Mutate the forces on an existing (running) simulation to a new config.
+ * No D3 selections are torn down — the simulation keeps ticking.
+ */
+export function applyForceConfig(
+  simulation: d3.Simulation<SimNode, undefined>,
+  config: ForceConfig,
+  genY: (d: SimNode) => number,
+): void {
+  const spouse = simulation.force('spouse-link');
+  if (spouse) {
+    (spouse as d3.ForceLink<SimNode, d3.SimulationLinkDatum<SimNode>>).strength(config.spouseStrength);
+  }
+  const pc = simulation.force('pc-link');
+  if (pc) {
+    (pc as d3.ForceLink<SimNode, d3.SimulationLinkDatum<SimNode>>).strength(config.parentChildStrength);
+  }
+  const gf = simulation.force('gen-field');
+  if (gf) {
+    (gf as d3.ForceY<SimNode>).strength(config.generationPull).y(genY);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main render function
 // ---------------------------------------------------------------------------
 
@@ -214,6 +317,7 @@ export function renderGraph(
 ): GraphController {
   // --- state ---
   let currentFilter: number | null = null;
+  const currentConfig: ForceConfig = { ...DEFAULT_FORCE_CONFIG };
   let highlighted = new Set<string>();
   let nodeClickCb: ((handle: string) => void) | null = null;
   let nodeHoverCb: ((handle: string | null, event: MouseEvent) => void) | null =
@@ -256,6 +360,26 @@ export function renderGraph(
     }
   });
   ro.observe(containerElement);
+
+  // Live SVG dimensions — read at force-creation time, not captured at
+  // construction, so they stay correct after window resize.
+  function getSvgHeight(): number {
+    const el = svg.node();
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      if (rect.height > 0) return rect.height;
+    }
+    return containerElement.clientHeight || 600;
+  }
+
+  function getSvgWidth(): number {
+    const el = svg.node();
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0) return rect.width;
+    }
+    return containerElement.clientWidth || 960;
+  }
 
   // --- build simulation ---
   function restartSimulation() {
@@ -340,25 +464,35 @@ export function renderGraph(
     // ---- simulation ----
     if (simulation) simulation.stop();
 
-    // Cast links to the D3 link datum type
-    const d3Links = filteredLinks as unknown as d3.SimulationLinkDatum<SimNode>[];
+    // Split links by type so each force can have its own strength.
+    const spouseLinks = filteredLinks.filter(
+      (l) => l.link_type === 'Spouse',
+    ) as unknown as d3.SimulationLinkDatum<SimNode>[];
+    const pcLinks = filteredLinks.filter(
+      (l) => l.link_type === 'ParentChild',
+    ) as unknown as d3.SimulationLinkDatum<SimNode>[];
 
-    simulation = d3
-      .forceSimulation(filtered)
-      .force(
-        'link',
-        d3
-          .forceLink<SimNode, d3.SimulationLinkDatum<SimNode>>(d3Links)
-          .id((d: SimNode) => d.handle)
-          .distance(80),
-      )
-      .force('charge', d3.forceManyBody().strength(-300))
-      .force('collision', d3.forceCollide(18))
-      .force(
-        'center',
-        d3.forceCenter(width / 2, height / 2).strength(0.3),
-      )
-      .on('tick', () => {
+    simulation = d3.forceSimulation(filtered);
+
+    // Generation band target: nodes of generation g land at y = (g - minGen) * spacing.
+    const genTarget = (d: SimNode): number => {
+      if (filtered.length === 0) return 0;
+      const spacing = computeGenerationSpacing(filtered, getSvgHeight());
+      const minGen = Math.min(...filtered.map((n) => n.generation));
+      return (d.generation - minGen) * spacing;
+    };
+
+    createSimulationForces(
+      simulation,
+      currentConfig,
+      genTarget,
+      spouseLinks,
+      pcLinks,
+      getSvgWidth(),
+      getSvgHeight(),
+    );
+
+    simulation.on('tick', () => {
         linkGroup
           .attr('x1', (d: SimLink) => d.source.x ?? 0)
           .attr('y1', (d: SimLink) => d.source.y ?? 0)
@@ -435,7 +569,9 @@ export function renderGraph(
       const h = containerElement.clientHeight;
       if (w > 0 && h > 0) {
         svg.attr('width', w).attr('height', h);
-        simulation.force('center', d3.forceCenter(w / 2, h / 2));
+        // Preserve CENTER_STRENGTH — recreating forceCenter without it would
+        // reset the strength to D3's default of 1.0.
+        simulation.force('center', d3.forceCenter(w / 2, h / 2).strength(CENTER_STRENGTH));
         simulation.alpha(0.3).restart();
       }
     },
