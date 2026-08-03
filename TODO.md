@@ -1,123 +1,44 @@
-# Implementation Plan: Fix All Nodes Gray — Event-Reference Resolution
+# Implementation Plan: Link Style Distinction — Vertical vs. Horizontal Relationships
 
-Source: `docs/research/fix-gray-nodes-event-reference-resolution.md`
-
-## Overview
-
-The `gramps-reader` crate's `extract_persons()` only handles inline `<birth>`/`<death>` elements inside `<person>`, but `gramps-gen` output (and standard Gramps 5.x format) uses an event-reference pattern where birth/death dates live in separate `<event>` elements referenced via `<eventref hlink="...">`. This causes all `birth_year` values to be `None`, resulting in every node rendering gray.
+Source: `docs/research/link-style-distinction.md`
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `feat(gramps-reader): add ParsedEvent type and event_refs field` | Types | `crates/gramps-reader/src/types.rs` | Unit |
-| 2 | `feat(gramps-reader): add extract_events parser for <event> elements` | Event extraction | `crates/gramps-reader/src/xml/extract.rs` | Unit |
-| 3 | `feat(gramps-reader): capture <eventref> hlinks in extract_persons` | Eventref capture | `crates/gramps-reader/src/xml/extract.rs` | Unit |
-| 4 | `feat(gramps-reader): add resolve_event_refs and re-export` | Resolution + public API | `crates/gramps-reader/src/xml/extract.rs`, `crates/gramps-reader/src/lib.rs` | Unit |
-| 5 | `feat(visualize): integrate event resolution in load_graph_data` | Pipeline integration | `crates/visualize/src/lib.rs` | Unit, Integration |
+| 1 | `feat(visualize): add LinkType type and link style functions` | Link style functions + `LinkType` type | `crates/visualize/frontend/src/types.ts`, `crates/visualize/frontend/src/colors.ts`, `crates/visualize/frontend/tests/colors.test.ts` | Unit |
+| 2 | `feat(visualize): add link-type legend items to renderLegend` | Legend rendering for link types | `crates/visualize/frontend/src/colors.ts`, `crates/visualize/frontend/tests/colors.test.ts` | Unit |
+| 3 | `feat(visualize): apply link styles in force simulation graph` | Graph rendering with distinct link styles | `crates/visualize/frontend/src/graph.ts`, `crates/visualize/frontend/tests/graph.test.ts` | Unit |
+| 4 | `feat(visualize): wire up link legend flags in main entry point` | Main entry wiring | `crates/visualize/frontend/src/main.ts` | — |
+| 5 | `chore(visualize): build and verify frontend + Rust integration` | Build verification | — | Integration |
 
 ## Step Details
 
-### Step 1 — Types
+### Step 1 — Link style functions + `LinkType` type
 
-**Deliverable:** Add `ParsedEvent` struct (with `handle`, `event_type`, `date_val`, `date_year`) and add `event_refs: Vec<String>` to `ParsedPerson`.
+- Add `export type LinkType = 'Spouse' | 'ParentChild';` to `types.ts`.
+- Replace inline union literal in `FamilyLink.link_type` with `LinkType`.
+- In `colors.ts`, add link style constants (`LINK_PARENT_CHILD_COLOR`, `LINK_SPOUSE_COLOR`, etc.) and three exported functions: `getLinkColor`, `getLinkStrokeDash`, `getLinkStrokeWidth`, each taking `LinkType` and returning the appropriate value with a console-warn fallback for unknown types.
+- In `colors.test.ts`, add tests for each function covering `Spouse`, `ParentChild`, and unknown fallback (deterministic return values + console.warning).
 
-**Design notes:**
+### Step 2 — Legend rendering for link types
 
-- `ParsedEvent` derives `Debug, Clone, PartialEq, Default`
-- `event_refs` defaults to empty (`Vec::default()`), fully backward-compatible
-- Both changes are in `crates/gramps-reader/src/types.rs`
+- Add `hasSpouseLinks?: boolean` and `hasParentChildLinks?: boolean` to `LegendConfig` in `colors.ts`.
+- Update `renderLegend` to render two SVG `<line>` legend items (30px long, matching stroke/dash/width of link types) under a "Links" sub-heading when both flags are present, or without sub-heading when only one flag is present.
+- In `colors.test.ts`, add tests for `renderLegend` with each flag combination (both, one, none).
 
-**Tests:**
+### Step 3 — Graph rendering with distinct link styles
 
-- `parsed_event_default` — verify `ParsedEvent::default()` has all fields `None`/empty
-- `parsed_event_full` — verify all fields settable
-- `parsed_person_event_refs_default` — verify `ParsedPerson::default().event_refs` is empty
-- `parsed_person_event_refs_populated` — verify `event_refs` holds values
+- Import `getLinkColor`, `getLinkStrokeDash`, `getLinkStrokeWidth` from `./colors` in `graph.ts`.
+- Remove the `LINK_STROKE_WIDTH` constant (no longer used uniformly).
+- In `restartSimulation()`, update the `linkBind.enter().append('line')` chain to use the new functions keyed on `d.link_type`, and increase `stroke-opacity` from 0.6 to 0.8.
+- In `graph.test.ts`, add tests verifying `buildSimLinks` preserves `link_type` through the handle→node mapping.
 
-### Step 2 — Event extraction
+### Step 4 — Main entry wiring
 
-**Deliverable:** Add `extract_events(content: &str) -> Result<Vec<ParsedEvent>, Error>` in `xml/extract.rs`.
+- In `renderGraphFromData()` in `main.ts`, compute `hasSpouseLinks` and `hasParentChildLinks` by checking `graphData.links` for each type, and pass them to the `renderLegend` call.
 
-**Design notes:**
+### Step 5 — Build verification
 
-- Same streaming pattern as `extract_persons`/`extract_families` — global-scan for `<event>` elements
-- On `<event handle="...">` → begin new `ParsedEvent`
-- On `<eventtype>` start → begin tracking type
-- On `<type>` text inside eventtype → capture via `reader.read_text()`, set `event_type`
-- On `<dateval val="..."/>` → set `date_val` and `date_year` via existing `read_dateval_val`/`parse_year_from_val` helpers
-- On `</event>` → push completed event
-- Uses existing `Error::XmlParseError` for error handling
-
-**Tests:**
-
-- `extract_event_birth` — parse Birth event with dateval
-- `extract_event_death` — parse Death event with dateval
-- `extract_event_marriage` — parse Marriage event
-- `extract_event_no_dateval` — event without date
-- `extract_event_self_closing_dateval` — self-closing `<dateval/>`
-- `extract_events_multiple` — multiple events in order
-- `extract_events_empty` — empty content
-- `extract_events_no_events_section` — XML with no events
-- `extract_events_namespace_prefixed` — namespace-prefixed elements
-
-### Step 3 — Eventref capture
-
-**Deliverable:** Extend `extract_persons()` to capture `<eventref hlink="...">` elements inside `<person>`.
-
-**Design notes:**
-
-- On `Start`/`Empty` `<eventref>` → read `hlink` attr via `read_hlink_attr`, push to `current.event_refs`
-- `<role>` child element is ignored (determine Birth vs Death from event type, not role)
-- Backward compatible: inline `<birth>`/`<death>` elements still work, eventrefs add to what inline provides
-
-**Tests:**
-
-- `extract_person_with_eventrefs` — person with eventref hlinks → event_refs populated
-- `extract_person_mixed_inline_and_eventrefs` — both inline birth and eventrefs
-- `extract_person_eventref_no_hlink` — eventref without hlink attribute
-- `extract_person_eventref_namespace_prefixed` — namespace-prefixed eventref
-- `extract_person_eventref_inline_birth_still_works` — inline birth parsing unaffected
-
-### Step 4 — Resolution + public API
-
-**Deliverable:** Add `resolve_event_refs(persons: &mut [ParsedPerson], events: &[ParsedEvent])` function and re-export `extract_events`, `ParsedEvent`, `resolve_event_refs` from `lib.rs`.
-
-**Design notes:**
-
-- Builds a `HashMap<&str, &ParsedEvent>` keyed by event handle
-- For each person, iterates `event_refs`, looks up event by handle
-- If event type is "Birth" and `birth_year` is `None` → populate `birth_date`, `birth_year`
-- If event type is "Death" and `death_date` is `None` → populate `death_date`
-- Does NOT overwrite already-populated fields (inline takes precedence)
-- Unknown event types (e.g., "Marriage") are silently skipped
-- Missing event handles are silently skipped (graceful degradation)
-
-**Re-exports in `lib.rs`:**
-
-- `pub use xml::extract::extract_events;`
-- `pub use types::ParsedEvent;`
-- `pub use xml::extract::resolve_event_refs;`
-
-**Tests:**
-
-- `resolve_event_refs_populates_dates` — cross-reference births and deaths
-- `resolve_event_refs_no_overwrite` — inline birth/death not overwritten by eventref
-- `resolve_event_refs_unknown_event_type` — Marriage event not applied to birth/death
-- `resolve_event_refs_missing_handle` — person references nonexistent event handle
-- `resolve_event_refs_empty_events` — empty events list
-- `resolve_event_refs_empty_persons` — empty persons list
-
-### Step 5 — Pipeline integration
-
-**Deliverable:** Wire up event extraction and resolution in `visualize`'s `load_graph_data()`.
-
-**Design notes:**
-
-- Add `extract_events` call after `extract_persons` and before `extract_families`
-- Call `resolve_event_refs(&mut persons, &events)` before building graph data
-- Error handling follows same pattern: `map_err(|e| format!("Not a valid Gramps XML file: {}", e))`
-
-**Tests (in `crates/visualize/src/lib.rs`):**
-
-- `load_graph_data_event_ref_format` — Full pipeline with `<events>` section + `<eventref>` references: verify persons get populated `birth_year`/`death_date` from event reference resolution
-- `load_graph_data_valid_file` — Extend existing test to confirm inline birth/death parsing is unaffected (backward compatibility)
-- `load_graph_data_mixed_inline_and_eventrefs` — Person with both inline birth and eventrefs; inline takes precedence
+- Run `npm test` in `crates/visualize/frontend` to verify all TypeScript tests pass.
+- Build the frontend (`npm run build`).
+- Run `cargo build -p visualize` to verify the Rust build with the updated frontend.
+- Run `cargo test -p visualize` to verify Rust integration tests.
