@@ -36,10 +36,16 @@ pub fn load_graph_data(
     let content =
         std::fs::read_to_string(path).map_err(|e| format!("Cannot read file '{}': {}", path, e))?;
 
-    let persons = gramps_reader::extract_persons(&content)
+    let mut persons = gramps_reader::extract_persons(&content)
+        .map_err(|e| format!("Not a valid Gramps XML file: {}", e))?;
+    let events = gramps_reader::extract_events(&content)
         .map_err(|e| format!("Not a valid Gramps XML file: {}", e))?;
     let families = gramps_reader::extract_families(&content)
         .map_err(|e| format!("Not a valid Gramps XML file: {}", e))?;
+
+    // Resolve event references to populate birth/death dates from
+    // separate <event> elements (Gramps 5.x event-reference format).
+    gramps_reader::resolve_event_refs(&mut persons, &events);
 
     if persons.is_empty() {
         return Err("No people found in the Gramps file".to_string());
@@ -220,5 +226,128 @@ mod tests {
         let p2 = gd.nodes.iter().find(|n| n.handle == "p2").unwrap();
         // 1850 + (1-0)*50 = 1900
         assert_eq!(p2.birth_year, Some(1900));
+    }
+
+    #[test]
+    fn load_graph_data_event_ref_format() {
+        // Full pipeline with the Gramps 5.x event-reference format: dates
+        // live in separate <event> elements referenced via <eventref>.
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <events>
+    <event handle="e-birth-1">
+      <eventtype><type>Birth</type></eventtype>
+      <dateval val="1850-07-13"/>
+    </event>
+    <event handle="e-birth-2">
+      <eventtype><type>Birth</type></eventtype>
+      <dateval val="1855-06-01"/>
+    </event>
+    <event handle="e-death-1">
+      <eventtype><type>Death</type></eventtype>
+      <dateval val="1920-03-01"/>
+    </event>
+  </events>
+  <people>
+    <person handle="p1">
+      <gender>M</gender>
+      <name><first>John</first><surname>Smith</surname></name>
+      <eventref hlink="e-birth-1"><role>Primary</role></eventref>
+      <eventref hlink="e-death-1"><role>Primary</role></eventref>
+    </person>
+    <person handle="p2">
+      <gender>F</gender>
+      <name><first>Jane</first><surname>Smith</surname></name>
+      <eventref hlink="e-birth-2"><role>Primary</role></eventref>
+    </person>
+    <person handle="p3">
+      <name><first>Jim</first><surname>Smith</surname></name>
+    </person>
+  </people>
+  <families>
+    <family handle="f1">
+      <father hlink="p1"/><mother hlink="p2"/>
+      <childref hlink="p3"/>
+    </family>
+  </families>
+</database>"#;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "{}", xml).unwrap();
+        let path = tmp.path().with_extension("gramps");
+        std::fs::rename(tmp.path(), &path).unwrap();
+
+        let gd = load_graph_data(path.to_str().unwrap(), false, 25).unwrap();
+        assert_eq!(gd.nodes.len(), 3);
+        assert_eq!(gd.links.len(), 3); // 1 spouse + 2 parent-child
+        assert_eq!(gd.family_groups.len(), 1);
+
+        // John and Jane get birth_year from event reference resolution.
+        let p1 = gd.nodes.iter().find(|n| n.handle == "p1").unwrap();
+        let p2 = gd.nodes.iter().find(|n| n.handle == "p2").unwrap();
+        assert_eq!(p1.birth_year, Some(1850), "John birth_year from eventref");
+        assert_eq!(
+            p1.death_date.as_deref(),
+            Some("1920-03-01"),
+            "John death_date from eventref"
+        );
+        assert_eq!(p2.birth_year, Some(1855), "Jane birth_year from eventref");
+        assert!(!p1.is_imputed);
+        assert!(!p2.is_imputed);
+
+        // Jim's birth year is imputed from his parents (same as the
+        // equivalent inline-birth test): (1875 + 1880) / 2 = 1877.
+        let p3 = gd.nodes.iter().find(|n| n.handle == "p3").unwrap();
+        assert!(p3.is_imputed);
+        assert_eq!(p3.birth_year, Some(1877));
+    }
+
+    #[test]
+    fn load_graph_data_mixed_inline_and_eventrefs() {
+        // A person with both inline <birth> and eventrefs: inline takes
+        // precedence, eventrefs fill in what inline doesn't.
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <events>
+    <event handle="e-birth">
+      <eventtype><type>Birth</type></eventtype>
+      <dateval val="1850-07-13"/>
+    </event>
+    <event handle="e-death">
+      <eventtype><type>Death</type></eventtype>
+      <dateval val="1920-03-01"/>
+    </event>
+  </events>
+  <people>
+    <person handle="p1">
+      <gender>M</gender>
+      <name><first>John</first><surname>Smith</surname></name>
+      <birth><dateval val="1845-01-01"/></birth>
+      <eventref hlink="e-birth"><role>Primary</role></eventref>
+      <eventref hlink="e-death"><role>Primary</role></eventref>
+    </person>
+  </people>
+</database>"#;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "{}", xml).unwrap();
+        let path = tmp.path().with_extension("gramps");
+        std::fs::rename(tmp.path(), &path).unwrap();
+
+        let gd = load_graph_data(path.to_str().unwrap(), true, 25).unwrap();
+        assert_eq!(gd.nodes.len(), 1);
+
+        let p1 = gd.nodes.iter().find(|n| n.handle == "p1").unwrap();
+        // Inline birth takes precedence over the Birth eventref.
+        assert_eq!(p1.birth_year, Some(1845));
+        assert_eq!(p1.birth_date.as_deref(), Some("1845-01-01"));
+        // Death comes only from the eventref (no inline death).
+        assert_eq!(p1.death_date.as_deref(), Some("1920-03-01"));
     }
 }
