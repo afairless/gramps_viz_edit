@@ -1,44 +1,51 @@
-# Implementation Plan: Link Style Distinction — Vertical vs. Horizontal Relationships
+# Implementation Plan: Draggable Nodes in the Force-Directed Graph
 
-Source: `docs/research/link-style-distinction.md`
+Source: `docs/research/drag-nodes-in-graph.md`
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `feat(visualize): add LinkType type and link style functions` | Link style functions + `LinkType` type | `crates/visualize/frontend/src/types.ts`, `crates/visualize/frontend/src/colors.ts`, `crates/visualize/frontend/tests/colors.test.ts` | Unit |
-| 2 | `feat(visualize): add link-type legend items to renderLegend` | Legend rendering for link types | `crates/visualize/frontend/src/colors.ts`, `crates/visualize/frontend/tests/colors.test.ts` | Unit |
-| 3 | `feat(visualize): apply link styles in force simulation graph` | Graph rendering with distinct link styles | `crates/visualize/frontend/src/graph.ts`, `crates/visualize/frontend/tests/graph.test.ts` | Unit |
-| 4 | `feat(visualize): wire up link legend flags in main entry point` | Main entry wiring | `crates/visualize/frontend/src/main.ts` | — |
-| 5 | `chore(visualize): build and verify frontend + Rust integration` | Build verification | — | Integration |
+| 1 | `feat: add d3.drag behavior to force-directed graph nodes` | Drag behavior + extractable handlers | `crates/visualize/frontend/src/graph.ts` | Unit |
+| 2 | `test: add tests for drag handler logic and fx/fy mutation` | Drag handler tests | `crates/visualize/frontend/tests/graph.test.ts` | Unit |
+| 3 | `feat: verify drag-nodes feature manually in browser` | Manual verification | — | — |
 
 ## Step Details
 
-### Step 1 — Link style functions + `LinkType` type
+### Step 1 — Add drag behavior to `graph.ts`
 
-- Add `export type LinkType = 'Spouse' | 'ParentChild';` to `types.ts`.
-- Replace inline union literal in `FamilyLink.link_type` with `LinkType`.
-- In `colors.ts`, add link style constants (`LINK_PARENT_CHILD_COLOR`, `LINK_SPOUSE_COLOR`, etc.) and three exported functions: `getLinkColor`, `getLinkStrokeDash`, `getLinkStrokeWidth`, each taking `LinkType` and returning the appropriate value with a console-warn fallback for unknown types.
-- In `colors.test.ts`, add tests for each function covering `Spouse`, `ParentChild`, and unknown fallback (deterministic return values + console.warning).
+**Code changes:**
 
-### Step 2 — Legend rendering for link types
+- Inside `restartSimulation()`, after the `nodeEnter` chain, define a `d3.drag<SVGGElement, SimNode>()` behavior with `start`/`drag`/`end` handlers.
+- In the `start` handler: call `simulation.alphaTarget(0.3).restart()` (guarded by `!event.active`), set `d.fx = d.x` / `d.fy = d.y`, and set cursor to `'grabbing'` via `d3.select(event.sourceEvent.currentTarget).style('cursor', 'grabbing')`.
+- In the `drag` handler: convert zoom coordinates to base SVG space via `d3.zoomTransform(svg.node()).invert([event.x, event.y])`, set `d.fx`/`d.fy` to the inverted coordinates.
+- In the `end` handler: call `simulation.alphaTarget(0)` (guarded by `!event.active`), set cursor to `'grab'` via `d3.select(event.sourceEvent.currentTarget).style('cursor', 'grab')`. Do **not** clear `fx`/`fy` (pin behavior).
+- Apply drag via `nodeGroup.call(drag)` (not `nodeEnter.call(drag)`) to re-bind existing nodes with the current simulation reference.
+- Extract drag handler logic into standalone exported functions (`onDragStart`, `onDrag`, `onDragEnd`) for testability. Each function takes `(d: SimNode, event: D3DragEvent, simulation: Simulation, svg: SVGSVGElement)` and returns `{ fx, fy }` or works via mutation.
+- Change node cursor from `'pointer'` to `'grab'` in the `nodeEnter` `.attr('cursor', ...)`.
 
-- Add `hasSpouseLinks?: boolean` and `hasParentChildLinks?: boolean` to `LegendConfig` in `colors.ts`.
-- Update `renderLegend` to render two SVG `<line>` legend items (30px long, matching stroke/dash/width of link types) under a "Links" sub-heading when both flags are present, or without sub-heading when only one flag is present.
-- In `colors.test.ts`, add tests for `renderLegend` with each flag combination (both, one, none).
+**Files modified:** `crates/visualize/frontend/src/graph.ts`
 
-### Step 3 — Graph rendering with distinct link styles
+**Tests:** Unit tests for the extracted handler functions (fx/fy mutation, coordinate conversion, pin behavior). These can be written in the same step or deferred to Step 2.
 
-- Import `getLinkColor`, `getLinkStrokeDash`, `getLinkStrokeWidth` from `./colors` in `graph.ts`.
-- Remove the `LINK_STROKE_WIDTH` constant (no longer used uniformly).
-- In `restartSimulation()`, update the `linkBind.enter().append('line')` chain to use the new functions keyed on `d.link_type`, and increase `stroke-opacity` from 0.6 to 0.8.
-- In `graph.test.ts`, add tests verifying `buildSimLinks` preserves `link_type` through the handle→node mapping.
+### Step 2 — Write tests for drag handler logic
 
-### Step 4 — Main entry wiring
+**Test coverage:**
 
-- In `renderGraphFromData()` in `main.ts`, compute `hasSpouseLinks` and `hasParentChildLinks` by checking `graphData.links` for each type, and pass them to the `renderLegend` call.
+- **`onDragStart`**: Given a `SimNode` with `x=100, y=200`, verify `fx=100, fy=200` after calling the handler.
+- **`onDrag`** (identity zoom): Given a zoom transform at identity, verify `fx`/`fy` match the event coordinates.
+- **`onDrag`** (with zoom): Given a zoom transform of `scale(2)`, verify `fx`/`fy` are correctly inverted from the zoomed coordinates.
+- **`onDragEnd`**: Verify `fx`/`fy` remain unchanged (not cleared) — pin behavior.
+- **Handler shape**: Verify that the drag behavior has `start`/`drag`/`end` handlers that are functions.
 
-### Step 5 — Build verification
+**Files modified:** `crates/visualize/frontend/tests/graph.test.ts`
 
-- Run `npm test` in `crates/visualize/frontend` to verify all TypeScript tests pass.
-- Build the frontend (`npm run build`).
-- Run `cargo build -p visualize` to verify the Rust build with the updated frontend.
-- Run `cargo test -p visualize` to verify Rust integration tests.
+### Step 3 — Manual verification
+
+Build and run the frontend, then verify:
+
+- Nodes are draggable with `'grab'`/`'grabbing'` cursor feedback
+- Other nodes move responsively during drag (simulation reheats)
+- Node stays pinned after drag ends
+- Filtering preserves pinned positions (fx/fy not cleared on filter change)
+- Click (without drag) still triggers selection
+- Zoom/pan on background still works
+- `npm test` passes
