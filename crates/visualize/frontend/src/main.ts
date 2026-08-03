@@ -4,6 +4,7 @@
 import { renderGraph, validateGraphData } from './graph';
 import type { GraphController } from './graph';
 import type { GraphData } from './types';
+import { DEFAULT_FORCE_CONFIG, type ForceConfig } from './types';
 import { createHoverHandler } from './tooltip';
 import { createSelectionPanel, exportToFile } from './selection';
 import { renderLegend, buildColorScale } from './colors';
@@ -170,11 +171,130 @@ async function openAndRenderFileFromPath(
 }
 
 /**
+ * Render a collapsible force-control panel with three sliders and a restore-defaults button.
+ * Collapsed by default. Each slider maps to a ForceConfig key with range [0, 2].
+ */
+export function renderForcePanel(
+  config: ForceConfig,
+  onChange: (c: ForceConfig) => void,
+): HTMLElement {
+  const panel = document.createElement('div');
+  panel.id = 'force-panel';
+
+  // ---- header (always visible, click toggles body) ----
+  const header = document.createElement('div');
+  header.className = 'force-header';
+  const title = document.createElement('span');
+  title.textContent = 'Force Controls';
+  const toggle = document.createElement('span');
+  toggle.textContent = '\u25B2'; // ▲ (up = expanded)
+  toggle.style.fontSize = '10px';
+  header.appendChild(title);
+  header.appendChild(toggle);
+
+  // ---- body (collapsed by default) ----
+  const body = document.createElement('div');
+  body.className = 'force-body';
+  body.style.display = 'none';
+
+  interface SliderDef {
+    key: keyof ForceConfig;
+    label: string;
+  }
+  const sliders: SliderDef[] = [
+    { key: 'generationPull', label: 'Generation pull' },
+    { key: 'spouseStrength', label: 'Spouse bond' },
+    { key: 'parentChildStrength', label: 'Parent-child bond' },
+  ];
+
+  const valueSpans: Record<string, HTMLSpanElement> = {};
+
+  for (const s of sliders) {
+    const row = document.createElement('div');
+    row.className = 'force-slider';
+
+    const lbl = document.createElement('label');
+    lbl.textContent = s.label;
+    row.appendChild(lbl);
+
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = '0';
+    input.max = '200';
+    input.step = '1';
+    input.value = String(Math.round(config[s.key] * 100));
+    row.appendChild(input);
+
+    const valSpan = document.createElement('span');
+    valSpan.className = 'value';
+    valSpan.textContent = config[s.key].toFixed(2);
+    row.appendChild(valSpan);
+    valueSpans[s.key] = valSpan;
+
+    input.addEventListener('input', () => {
+      const val = Number(input.value) / 100;
+      valSpan.textContent = val.toFixed(2);
+      onChange({ ...config, [s.key]: val });
+    });
+
+    body.appendChild(row);
+  }
+
+  // Restore defaults button
+  const restoreBtn = document.createElement('button');
+  restoreBtn.textContent = 'Restore defaults';
+  restoreBtn.style.padding = '4px 10px';
+  restoreBtn.style.fontSize = '11px';
+  restoreBtn.style.borderRadius = '4px';
+  restoreBtn.style.border = '1px solid #ccc';
+  restoreBtn.style.background = '#fff';
+  restoreBtn.style.cursor = 'pointer';
+  restoreBtn.style.marginTop = '6px';
+  restoreBtn.addEventListener('mouseenter', () => {
+    restoreBtn.style.background = '#eee';
+  });
+  restoreBtn.addEventListener('mouseleave', () => {
+    restoreBtn.style.background = '#fff';
+  });
+  restoreBtn.addEventListener('click', () => {
+    // Reset sliders to defaults using nth-child selectors
+    const rowEls = body.querySelectorAll('.force-slider');
+    for (let i = 0; i < sliders.length && i < rowEls.length; i++) {
+      const inputEl = rowEls[i].querySelector<HTMLInputElement>('input[type="range"]');
+      const valSpan = rowEls[i].querySelector<HTMLSpanElement>('.value');
+      if (inputEl) {
+        const defaultVal = Math.round(DEFAULT_FORCE_CONFIG[sliders[i].key] * 100);
+        inputEl.value = String(defaultVal);
+      }
+      if (valSpan) {
+        valSpan.textContent = DEFAULT_FORCE_CONFIG[sliders[i].key].toFixed(2);
+      }
+    }
+    onChange({ ...DEFAULT_FORCE_CONFIG });
+  });
+  body.appendChild(restoreBtn);
+
+  // Toggle expand/collapse
+  let expanded = false;
+  header.addEventListener('click', () => {
+    expanded = !expanded;
+    body.style.display = expanded ? 'flex' : 'none';
+    toggle.textContent = expanded ? '\u25B2' : '\u25BC'; // ▲ or ▼
+  });
+
+  panel.appendChild(header);
+  panel.appendChild(body);
+  return panel;
+}
+
+/**
  * Render a toolbar containing the family group filter dropdown and a reset layout button.
  */
 export function renderToolbar(
   graphData: GraphData,
   controller: GraphController,
+  forceConfig?: ForceConfig,
+  onForceConfigChange?: (c: ForceConfig) => void,
 ): HTMLElement {
   const toolbar = document.createElement('div');
   toolbar.id = 'toolbar';
@@ -214,9 +334,18 @@ export function renderToolbar(
     resetBtn.style.background = '#fff';
   });
   resetBtn.addEventListener('click', () => {
+    if (forceConfig) {
+      controller.setForceConfig(forceConfig);
+    }
     controller.resetLayout();
   });
   toolbar.appendChild(resetBtn);
+
+  // Force control panel (appended after reset button when config is provided)
+  if (forceConfig && onForceConfigChange) {
+    const forcePanel = renderForcePanel(forceConfig, onForceConfigChange);
+    toolbar.appendChild(forcePanel);
+  }
 
   return toolbar;
 }
@@ -241,8 +370,13 @@ function renderGraphFromData(
   const hoverHandler = createHoverHandler(graphData);
   controller.onNodeHover(hoverHandler);
 
-  // Wire up toolbar (filter dropdown + reset button)
-  const toolbar = renderToolbar(graphData, controller);
+  // Force config state (pending — updated by sliders, applied on reset)
+  const forceConfig: ForceConfig = { ...DEFAULT_FORCE_CONFIG };
+
+  // Wire up toolbar (filter dropdown + reset button + force panel)
+  const toolbar = renderToolbar(graphData, controller, forceConfig, (c) => {
+    Object.assign(forceConfig, c);
+  });
   if (appEl) {
     appEl.insertBefore(toolbar, document.getElementById('legend'));
   }
