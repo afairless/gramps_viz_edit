@@ -677,6 +677,15 @@ fn e2e_visualize_sibling_binary_not_found() {
     // the visualize command should fail gracefully with a clear error.
     // We use a valid .gramps file to ensure we get past path validation
     // but hit the sibling binary lookup failure.
+    //
+    // Override the sibling binary path via env var so the test is
+    // deterministic regardless of whether the sibling binary exists in
+    // the cargo build directory.
+    std::env::set_var(
+        "GRAMPS_GEN_VISUALIZE_BIN",
+        "/nonexistent/gramps-gen-visualize",
+    );
+
     use std::io::Write;
     let path = "/tmp/gramps_gen_e2e_visualize_sibling.gramps";
     let mut f = std::fs::File::create(path).unwrap();
@@ -706,4 +715,5 @@ fn e2e_visualize_sibling_binary_not_found() {
     );
 
     let _ = std::fs::remove_file(path);
+    std::env::remove_var("GRAMPS_GEN_VISUALIZE_BIN");
 }

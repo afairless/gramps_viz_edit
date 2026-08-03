@@ -100,7 +100,13 @@ fn validate_generation_gap(gap: u32) -> Result<(), CliError> {
 
 /// Path to the `gramps-gen-visualize` sibling binary, alongside the
 /// currently running executable (Windows appends `.exe`).
+///
+/// Override with `GRAMPS_GEN_VISUALIZE_BIN` environment variable (useful
+/// for testing when the sibling binary may not be present).
 fn sibling_binary_path() -> Option<PathBuf> {
+    if let Some(overridden) = std::env::var_os("GRAMPS_GEN_VISUALIZE_BIN") {
+        return Some(PathBuf::from(overridden));
+    }
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
     #[cfg(windows)]
