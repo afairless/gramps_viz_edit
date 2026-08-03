@@ -3,6 +3,19 @@
 //! These types are produced by the streaming extractors in [`crate::xml`]
 //! and consumed by downstream crates (`cli` stats, `visualize` graph data).
 
+/// Raw extracted event data from streaming XML parse.
+///
+/// Produced by [`crate::xml::extract::extract_events`]; consumed by
+/// [`resolve_event_refs`] to populate person birth/death dates from
+/// event references.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ParsedEvent {
+    pub handle: String,
+    pub event_type: Option<String>,  // "Birth", "Death", "Marriage", etc.
+    pub date_val: Option<String>,    // e.g. "1850-07-13"
+    pub date_year: Option<i32>,      // e.g. 1850
+}
+
 /// Raw extracted person data from streaming XML parse.
 ///
 /// Produced by [`crate::xml::extract::extract_persons`]; consumed by
@@ -16,6 +29,10 @@ pub struct ParsedPerson {
     pub death_date: Option<String>,
     pub birth_year: Option<i32>,
     pub gender: Option<String>,
+    /// Handles of `<eventref>` elements referencing events in the
+    /// `<events>` section. Used by [`resolve_event_refs`] to populate
+    /// birth/death dates from separate event elements.
+    pub event_refs: Vec<String>,
 }
 
 /// Raw extracted family data from streaming XML parse.
@@ -89,5 +106,51 @@ mod tests {
     fn family_record_size_single_parent() {
         let r = rec(&["p1"], &[]);
         assert_eq!(r.size(), 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // ParsedEvent
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parsed_event_default() {
+        let e = ParsedEvent::default();
+        assert_eq!(e.handle, "");
+        assert!(e.event_type.is_none());
+        assert!(e.date_val.is_none());
+        assert!(e.date_year.is_none());
+    }
+
+    #[test]
+    fn parsed_event_full() {
+        let e = ParsedEvent {
+            handle: "e0001".to_string(),
+            event_type: Some("Birth".to_string()),
+            date_val: Some("1850-07-13".to_string()),
+            date_year: Some(1850),
+        };
+        assert_eq!(e.handle, "e0001");
+        assert_eq!(e.event_type.as_deref(), Some("Birth"));
+        assert_eq!(e.date_val.as_deref(), Some("1850-07-13"));
+        assert_eq!(e.date_year, Some(1850));
+    }
+
+    // -----------------------------------------------------------------------
+    // ParsedPerson event_refs
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parsed_person_event_refs_default() {
+        let p = ParsedPerson::default();
+        assert!(p.event_refs.is_empty());
+    }
+
+    #[test]
+    fn parsed_person_event_refs_populated() {
+        let p = ParsedPerson {
+            event_refs: vec!["e1".to_string(), "e2".to_string()],
+            ..ParsedPerson::default()
+        };
+        assert_eq!(p.event_refs, vec!["e1", "e2"]);
     }
 }
