@@ -71,3 +71,70 @@ html, body {
   padding: 10px;
   z-index: 500;
 }
+
+/* ---- Force-control panel ---- */
+
+#force-panel {
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  padding: 0;
+  min-width: 180px;
+}
+
+.force-header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.force-header:hover {
+  background: #f0f0f0;
+}
+
+.force-body {
+  display: flex;
+  flex-direction: column;
+  padding: 0 10px 8px;
+  gap: 6px;
+}
+
+.force-body[hidden],
+.force-body.hidden {
+  display: none;
+}
+
+.force-slider {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.force-slider label {
+  min-width: 90px;
+  color: #555;
+}
+
+.force-slider input[type="range"] {
+  width: 100px;
+  height: 14px;
+  cursor: pointer;
+}
+
+.force-slider .value {
+  min-width: 32px;
+  text-align: right;
+  font-family: monospace;
+  font-size: 11px;
+  color: #333;
+}
