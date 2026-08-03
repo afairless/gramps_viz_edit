@@ -2,7 +2,7 @@
 // Tests for the main.ts module — toolbar rendering and UI wiring.
 
 import { describe, it, expect, vi } from 'vitest';
-import { renderToolbar, renderForcePanel } from '../src/main';
+import { renderToolbar, renderForcePanel, renderModeSelector, renderSelectAllButtons } from '../src/main';
 import type { GraphController } from '../src/graph';
 import type { GraphData, PersonNode, FamilyLink } from '../src/types';
 import { DEFAULT_FORCE_CONFIG, type ForceConfig } from '../src/types';
@@ -41,6 +41,107 @@ describe('renderToolbar', () => {
     expect(resetBtn).toBeTruthy();
     expect(resetBtn!.textContent).toContain('↺');
     expect(resetBtn!.title).toBe('Reset node positions to force-directed layout');
+  });
+
+  it('includes a mode selector <select> with 5 options', () => {
+    const data = makeGraph([makeNode('p1')], []);
+    const mockController = {
+      resetLayout: vi.fn(),
+      setForceConfig: vi.fn(),
+      getVisibleNodes: vi.fn().mockReturnValue([]),
+      setHighlighted: vi.fn(),
+    } as unknown as GraphController;
+
+    const toolbar = renderToolbar(data, mockController, undefined, undefined, undefined, vi.fn());
+    const modeSelect = toolbar.querySelector('#mode-selector-container select') as HTMLSelectElement;
+    expect(modeSelect).toBeTruthy();
+    expect(modeSelect.options.length).toBe(5);
+    expect(modeSelect.options[0].value).toBe('single');
+    expect(modeSelect.options[1].value).toBe('ancestors');
+    expect(modeSelect.options[2].value).toBe('descendants');
+    expect(modeSelect.options[3].value).toBe('first-degree');
+    expect(modeSelect.options[4].value).toBe('second-degree');
+  });
+
+  it('mode selector onChange fires with correct mode on user interaction', () => {
+    const data = makeGraph([makeNode('p1')], []);
+    const mockController = {
+      resetLayout: vi.fn(),
+      setForceConfig: vi.fn(),
+      getVisibleNodes: vi.fn().mockReturnValue([]),
+      setHighlighted: vi.fn(),
+    } as unknown as GraphController;
+
+    const onChange = vi.fn();
+    const toolbar = renderToolbar(data, mockController, undefined, undefined, undefined, onChange);
+    const modeSelect = toolbar.querySelector('#mode-selector-container select') as HTMLSelectElement;
+    expect(modeSelect).toBeTruthy();
+
+    // Simulate changing to 'ancestors'
+    modeSelect.value = 'ancestors';
+    modeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(onChange).toHaveBeenCalledWith('ancestors');
+
+    // Simulate changing to 'second-degree'
+    modeSelect.value = 'second-degree';
+    modeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(onChange).toHaveBeenCalledWith('second-degree');
+  });
+
+  it('includes Select All and Deselect All buttons in toolbar', () => {
+    const data = makeGraph([makeNode('p1')], []);
+    const mockController = {
+      resetLayout: vi.fn(),
+      setForceConfig: vi.fn(),
+      getVisibleNodes: vi.fn().mockReturnValue([]),
+      setHighlighted: vi.fn(),
+    } as unknown as GraphController;
+
+    const mockSelectionManager = {
+      addAll: vi.fn(),
+      removeAll: vi.fn(),
+      clear: vi.fn(),
+      handles: [],
+    };
+
+    const toolbar = renderToolbar(data, mockController, undefined, undefined, mockSelectionManager, vi.fn());
+    const selectAllContainer = toolbar.querySelector('#select-all-container');
+    expect(selectAllContainer).toBeTruthy();
+
+    const buttons = selectAllContainer!.querySelectorAll('button');
+    expect(buttons.length).toBe(2);
+    expect(buttons[0].textContent).toContain('Select All');
+    expect(buttons[1].textContent).toContain('Deselect All');
+  });
+
+  it('group select/deselect buttons disabled when filter is All groups', () => {
+    const data = makeGraph([makeNode('p1')], []);
+    const mockController = {
+      resetLayout: vi.fn(),
+      setForceConfig: vi.fn(),
+      getVisibleNodes: vi.fn().mockReturnValue([]),
+      setHighlighted: vi.fn(),
+      setFamilyGroupFilter: vi.fn(),
+    } as unknown as GraphController;
+
+    const mockSelectionManager = {
+      addAll: vi.fn(),
+      removeAll: vi.fn(),
+      clear: vi.fn(),
+      handles: [],
+    };
+
+    const toolbar = renderToolbar(data, mockController, undefined, undefined, mockSelectionManager, vi.fn());
+    const buttons = toolbar.querySelectorAll('button');
+    // Find group select/deselect buttons
+    const groupSelectBtn = Array.from(buttons).find((b) => b.textContent === 'Select Group');
+    const groupDeselectBtn = Array.from(buttons).find((b) => b.textContent === 'Deselect Group');
+
+    expect(groupSelectBtn).toBeTruthy();
+    expect(groupDeselectBtn).toBeTruthy();
+    // With no family_groups, the filter defaults to 'All groups', so buttons are disabled
+    expect(groupSelectBtn!.disabled).toBe(true);
+    expect(groupDeselectBtn!.disabled).toBe(true);
   });
 
   it('includes a <select> element (filter dropdown)', () => {

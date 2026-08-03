@@ -171,7 +171,7 @@ async function openAndRenderFileFromPath(
   renderGraphFromData(container, appEl, graphData);
 }
 
-function renderModeSelector(onChange: (mode: SelectionMode) => void): HTMLElement {
+export function renderModeSelector(onChange: (mode: SelectionMode) => void): HTMLElement {
   const container = document.createElement('div');
   container.id = 'mode-selector-container';
   container.style.display = 'inline-flex';
@@ -206,7 +206,7 @@ function renderModeSelector(onChange: (mode: SelectionMode) => void): HTMLElemen
   return container;
 }
 
-function renderSelectAllButtons(
+export function renderSelectAllButtons(
   onSelectAll: () => void,
   onDeselectAll: () => void,
 ): HTMLElement {
