@@ -1,11 +1,14 @@
 // Tests for the color gradient module.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   buildColorScale,
   getNodeColor,
   getNodeStrokeDash,
   getNodeOpacity,
+  getLinkColor,
+  getLinkStrokeDash,
+  getLinkStrokeWidth,
 } from '../src/colors';
 
 describe('buildColorScale', () => {
@@ -83,5 +86,74 @@ describe('getNodeOpacity', () => {
 
   it('returns 1.0 for non-imputed', () => {
     expect(getNodeOpacity(false)).toBe(1.0);
+  });
+});
+
+describe('getLinkColor', () => {
+  it('returns orange for ParentChild', () => {
+    expect(getLinkColor('ParentChild')).toBe('#e67e22');
+  });
+
+  it('returns blue for Spouse', () => {
+    expect(getLinkColor('Spouse')).toBe('#3498db');
+  });
+
+  it('returns fallback and warns for unknown type', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = getLinkColor('Unknown' as never);
+    expect(result).toBe('#999999');
+    expect(warnSpy).toHaveBeenCalledWith('Unknown link type:', 'Unknown');
+    warnSpy.mockRestore();
+  });
+
+  it('returns deterministic values for known types', () => {
+    expect(getLinkColor('ParentChild')).toBe('#e67e22');
+    expect(getLinkColor('Spouse')).toBe('#3498db');
+  });
+});
+
+describe('getLinkStrokeDash', () => {
+  it('returns none for ParentChild', () => {
+    expect(getLinkStrokeDash('ParentChild')).toBe('none');
+  });
+
+  it('returns 4,3 for Spouse', () => {
+    expect(getLinkStrokeDash('Spouse')).toBe('4,3');
+  });
+
+  it('returns fallback and warns for unknown type', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = getLinkStrokeDash('Unknown' as never);
+    expect(result).toBe('none');
+    expect(warnSpy).toHaveBeenCalledWith('Unknown link type:', 'Unknown');
+    warnSpy.mockRestore();
+  });
+
+  it('returns deterministic values for known types', () => {
+    expect(getLinkStrokeDash('ParentChild')).toBe('none');
+    expect(getLinkStrokeDash('Spouse')).toBe('4,3');
+  });
+});
+
+describe('getLinkStrokeWidth', () => {
+  it('returns 1.5 for ParentChild', () => {
+    expect(getLinkStrokeWidth('ParentChild')).toBe(1.5);
+  });
+
+  it('returns 3 for Spouse', () => {
+    expect(getLinkStrokeWidth('Spouse')).toBe(3);
+  });
+
+  it('returns fallback and warns for unknown type', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = getLinkStrokeWidth('Unknown' as never);
+    expect(result).toBe(1.5);
+    expect(warnSpy).toHaveBeenCalledWith('Unknown link type:', 'Unknown');
+    warnSpy.mockRestore();
+  });
+
+  it('returns deterministic values for known types', () => {
+    expect(getLinkStrokeWidth('ParentChild')).toBe(1.5);
+    expect(getLinkStrokeWidth('Spouse')).toBe(3);
   });
 });

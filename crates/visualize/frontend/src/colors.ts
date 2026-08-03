@@ -3,6 +3,7 @@
 // Undated nodes get neutral gray; imputed nodes get dashed borders.
 
 import * as d3 from 'd3';
+import type { LinkType } from './types';
 
 // ---------------------------------------------------------------------------
 // Color scale
@@ -71,6 +72,74 @@ export function getNodeStrokeDash(isImputed: boolean): string {
  */
 export function getNodeOpacity(isImputed: boolean): number {
   return isImputed ? 0.85 : 1.0;
+}
+
+// ---------------------------------------------------------------------------
+// Legend rendering
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Link style constants
+// ---------------------------------------------------------------------------
+
+const LINK_PARENT_CHILD_COLOR = '#e67e22';  // orange
+const LINK_SPOUSE_COLOR = '#3498db';         // blue
+const LINK_PARENT_CHILD_DASH = 'none';       // solid
+const LINK_SPOUSE_DASH = '4,3';              // dotted
+const LINK_PARENT_CHILD_WIDTH = 1.5;         // thin
+const LINK_SPOUSE_WIDTH = 3;                 // thick
+
+// Default fallback for unknown link types
+const LINK_FALLBACK_COLOR = '#999999';
+const LINK_FALLBACK_DASH = 'none';
+const LINK_FALLBACK_WIDTH = 1.5;
+
+/**
+ * Get the stroke color for a link based on its type.
+ * Parent-child links are orange; spouse links are blue.
+ */
+export function getLinkColor(linkType: LinkType): string {
+  switch (linkType) {
+    case 'ParentChild':
+      return LINK_PARENT_CHILD_COLOR;
+    case 'Spouse':
+      return LINK_SPOUSE_COLOR;
+    default:
+      console.warn('Unknown link type:', linkType);
+      return LINK_FALLBACK_COLOR;
+  }
+}
+
+/**
+ * Get the stroke dash array for a link based on its type.
+ * Parent-child links are solid; spouse links are dotted.
+ */
+export function getLinkStrokeDash(linkType: LinkType): string {
+  switch (linkType) {
+    case 'ParentChild':
+      return LINK_PARENT_CHILD_DASH;
+    case 'Spouse':
+      return LINK_SPOUSE_DASH;
+    default:
+      console.warn('Unknown link type:', linkType);
+      return LINK_FALLBACK_DASH;
+  }
+}
+
+/**
+ * Get the stroke width for a link based on its type.
+ * Parent-child links are thin (1.5px); spouse links are thick (3px).
+ */
+export function getLinkStrokeWidth(linkType: LinkType): number {
+  switch (linkType) {
+    case 'ParentChild':
+      return LINK_PARENT_CHILD_WIDTH;
+    case 'Spouse':
+      return LINK_SPOUSE_WIDTH;
+    default:
+      console.warn('Unknown link type:', linkType);
+      return LINK_FALLBACK_WIDTH;
+  }
 }
 
 // ---------------------------------------------------------------------------

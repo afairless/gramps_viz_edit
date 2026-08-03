@@ -12,10 +12,12 @@ export interface PersonNode {
   generation: number;
 }
 
+export type LinkType = 'Spouse' | 'ParentChild';
+
 export interface FamilyLink {
   source: string;
   target: string;
-  link_type: 'Spouse' | 'ParentChild';
+  link_type: LinkType;
 }
 
 export interface FamilyGroupMeta {
