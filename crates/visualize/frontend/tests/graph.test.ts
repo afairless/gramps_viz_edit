@@ -16,6 +16,7 @@ import {
 } from '../src/graph';
 import type { SimNode } from '../src/graph';
 import type { GraphData, PersonNode, FamilyLink } from '../src/types';
+import { DEFAULT_FORCE_CONFIG } from '../src/types';
 
 function makeNode(handle: string, overrides: Partial<PersonNode> = {}): PersonNode {
   return {
@@ -440,6 +441,32 @@ describe('force simulation configuration shape', () => {
     // Positions start undefined until the simulation runs
     expect(sim[0].x).toBeUndefined();
     expect(sim[0].y).toBeUndefined();
+  });
+});
+
+describe('DEFAULT_FORCE_CONFIG', () => {
+  it('has all three keys', () => {
+    const cfg = DEFAULT_FORCE_CONFIG;
+    expect(cfg).toHaveProperty('generationPull');
+    expect(cfg).toHaveProperty('spouseStrength');
+    expect(cfg).toHaveProperty('parentChildStrength');
+  });
+
+  it('values are within [0, 2] range', () => {
+    const cfg = DEFAULT_FORCE_CONFIG;
+    expect(cfg.generationPull).toBeGreaterThanOrEqual(0);
+    expect(cfg.generationPull).toBeLessThanOrEqual(2);
+    expect(cfg.spouseStrength).toBeGreaterThanOrEqual(0);
+    expect(cfg.spouseStrength).toBeLessThanOrEqual(2);
+    expect(cfg.parentChildStrength).toBeGreaterThanOrEqual(0);
+    expect(cfg.parentChildStrength).toBeLessThanOrEqual(2);
+  });
+
+  it('provides sensible defaults (not all zero)', () => {
+    const cfg = DEFAULT_FORCE_CONFIG;
+    expect(cfg.generationPull).toBeGreaterThan(0);
+    expect(cfg.spouseStrength).toBeGreaterThan(0);
+    expect(cfg.parentChildStrength).toBeGreaterThan(0);
   });
 });
 
