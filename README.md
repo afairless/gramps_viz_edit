@@ -17,7 +17,11 @@ The binary is at `target/release/gramps-gen`.
 Or install globally:
 
 ```bash
+# Core CLI (gramps-gen)
 cargo install --path .
+
+# With visualization (gramps-gen-visualize, requires system deps - see below)
+cargo install -p visualize -F visualize --path .
 ```
 
 ## Usage
@@ -143,24 +147,47 @@ cargo run --release -- stats --json output.gramps
 
 ### Visualize a `.gramps` file
 
-Requires the `--features visualize` flag and system dependencies (see below).
+Requires the `visualize` feature and system dependencies (see [Build Dependencies](#build-dependencies) below).
+
+**Direct binary (recommended for testing):**
 
 ```bash
-# Open the family graph in a Tauri desktop window
-cargo run --release --features visualize -- visualize output.gramps
+# Open a specific .gramps file (auto-loads on launch)
+cargo run -p visualize -F visualize -- ~/Documents/gramps01/exp01.gramps
+
+# Open without a file (welcome screen with "Open Gramps File" button)
+cargo run -p visualize -F visualize
 
 # Skip date imputation (use only explicit dates)
-cargo run --release --features visualize -- visualize output.gramps --no-impute
+cargo run -p visualize -F visualize -- ~/Documents/gramps01/exp01.gramps --no-impute
 
 # Custom generation gap for date imputation (default: 25, range: 1-100)
-cargo run --release --features visualize -- visualize output.gramps --generation-gap 30
+cargo run -p visualize -F visualize -- ~/Documents/gramps01/exp01.gramps --generation-gap 30
+
+# Flags can appear before or after the file path
+cargo run -p visualize -F visualize -- --no-impute ~/Documents/gramps01/exp01.gramps --generation-gap 30
 ```
 
-See [Visualization](#visualization) for details on the force-directed graphact the Gramps schema from a local Gramps source checkout (stub) |
+**Via the CLI subcommand** (requires both binaries built, see [Two-binary architecture](#two-binary-architecture)):
+
+```bash
+cargo build -p cli
+cargo build -p visualize -F visualize
+cargo run -p cli -- visualize ~/Documents/gramps01/exp01.gramps
+```
+
+The file path is a **positional argument** — no `--path` flag needed. The `--no-impute`
+and `--generation-gap` flags are forwarded to the visualization backend and sent to
+the frontend via Tauri IPC. When launched without arguments, the welcome screen
+appears with an "Open Gramps File" button.
+
+See [Visualization](#visualization) for details on the force-directed graph.
+
+| Command | Description |
+|---|---|
+| `extract-schema <path>` | Extract the Gramps schema from a local Gramps source checkout (stub) |
 | `schema list` | List local and available Gramps schemas |
 | `schema download` | Download a schema from Gramps GitHub |
-
-## Visualization
 
 The `visualize` subcommand opens a native desktop window with an interactive
 force-directed graph of the family tree. It uses **Tauri v2** for the desktop
@@ -203,7 +230,7 @@ cd crates/visualize/frontend
 npm install
 npm run build
 cd ../../..
-cargo build --release --features visualize
+cargo build -p visualize -F visualize --release
 ```
 
 ### Feature gate
@@ -216,7 +243,7 @@ core CLI can build without system webview dependencies:
 cargo build --release
 
 # Build with visualization (requires system deps)
-cargo build --release --features visualize
+cargo build -p visualize -F visualize --release
 ```
 
 ### Two-binary architecture
@@ -225,7 +252,12 @@ cargo build --release --features visualize
   and spawns the sibling binary
 - `gramps-gen-visualize` — the Tauri desktop app binary
 
-Both binaries are installed to the same directory by `cargo install --path .`
+Both binaries are installed to the same directory by:
+
+```bash
+cargo install --path .
+cargo install -p visualize -F visualize --path .
+```
 
 ### Data Flow
 
@@ -275,7 +307,7 @@ Generate → Validate (Gate 1) → Adversarial Transform → Validate (Gate 2) �
 | `output` | `crates/output/` | Gramps XML serialization with hand-coded `SerializationMap`, streaming `GraphXmlWriter` |
 | `gramps-reader` | `crates/gramps-reader/` | Shared library for streaming `.gramps` XML parsing: `FamilyRecord`, `ParsedPerson`, `ParsedFamily`, `Dsu`, `compute_generations`, XML attribute helpers |
 | `cli` | `crates/cli/` | CLI binary (`clap`), YAML scenario parsing, pipeline wiring, progress reporting |
-| `visualize` | `crates/visualize/` | Tauri v2 desktop app with D3.js force-directed graph visualization (gated behind `--features visualize`) |
+| `visualize` | `crates/visualize/` | Tauri v2 desktop app with D3.js force-directed graph visualization (gated behind the `visualize` Cargo feature) |
 
 ## Documentation
 
