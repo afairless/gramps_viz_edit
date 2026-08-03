@@ -66,3 +66,23 @@ export const DEFAULT_FORCE_CONFIG: ForceConfig = {
   spouseStrength: 0.80,
   parentChildStrength: 0.50,
 };
+
+// ---------------------------------------------------------------------------
+// Selection mode types
+// ---------------------------------------------------------------------------
+
+export type SelectionMode = 'single' | 'ancestors' | 'descendants' | 'first-degree' | 'second-degree';
+
+export interface SelectionModeOption {
+  value: SelectionMode;
+  label: string;
+  description: string;
+}
+
+export const SELECTION_MODES: SelectionModeOption[] = [
+  { value: 'single', label: 'Single node', description: 'Select one node at a time' },
+  { value: 'ancestors', label: 'Ancestors', description: 'Select node + all ancestors' },
+  { value: 'descendants', label: 'Descendants', description: 'Select node + all descendants' },
+  { value: 'first-degree', label: '1st-degree', description: 'Select node + spouses, parents, children' },
+  { value: 'second-degree', label: '2nd-degree', description: 'Select node + 2-hop connections' },
+];
