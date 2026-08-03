@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 // Tests for the color gradient module.
 
 import { describe, it, expect, vi } from 'vitest';
@@ -9,7 +10,9 @@ import {
   getLinkColor,
   getLinkStrokeDash,
   getLinkStrokeWidth,
+  renderLegend,
 } from '../src/colors';
+import type { LegendConfig } from '../src/colors';
 
 describe('buildColorScale', () => {
   it('creates a viridis scale from known birth years', () => {
@@ -155,5 +158,82 @@ describe('getLinkStrokeWidth', () => {
   it('returns deterministic values for known types', () => {
     expect(getLinkStrokeWidth('ParentChild')).toBe(1.5);
     expect(getLinkStrokeWidth('Spouse')).toBe(3);
+  });
+});
+
+describe('renderLegend link items', () => {
+  function makeConfig(overrides: Partial<LegendConfig> = {}): LegendConfig {
+    return {
+      colorScale: buildColorScale([1800, 2000]),
+      minYear: 1800,
+      maxYear: 2000,
+      hasImputed: false,
+      hasUndated: false,
+      hasSpouseLinks: false,
+      hasParentChildLinks: false,
+      ...overrides,
+    };
+  }
+
+  it('renders spouse link legend item with blue dotted line', () => {
+    const container = document.createElement('div');
+    renderLegend(container, makeConfig({ hasSpouseLinks: true }));
+    const text = container.textContent ?? '';
+    expect(text).toContain('Spouse');
+    // Should NOT have a sub-heading (only one link type)
+    expect(text).not.toContain('Links');
+    // The SVG line should exist
+    const svg = container.querySelector('line');
+    expect(svg).not.toBeNull();
+    expect(svg?.getAttribute('stroke')).toBe('#3498db');
+    expect(svg?.getAttribute('stroke-dasharray')).toBe('4,3');
+    expect(svg?.getAttribute('stroke-width')).toBe('3');
+  });
+
+  it('renders parent-child link legend item with orange solid line', () => {
+    const container = document.createElement('div');
+    renderLegend(container, makeConfig({ hasParentChildLinks: true }));
+    const text = container.textContent ?? '';
+    expect(text).toContain('Parent-child');
+    // Should NOT have a sub-heading (only one link type)
+    expect(text).not.toContain('Links');
+    const svg = container.querySelector('line');
+    expect(svg).not.toBeNull();
+    expect(svg?.getAttribute('stroke')).toBe('#e67e22');
+    expect(svg?.getAttribute('stroke-dasharray')).toBe('none');
+    expect(svg?.getAttribute('stroke-width')).toBe('1.5');
+  });
+
+  it('renders both link types under a Links sub-heading', () => {
+    const container = document.createElement('div');
+    renderLegend(container, makeConfig({ hasSpouseLinks: true, hasParentChildLinks: true }));
+    const text = container.textContent ?? '';
+    expect(text).toContain('Links');
+    expect(text).toContain('Spouse');
+    expect(text).toContain('Parent-child');
+    // Two SVG lines
+    const lines = container.querySelectorAll('line');
+    expect(lines.length).toBe(2);
+  });
+
+  it('omits link items when neither flag is set', () => {
+    const container = document.createElement('div');
+    renderLegend(container, makeConfig({ hasSpouseLinks: false, hasParentChildLinks: false }));
+    const text = container.textContent ?? '';
+    expect(text).not.toContain('Spouse');
+    expect(text).not.toContain('Parent-child');
+    expect(text).not.toContain('Links');
+    const lines = container.querySelectorAll('line');
+    expect(lines.length).toBe(0);
+  });
+
+  it('renders link items alongside existing birth-year legend', () => {
+    const container = document.createElement('div');
+    renderLegend(container, makeConfig({ hasSpouseLinks: true, hasUndated: true, hasImputed: true }));
+    const text = container.textContent ?? '';
+    expect(text).toContain('Birth Year');
+    expect(text).toContain('Undated');
+    expect(text).toContain('Imputed');
+    expect(text).toContain('Spouse');
   });
 });

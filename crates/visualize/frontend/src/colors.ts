@@ -157,6 +157,10 @@ export interface LegendConfig {
   hasImputed: boolean;
   /** Whether any nodes are undated (show gray legend item). */
   hasUndated: boolean;
+  /** Whether to show the Spouse (blue dotted) legend item. */
+  hasSpouseLinks?: boolean;
+  /** Whether to show the Parent-child (orange solid) legend item. */
+  hasParentChildLinks?: boolean;
 }
 
 /**
@@ -166,7 +170,7 @@ export interface LegendConfig {
 export function renderLegend(containerEl: HTMLElement, config: LegendConfig): void {
   containerEl.textContent = '';
 
-  const { colorScale, minYear, maxYear, hasImputed, hasUndated } = config;
+  const { colorScale, minYear, maxYear, hasImputed, hasUndated, hasSpouseLinks, hasParentChildLinks } = config;
 
   // Title
   const title = document.createElement('div');
@@ -287,4 +291,70 @@ export function renderLegend(containerEl: HTMLElement, config: LegendConfig): vo
   }
 
   containerEl.appendChild(items);
+
+  // Link legend items
+  const hasSpouse = hasSpouseLinks ?? false;
+  const hasParentChild = hasParentChildLinks ?? false;
+
+  if (hasSpouse || hasParentChild) {
+    const linkSection = document.createElement('div');
+    linkSection.style.marginTop = '6px';
+    linkSection.style.fontSize = '11px';
+    linkSection.style.color = '#666';
+
+    // Sub-heading only when both link types are present
+    if (hasSpouse && hasParentChild) {
+      const heading = document.createElement('div');
+      heading.textContent = 'Links';
+      heading.style.fontWeight = 'bold';
+      heading.style.fontSize = '11px';
+      heading.style.marginBottom = '4px';
+      linkSection.appendChild(heading);
+    }
+
+    function createLinkLegendItem(
+      color: string,
+      dash: string,
+      width: number,
+      label: string,
+    ): HTMLDivElement {
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.alignItems = 'center';
+      row.style.gap = '4px';
+
+      const lineSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      lineSvg.setAttribute('width', '30');
+      lineSvg.setAttribute('height', '12');
+      lineSvg.style.display = 'block';
+
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', '0');
+      line.setAttribute('y1', '6');
+      line.setAttribute('x2', '30');
+      line.setAttribute('y2', '6');
+      line.setAttribute('stroke', color);
+      line.setAttribute('stroke-width', String(width));
+      line.setAttribute('stroke-dasharray', dash);
+      lineSvg.appendChild(line);
+      row.appendChild(lineSvg);
+
+      const text = document.createTextNode(' ' + label);
+      row.appendChild(text);
+      return row;
+    }
+
+    if (hasSpouse) {
+      linkSection.appendChild(
+        createLinkLegendItem(LINK_SPOUSE_COLOR, LINK_SPOUSE_DASH, LINK_SPOUSE_WIDTH, 'Spouse'),
+      );
+    }
+    if (hasParentChild) {
+      linkSection.appendChild(
+        createLinkLegendItem(LINK_PARENT_CHILD_COLOR, LINK_PARENT_CHILD_DASH, LINK_PARENT_CHILD_WIDTH, 'Parent-child'),
+      );
+    }
+
+    containerEl.appendChild(linkSection);
+  }
 }
