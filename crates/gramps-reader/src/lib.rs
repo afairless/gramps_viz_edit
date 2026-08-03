@@ -26,7 +26,7 @@ pub use error::Error;
 pub use graph::{
     compute_generation_table, compute_generations, Dsu, FamilyGroupGenerationTable, MAX_GENERATION,
 };
-pub use types::{FamilyRecord, ParsedFamily, ParsedPerson};
+pub use types::{FamilyRecord, ParsedEvent, ParsedFamily, ParsedPerson};
 pub use xml::count::{count_gramps_xml, PrimaryTypeCounts, StatsReport};
-pub use xml::extract::{extract_families, extract_persons};
+pub use xml::extract::{extract_events, extract_families, extract_persons, resolve_event_refs};
 pub use xml::{read_handle_attr, read_hlink_attr, strip_prefix};

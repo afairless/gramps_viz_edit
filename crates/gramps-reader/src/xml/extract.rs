@@ -5,9 +5,43 @@
 //! downstream processing. They are pure functions over `&str` so they
 //! can be unit-tested without filesystem access.
 
+use std::collections::HashMap;
+
 use crate::error::Error;
 use crate::types::{ParsedEvent, ParsedFamily, ParsedPerson};
 use crate::xml::{read_handle_attr, read_hlink_attr, strip_prefix};
+
+/// Given persons with event_refs and a lookup of events by handle,
+/// populate birth_date/birth_year/death_date for persons whose
+/// birth/death was stored as a separate event reference.
+///
+/// Does **not** overwrite already-populated fields (inline birth/death
+/// takes precedence).  Unknown event types (e.g. "Marriage") and missing
+/// event handles are silently skipped.
+pub fn resolve_event_refs(persons: &mut [ParsedPerson], events: &[ParsedEvent]) {
+    // Index events by handle for O(1) lookup.
+    let event_map: HashMap<&str, &ParsedEvent> = events
+        .iter()
+        .map(|e| (e.handle.as_str(), e))
+        .collect();
+
+    for person in persons {
+        for hlink in &person.event_refs {
+            if let Some(event) = event_map.get(hlink.as_str()) {
+                match event.event_type.as_deref() {
+                    Some("Birth") if person.birth_year.is_none() => {
+                        person.birth_date = event.date_val.clone();
+                        person.birth_year = event.date_year;
+                    }
+                    Some("Death") if person.death_date.is_none() => {
+                        person.death_date = event.date_val.clone();
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
 
 /// Extract all events from a `.gramps` XML document.
 ///
@@ -869,6 +903,111 @@ mod tests {
         assert_eq!(e.event_type.as_deref(), Some("Birth"));
         assert_eq!(e.date_val.as_deref(), Some("1850-07-13"));
         assert_eq!(e.date_year, Some(1850));
+    }
+
+    // -----------------------------------------------------------------------
+    // Event reference resolution
+    // -----------------------------------------------------------------------
+
+    fn event(handle: &str, event_type: &str, date_val: &str) -> ParsedEvent {
+        ParsedEvent {
+            handle: handle.to_string(),
+            event_type: Some(event_type.to_string()),
+            date_val: Some(date_val.to_string()),
+            date_year: date_val.split('-').next().and_then(|y| y.parse().ok()),
+        }
+    }
+
+    fn person(handle: &str, event_refs: &[&str]) -> ParsedPerson {
+        ParsedPerson {
+            handle: handle.to_string(),
+            event_refs: event_refs.iter().map(|s| s.to_string()).collect(),
+            ..ParsedPerson::default()
+        }
+    }
+
+    #[test]
+    fn resolve_event_refs_populates_dates() {
+        let events = vec![
+            event("e-birth", "Birth", "1850-07-13"),
+            event("e-death", "Death", "1910-08-21"),
+        ];
+        let mut persons = vec![person("p1", &["e-birth", "e-death"])];
+
+        resolve_event_refs(&mut persons, &events);
+
+        assert_eq!(persons[0].birth_date.as_deref(), Some("1850-07-13"));
+        assert_eq!(persons[0].birth_year, Some(1850));
+        assert_eq!(persons[0].death_date.as_deref(), Some("1910-08-21"));
+    }
+
+    #[test]
+    fn resolve_event_refs_no_overwrite() {
+        let events = vec![
+            event("e-birth", "Birth", "1850-07-13"),
+            event("e-death", "Death", "1910-08-21"),
+        ];
+        let mut persons = vec![ParsedPerson {
+            handle: "p1".to_string(),
+            birth_date: Some("1845-01-01".to_string()),
+            birth_year: Some(1845),
+            death_date: Some("1905-05-05".to_string()),
+            event_refs: vec!["e-birth".to_string(), "e-death".to_string()],
+            ..ParsedPerson::default()
+        }];
+
+        resolve_event_refs(&mut persons, &events);
+
+        // Inline values take precedence — event refs do NOT overwrite.
+        assert_eq!(persons[0].birth_date.as_deref(), Some("1845-01-01"));
+        assert_eq!(persons[0].birth_year, Some(1845));
+        assert_eq!(persons[0].death_date.as_deref(), Some("1905-05-05"));
+    }
+
+    #[test]
+    fn resolve_event_refs_unknown_event_type() {
+        let events = vec![event("e-marriage", "Marriage", "1875-06-15")];
+        let mut persons = vec![person("p1", &["e-marriage"])];
+
+        resolve_event_refs(&mut persons, &events);
+
+        // Marriage events do not populate birth/death fields.
+        assert!(persons[0].birth_date.is_none());
+        assert!(persons[0].birth_year.is_none());
+        assert!(persons[0].death_date.is_none());
+    }
+
+    #[test]
+    fn resolve_event_refs_missing_handle() {
+        let events = vec![event("e-birth", "Birth", "1850-07-13")];
+        let mut persons = vec![person("p1", &["e-nonexistent"])];
+
+        resolve_event_refs(&mut persons, &events);
+
+        // Missing event handle is silently skipped.
+        assert!(persons[0].birth_date.is_none());
+        assert!(persons[0].birth_year.is_none());
+    }
+
+    #[test]
+    fn resolve_event_refs_empty_events() {
+        let events = vec![];
+        let mut persons = vec![person("p1", &["e-birth"])];
+
+        resolve_event_refs(&mut persons, &events);
+
+        assert!(persons[0].birth_date.is_none());
+        assert!(persons[0].birth_year.is_none());
+    }
+
+    #[test]
+    fn resolve_event_refs_empty_persons() {
+        let events = vec![event("e-birth", "Birth", "1850-07-13")];
+        let mut persons: Vec<ParsedPerson> = vec![];
+
+        resolve_event_refs(&mut persons, &events);
+
+        assert!(persons.is_empty());
     }
 
     // -----------------------------------------------------------------------
