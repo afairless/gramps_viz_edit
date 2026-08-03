@@ -1,184 +1,78 @@
-# Implementation Plan: Per-Generation Field Force
+# Implementation Plan: Multi-Node Selection
 
-Source: `docs/research/per-generation-field-force.md`
-
-## Plan review notes
-
-- **`getSvgWidth()`:** The plan references `getSvgWidth()` in `createSimulationForces` (Step 2) but only defines `getSvgHeight()` (Step 3). Both need to be defined in Step 2 alongside the helper.
-- All other aspects are well-specified and consistent with the codebase.
+Source: `docs/research/multi-node-selection.md`
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `feat: add ForceConfig type and defaults` | ForceConfig type | `crates/visualize/frontend/src/types.ts` | Unit |
-| 2 | `refactor: lift force creation into helpers, split link forces, add gen-field` | Force simulation helpers | `crates/visualize/frontend/src/graph.ts` | Unit |
-| 3 | `feat: add setForceConfig to GraphController` | Controller method | `crates/visualize/frontend/src/graph.ts` | Unit |
-| 4 | `feat: build collapsible force-control panel` | Force panel UI | `crates/visualize/frontend/src/main.ts` | Unit |
-| 5 | `feat: add force-panel CSS` | Force panel styles | `crates/visualize/frontend/styles/main.css` | — |
-| 6 | `test: add force-config tests for graph and main` | Force-config tests | `crates/visualize/frontend/tests/graph.test.ts`, `crates/visualize/frontend/tests/main.test.ts` | Unit, Integration |
-| 7 | `chore: add manual test sliders to test-harness.html` | Test harness sliders | `crates/visualize/frontend/test-harness.html` | — |
+| 1 | `feat: add SelectionMode type and metadata` | Selection mode types | `src/types.ts` (add `SelectionMode`, `SelectionModeOption`, `SELECTION_MODES`) | — |
+| 2 | `feat: create graph topology query module` | Topology traversal | `src/graph-query.ts` (NEW), `tests/graph-query.test.ts` (NEW) | Unit, property-based |
+| 3 | `feat: extend SelectionManager with indirect-set and bulk methods` | Selection extensions | `src/selection.ts` (add `clickWithIndirect`, `addAll`, `removeAll`, wrapping), `tests/selection.test.ts` (additions) | Unit |
+| 4 | `feat: add UI controls for multi-node selection` | Toolbar controls + click wiring | `src/main.ts` (mode selector `<select>`, Select All / Deselect All buttons, Group Select / Deselect buttons, revised `onNodeClick` wiring) | — |
+| 5 | `style: add CSS for selection toolbar widgets` | Selection UI styles | `styles/main.css` (mode selector, bulk buttons, group buttons, separators) | — |
+| 6 | `test: add smoke tests for selection UI rendering` | Smoke tests for UI widgets | `tests/main.test.ts` (additions) | Unit, smoke |
+| 7 | `test: manual integration verification` | Manual verification | — | — |
 
-## Step details
+## Step Details
 
-### Step 1 — `ForceConfig` type and defaults
+### Step 1 — Selection mode types
 
-**File:** `crates/visualize/frontend/src/types.ts`
+**File:** `src/types.ts`
 
-Add `ForceConfig` interface and `DEFAULT_FORCE_CONFIG` constant. Export both.
+Add the `SelectionMode` type, `SelectionModeOption` interface, and `SELECTION_MODES` constant array as specified in the source plan. No tests — pure type definition.
 
-```ts
-export interface ForceConfig {
-  generationPull: number;
-  spouseStrength: number;
-  parentChildStrength: number;
-}
+### Step 2 — Topology query module (new)
 
-export const DEFAULT_FORCE_CONFIG: ForceConfig = {
-  generationPull: 0.30,
-  spouseStrength: 0.80,
-  parentChildStrength: 0.50,
-};
-```
+**Files:** `src/graph-query.ts` (NEW), `tests/graph-query.test.ts` (NEW)
 
-**Tests:** Unit test verifying shape and value ranges of `DEFAULT_FORCE_CONFIG`.
+- Implement `Adjacency` interface and `buildAdjacency()` — builds parent/children/spouses/siblings/allNeighbors maps from `GraphData`
+- Implement `getAncestors()`, `getDescendants()`, `getFirstDegree()`, `getSecondDegree()`, `getIndirectSet()`
+- All query functions guard against missing nodes and cycles using visited sets
+- Sibling derivation via nested loop over children per parent
+- Write tests alongside: empty graph, single node, spouses, parent-child, three-generation chain, siblings, cycle safety, `getIndirectSet` with `'single'` mode, property-based invariants (no self-inclusion)
 
----
+**Dependencies:** Step 1 (`SelectionMode` import in `getIndirectSet` signature)
 
-### Step 2 — Lift force creation into helpers, split link forces, add gen-field
+### Step 3 — SelectionManager extensions
 
-**File:** `crates/visualize/frontend/src/graph.ts`
+**Files:** `src/selection.ts`, `tests/selection.test.ts`
 
-Changes:
+- Add `clickWithIndirect(handle, indirectHandles)` — if handle selected, remove handle + all indirects; if not selected, add handle + all indirects
+- Add `addAll(handles)` and `removeAll(handles)` for bulk operations
+- Wrap all three new methods in `createSelectionPanel` to trigger DOM re-render
+- Write tests: `clickWithIndirect` toggle/add/remove semantics, `addAll`/`removeAll` with empty iterables, idempotency
 
-1. **Define helpers** (module-level, not inside `renderGraph`):
-   - `computeGenerationSpacing(nodes, canvasHeight)` — pure function; exported for testing.
-   - `getSvgHeight()` — reads `svg.node().getBoundingClientRect().height` (closure-bound).
-   - `getSvgWidth()` — reads `svg.node().getBoundingClientRect().width` (closure-bound).
-   - `applyForceConfig(simulation, config, genY)` — mutates forces on existing simulation.
-   - `createSimulationForces(sim, config, genY)` — registers all four named forces.
+### Step 4 — UI controls
 
-2. **Add constants** (module-level):
-   - `SPOUSE_BASE_DISTANCE = 40`
-   - `PC_BASE_DISTANCE = 120`
-   - `CHARGE_STRENGTH = -300` (unchanged)
-   - `COLLIDE_RADIUS = 18` (unchanged)
-   - `CENTER_STRENGTH = 0.05` (reduced from 0.3)
+**File:** `src/main.ts`
 
-3. **Refactor `restartSimulation`** inside `renderGraph`:
-   - Replace the inline force definition with a call to `createSimulationForces`.
-   - Split the single `force('link', ...)` into `force('spouse-link', ...)` and `force('pc-link', ...)`.
-   - Add `force('gen-field', d3.forceY<SimNode>().y(genY).strength(config.generationPull))`.
-   - Pass `currentConfig` (new closure variable) to the helper.
+- Add `renderModeSelector(onChange)` — `<select>` populated from `SELECTION_MODES`, default `'single'`
+- Add `renderSelectAllButtons(onSelectAll, onDeselectAll)` — two `<button>` elements
+- Add family group Select Group / Deselect Group buttons inside `renderToolbar`, disabled when "All groups" selected
+- Revise the `onNodeClick` callback in `renderGraphFromData`:
+  - Build `adjacency` from `graphData` once (same closure scope as `currentMode`)
+  - Use `getIndirectSet(adjacency, handle, currentMode)` + `selectionManager.clickWithIndirect()`
+- Wire Select All → `selectionManager.addAll(controller.getVisibleNodes())`
+- Wire Deselect All → `selectionManager.clear()`
+- Import `SelectionMode` from types, query functions from graph-query
 
-4. **Store `currentConfig`** in the renderGraph closure, initialized to `DEFAULT_FORCE_CONFIG`.
+### Step 5 — CSS styles
 
-5. **Fix `resize()`:** Preserve `CENTER_STRENGTH` when recreating the center force:
+**File:** `styles/main.css`
 
-   ```ts
-   simulation.force('center', d3.forceCenter(w / 2, h / 2).strength(CENTER_STRENGTH));
-   ```
+- Style for mode selector `<select>` (match existing filter dropdown)
+- Style for Select All / Deselect All buttons (small, toolbar-consistent)
+- Style for Group Select / Deselect buttons (compact, inline with filter dropdown)
+- Optional visual separator between selection controls and existing toolbar widgets
 
-**Note:** `getSvgWidth()` and `getSvgHeight()` both read from the live SVG element, not the captured initial `width`/`height`, so they stay correct after resize.
+### Step 6 — Smoke tests for UI
 
-**Tests:** Unit tests for `computeGenerationSpacing` (empty, single gen, two gen, height ≤ 0, NaN), `applyForceConfig` roundtrip, `restartSimulation` force creation shape.
+**File:** `tests/main.test.ts`
 
----
+- `renderModeSelector(onChange)` creates a `<select>` with 5 options
+- Mode selector fires `onChange` with correct `SelectionMode` value on user interaction
+- Select All / Deselect All buttons appear in toolbar
+- Group Select/Deselect buttons disabled when "All groups" selected
 
-### Step 3 — Add `setForceConfig` to `GraphController`
+### Step 7 — Manual integration verification
 
-**File:** `crates/visualize/frontend/src/graph.ts`
-
-1. Add `setForceConfig(config: ForceConfig): void` to the `GraphController` interface.
-2. Implement in the controller object inside `renderGraph`:
-   - Compute generation spacing from the active (filtered) node set.
-   - Compute target Y function: `(d) => (d.generation - minGen) * spacing`.
-   - Call `applyForceConfig(simulation, config, targetY)`.
-   - Reheat: `simulation.alpha(0.3).restart()`.
-
-**Tests:** Unit test for `setForceConfig` — verify it computes spacing from filtered node set.
-
----
-
-### Step 4 — Build collapsible force-control panel
-
-**Files:** `crates/visualize/frontend/src/main.ts`
-
-1. Add `renderForcePanel(config, onChange): HTMLElement` function.
-   - Collapsible panel (header + body, collapsed by default).
-   - Three `<input type="range">` sliders (0–200 → 0.00–2.00).
-   - Value display spans next to each slider.
-   - "Restore defaults" button.
-   - `onChange` fires on every `input` event.
-
-2. Extend `renderToolbar` signature:
-
-   ```ts
-   export function renderToolbar(
-     graphData: GraphData,
-     controller: GraphController,
-     forceConfig?: ForceConfig,
-     onForceConfigChange?: (c: ForceConfig) => void,
-   ): HTMLElement
-   ```
-
-   When `forceConfig` and `onForceConfigChange` are provided, append the force panel after the reset button.
-
-3. Update reset button wiring:
-
-   ```ts
-   resetBtn.addEventListener('click', () => {
-     controller.setForceConfig(currentForceConfig);
-     controller.resetLayout();
-   });
-   ```
-
-4. Update `renderGraphFromData` to create a `ForceConfig` state object and pass it through to `renderToolbar`.
-
-**Tests:** Unit tests for `renderToolbar` — update mock to include `setForceConfig`, verify call order (`setForceConfig` before `resetLayout`). Integration tests for force panel DOM: slider input updates value span, restore defaults resets to `DEFAULT_FORCE_CONFIG`, panel collapsed by default, toggle expands/collapses.
-
----
-
-### Step 5 — Add force-panel CSS
-
-**File:** `crates/visualize/frontend/styles/main.css`
-
-Add:
-
-- `#force-panel` — `display: flex; flex-direction: column`
-- `.force-header` — flex row, title + toggle, cursor pointer
-- `.force-body` — `display: none` when collapsed, flex column when expanded
-- `.force-slider` — flex row, label + slider + value
-- Slider width ~120px, labels 11px font
-- Restore button styled consistently with existing reset button
-
-**Tests:** None (CSS-only, no JS logic).
-
----
-
-### Step 6 — Add force-config tests
-
-**File:** `crates/visualize/frontend/tests/graph.test.ts`
-
-New `describe('force configuration')` block:
-
-1. `DEFAULT_FORCE_CONFIG` shape and value range.
-2. `computeGenerationSpacing` — empty, single gen, two gen, uniform gen, 5 gens, height ≤ 0, NaN.
-3. `applyForceConfig` roundtrip — apply then read back force parameters.
-4. `restartSimulation` force creation — all four named forces registered.
-5. Filter + `setForceConfig` interaction — spacing computed from filtered set.
-
-**File:** `crates/visualize/frontend/tests/main.test.ts`
-
-1. Update mock to include `setForceConfig: vi.fn()`.
-2. Verify call order: `setForceConfig` before `resetLayout`.
-3. Slider `input` event updates value `<span>`.
-4. "Restore defaults" resets sliders to `DEFAULT_FORCE_CONFIG`.
-5. Panel collapsed by default.
-6. Header click toggles collapsed/expanded.
-
----
-
-### Step 7 — Add manual test sliders to test-harness.html
-
-**File:** `crates/visualize/frontend/test-harness.html`
-
-Add three hard-coded sliders: generation pull, spouse strength, parent-child strength. Wire to `controller.setForceConfig()` + `controller.resetLayout()`. Manual QA only — no automated test.
+Follow the 13-point checklist in the source plan to verify all modes, bulk operations, multi-click additive behavior, filter interaction, and export behavior.
