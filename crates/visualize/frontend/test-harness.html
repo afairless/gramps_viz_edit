@@ -36,6 +36,20 @@
     <button id="btn-reset">Reset layout</button>
     <span id="click-log" style="color:#999;font-size:11px;"></span>
   </div>
+  <div id="force-controls" style="position:absolute; top:48px; left:8px; z-index:1000; background:rgba(255,255,255,0.9); padding:8px 12px; border-radius:6px; border:1px solid #ccc; font-size:12px; display:flex; gap:10px;">
+    <label style="display:flex; align-items:center; gap:4px;">Gen pull
+      <input id="slider-gen-pull" type="range" min="0" max="200" value="30" />
+      <span id="val-gen-pull" style="font-family:monospace;">0.30</span>
+    </label>
+    <label style="display:flex; align-items:center; gap:4px;">Spouse
+      <input id="slider-spouse" type="range" min="0" max="200" value="80" />
+      <span id="val-spouse" style="font-family:monospace;">0.80</span>
+    </label>
+    <label style="display:flex; align-items:center; gap:4px;">Parent-child
+      <input id="slider-pc" type="range" min="0" max="200" value="50" />
+      <span id="val-pc" style="font-family:monospace;">0.50</span>
+    </label>
+  </div>
   <div id="graph-container"></div>
   <div id="status">Drag a node to test. Check: cursor, pin, zoom, filter.</div>
   <script type="module">
@@ -110,6 +124,32 @@
     document.getElementById('btn-filter-1')?.addEventListener('click', () => { controller.setFamilyGroupFilter(1); });
     document.getElementById('btn-filter-2')?.addEventListener('click', () => { controller.setFamilyGroupFilter(2); });
     document.getElementById('btn-reset')?.addEventListener('click', () => { controller.resetLayout(); });
+
+    // ---- Force config sliders (manual QA) ----
+    const genPullSlider = document.getElementById('slider-gen-pull') as HTMLInputElement;
+    const spouseSlider = document.getElementById('slider-spouse') as HTMLInputElement;
+    const pcSlider = document.getElementById('slider-pc') as HTMLInputElement;
+
+    function applyForceConfigFromSliders(): void {
+      const config = {
+        generationPull: Number(genPullSlider.value) / 100,
+        spouseStrength: Number(spouseSlider.value) / 100,
+        parentChildStrength: Number(pcSlider.value) / 100,
+      };
+      controller.setForceConfig(config);
+      controller.resetLayout();
+      // Update value readouts
+      const v1 = document.getElementById('val-gen-pull');
+      const v2 = document.getElementById('val-spouse');
+      const v3 = document.getElementById('val-pc');
+      if (v1) v1.textContent = config.generationPull.toFixed(2);
+      if (v2) v2.textContent = config.spouseStrength.toFixed(2);
+      if (v3) v3.textContent = config.parentChildStrength.toFixed(2);
+    }
+
+    genPullSlider?.addEventListener('input', applyForceConfigFromSliders);
+    spouseSlider?.addEventListener('input', applyForceConfigFromSliders);
+    pcSlider?.addEventListener('input', applyForceConfigFromSliders);
 
     (window).__CTRL__ = controller;
     console.log('Graph rendered. Use __CTRL__ for console debugging.');
