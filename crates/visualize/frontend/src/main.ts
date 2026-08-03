@@ -3,8 +3,9 @@
 
 import { renderGraph, validateGraphData } from './graph';
 import type { GraphController } from './graph';
-import type { GraphData } from './types';
-import { DEFAULT_FORCE_CONFIG, type ForceConfig } from './types';
+import type { GraphData, SelectionMode } from './types';
+import { DEFAULT_FORCE_CONFIG, SELECTION_MODES, type ForceConfig } from './types';
+import { buildAdjacency, getIndirectSet } from './graph-query';
 import { createHoverHandler } from './tooltip';
 import { createSelectionPanel, exportToFile } from './selection';
 import { renderLegend, buildColorScale } from './colors';
@@ -48,7 +49,7 @@ function showEmpty(container: HTMLElement): void {
 function renderFilterDropdown(
   data: GraphData,
   controller: GraphController,
-): HTMLElement | null {
+): { container: HTMLElement; select: HTMLSelectElement } | null {
   const container = document.createElement('div');
   container.id = 'filter-container';
   container.style.position = 'absolute';
@@ -89,7 +90,7 @@ function renderFilterDropdown(
   });
 
   container.appendChild(select);
-  return container;
+  return { container, select };
 }
 
 /**
@@ -168,6 +169,92 @@ async function openAndRenderFileFromPath(
   }
 
   renderGraphFromData(container, appEl, graphData);
+}
+
+function renderModeSelector(onChange: (mode: SelectionMode) => void): HTMLElement {
+  const container = document.createElement('div');
+  container.id = 'mode-selector-container';
+  container.style.display = 'inline-flex';
+  container.style.alignItems = 'center';
+  container.style.gap = '4px';
+
+  const label = document.createElement('label');
+  label.textContent = 'Mode: ';
+  label.style.fontSize = '12px';
+  label.style.color = '#666';
+  label.style.marginRight = '2px';
+  container.appendChild(label);
+
+  const select = document.createElement('select');
+  select.style.padding = '4px 8px';
+  select.style.fontSize = '12px';
+  select.style.borderRadius = '4px';
+  select.style.border = '1px solid #ccc';
+
+  for (const option of SELECTION_MODES) {
+    const optEl = document.createElement('option');
+    optEl.value = option.value;
+    optEl.textContent = option.label;
+    select.appendChild(optEl);
+  }
+
+  select.addEventListener('change', () => {
+    onChange(select.value as SelectionMode);
+  });
+
+  container.appendChild(select);
+  return container;
+}
+
+function renderSelectAllButtons(
+  onSelectAll: () => void,
+  onDeselectAll: () => void,
+): HTMLElement {
+  const container = document.createElement('div');
+  container.id = 'select-all-container';
+  container.style.display = 'inline-flex';
+  container.style.alignItems = 'center';
+  container.style.gap = '4px';
+
+  const selectAllBtn = document.createElement('button');
+  selectAllBtn.textContent = 'Select All';
+  selectAllBtn.title = 'Select all visible nodes';
+  selectAllBtn.style.padding = '4px 10px';
+  selectAllBtn.style.fontSize = '12px';
+  selectAllBtn.style.borderRadius = '4px';
+  selectAllBtn.style.border = '1px solid #ccc';
+  selectAllBtn.style.background = '#fff';
+  selectAllBtn.style.cursor = 'pointer';
+  selectAllBtn.style.color = '#333';
+  selectAllBtn.addEventListener('mouseenter', () => {
+    selectAllBtn.style.background = '#eee';
+  });
+  selectAllBtn.addEventListener('mouseleave', () => {
+    selectAllBtn.style.background = '#fff';
+  });
+  selectAllBtn.addEventListener('click', () => onSelectAll());
+  container.appendChild(selectAllBtn);
+
+  const deselectAllBtn = document.createElement('button');
+  deselectAllBtn.textContent = 'Deselect All';
+  deselectAllBtn.title = 'Clear all selections';
+  deselectAllBtn.style.padding = '4px 10px';
+  deselectAllBtn.style.fontSize = '12px';
+  deselectAllBtn.style.borderRadius = '4px';
+  deselectAllBtn.style.border = '1px solid #ccc';
+  deselectAllBtn.style.background = '#fff';
+  deselectAllBtn.style.cursor = 'pointer';
+  deselectAllBtn.style.color = '#333';
+  deselectAllBtn.addEventListener('mouseenter', () => {
+    deselectAllBtn.style.background = '#eee';
+  });
+  deselectAllBtn.addEventListener('mouseleave', () => {
+    deselectAllBtn.style.background = '#fff';
+  });
+  deselectAllBtn.addEventListener('click', () => onDeselectAll());
+  container.appendChild(deselectAllBtn);
+
+  return container;
 }
 
 /**
@@ -288,13 +375,21 @@ export function renderForcePanel(
 }
 
 /**
- * Render a toolbar containing the family group filter dropdown and a reset layout button.
+ * Render a toolbar containing the family group filter dropdown, selection controls,
+ * reset button, and force control panel.
  */
 export function renderToolbar(
   graphData: GraphData,
   controller: GraphController,
   forceConfig?: ForceConfig,
   onForceConfigChange?: (c: ForceConfig) => void,
+  selectionManager?: {
+    addAll: (handles: Iterable<string>) => void;
+    removeAll: (handles: Iterable<string>) => void;
+    clear: () => void;
+    handles: string[];
+  },
+  onModeChange?: (mode: SelectionMode) => void,
 ): HTMLElement {
   const toolbar = document.createElement('div');
   toolbar.id = 'toolbar';
@@ -305,15 +400,104 @@ export function renderToolbar(
   toolbar.style.display = 'flex';
   toolbar.style.alignItems = 'center';
   toolbar.style.gap = '8px';
+  toolbar.style.flexWrap = 'wrap';
 
-  // Family group filter dropdown
-  const filterDropdown = renderFilterDropdown(graphData, controller);
-  if (filterDropdown) {
-    filterDropdown.style.position = 'relative';
-    filterDropdown.style.top = 'auto';
-    filterDropdown.style.left = 'auto';
-    filterDropdown.style.zIndex = 'auto';
-    toolbar.appendChild(filterDropdown);
+  // Selection mode selector
+  if (onModeChange) {
+    const modeSelector = renderModeSelector(onModeChange);
+    toolbar.appendChild(modeSelector);
+  }
+
+  // Select All / Deselect All buttons
+  if (selectionManager) {
+    const selectAllEl = renderSelectAllButtons(
+      () => {
+        selectionManager!.addAll(controller.getVisibleNodes());
+        controller.setHighlighted(new Set(selectionManager!.handles));
+      },
+      () => {
+        selectionManager!.clear();
+        controller.setHighlighted(new Set());
+      },
+    );
+    toolbar.appendChild(selectAllEl);
+  }
+
+  // Visual separator
+  const sep = document.createElement('span');
+  sep.textContent = '|';
+  sep.style.color = '#ccc';
+  sep.style.fontSize = '14px';
+  sep.style.margin = '0 2px';
+  toolbar.appendChild(sep);
+
+  // Family group filter dropdown + group select/deselect buttons
+  const filterResult = renderFilterDropdown(graphData, controller);
+  if (filterResult) {
+    filterResult.container.style.position = 'relative';
+    filterResult.container.style.top = 'auto';
+    filterResult.container.style.left = 'auto';
+    filterResult.container.style.zIndex = 'auto';
+    toolbar.appendChild(filterResult.container);
+
+    // Group select/deselect buttons (disabled when "All groups" selected)
+    if (selectionManager) {
+      const groupSelectBtn = document.createElement('button');
+      groupSelectBtn.textContent = 'Select Group';
+      groupSelectBtn.title = 'Select all nodes in this family group';
+      groupSelectBtn.style.padding = '4px 10px';
+      groupSelectBtn.style.fontSize = '12px';
+      groupSelectBtn.style.borderRadius = '4px';
+      groupSelectBtn.style.border = '1px solid #ccc';
+      groupSelectBtn.style.background = '#fff';
+      groupSelectBtn.style.cursor = 'pointer';
+      groupSelectBtn.style.color = '#333';
+      groupSelectBtn.disabled = filterResult.select.value === '';
+
+      const groupDeselectBtn = document.createElement('button');
+      groupDeselectBtn.textContent = 'Deselect Group';
+      groupDeselectBtn.title = 'Deselect all nodes in this family group';
+      groupDeselectBtn.style.padding = '4px 10px';
+      groupDeselectBtn.style.fontSize = '12px';
+      groupDeselectBtn.style.borderRadius = '4px';
+      groupDeselectBtn.style.border = '1px solid #ccc';
+      groupDeselectBtn.style.background = '#fff';
+      groupDeselectBtn.style.cursor = 'pointer';
+      groupDeselectBtn.style.color = '#333';
+      groupDeselectBtn.disabled = filterResult.select.value === '';
+
+      // Update button enabled state when filter changes
+      filterResult.select.addEventListener('change', () => {
+        const isAll = filterResult.select.value === '';
+        groupSelectBtn.disabled = isAll;
+        groupDeselectBtn.disabled = isAll;
+      });
+
+      // Group select: select all nodes in the chosen family group
+      groupSelectBtn.addEventListener('click', () => {
+        const groupId = filterResult.select.value;
+        if (groupId === '') return;
+        const groupHandles = graphData.nodes
+          .filter((n) => n.family_group === Number(groupId))
+          .map((n) => n.handle);
+        selectionManager!.addAll(groupHandles);
+        controller.setHighlighted(new Set(selectionManager!.handles));
+      });
+
+      // Group deselect: deselect all nodes in the chosen family group
+      groupDeselectBtn.addEventListener('click', () => {
+        const groupId = filterResult.select.value;
+        if (groupId === '') return;
+        const groupHandles = graphData.nodes
+          .filter((n) => n.family_group === Number(groupId))
+          .map((n) => n.handle);
+        selectionManager!.removeAll(groupHandles);
+        controller.setHighlighted(new Set(selectionManager!.handles));
+      });
+
+      toolbar.appendChild(groupSelectBtn);
+      toolbar.appendChild(groupDeselectBtn);
+    }
   }
 
   // Reset layout button
@@ -373,10 +557,35 @@ function renderGraphFromData(
   // Force config state (pending — updated by sliders, applied on reset)
   const forceConfig: ForceConfig = { ...DEFAULT_FORCE_CONFIG };
 
-  // Wire up toolbar (filter dropdown + reset button + force panel)
-  const toolbar = renderToolbar(graphData, controller, forceConfig, (c) => {
-    Object.assign(forceConfig, c);
-  });
+  // Build adjacency once from the full graph topology (not rebuilt on filter changes)
+  const adjacency = buildAdjacency(graphData);
+  let currentMode: SelectionMode = 'single';
+
+  // Wire up selection panel first (toolbar buttons call into the manager)
+  const panelEl = document.getElementById('selection-panel');
+  let selectionManager: ReturnType<typeof createSelectionPanel> | null = null;
+  if (panelEl) {
+    selectionManager = createSelectionPanel(graphData, {
+      panelEl,
+      onExport: async (exportData) => {
+        await exportToFile(exportData);
+      },
+    });
+  }
+
+  // Wire up toolbar (filter dropdown + reset button + force panel + selection controls)
+  const toolbar = renderToolbar(
+    graphData,
+    controller,
+    forceConfig,
+    (c) => {
+      Object.assign(forceConfig, c);
+    },
+    selectionManager ?? undefined,
+    (mode: SelectionMode) => {
+      currentMode = mode;
+    },
+  );
   if (appEl) {
     appEl.insertBefore(toolbar, document.getElementById('legend'));
   }
@@ -399,20 +608,12 @@ function renderGraphFromData(
     });
   }
 
-  // Wire up selection panel
-  const panelEl = document.getElementById('selection-panel');
-  if (panelEl) {
-    const selectionManager = createSelectionPanel(graphData, {
-      panelEl,
-      onExport: async (exportData) => {
-        await exportToFile(exportData);
-      },
-    });
-
-    // Route graph node clicks to selection manager
+  // Route graph node clicks to selection manager (with indirect-set support)
+  if (selectionManager) {
     controller.onNodeClick((handle: string) => {
-      selectionManager.click(handle, false);
-      controller.setHighlighted(new Set(selectionManager.handles));
+      const indirect = getIndirectSet(adjacency, handle, currentMode);
+      selectionManager!.clickWithIndirect(handle, indirect);
+      controller.setHighlighted(new Set(selectionManager!.handles));
     });
   }
 
