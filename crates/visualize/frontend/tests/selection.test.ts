@@ -89,6 +89,100 @@ describe('SelectionManager', () => {
     const sm = new SelectionManager();
     expect(sm.handles).toEqual([]);
   });
+
+  it('clickWithIndirect with empty indirects behaves like click (toggle)', () => {
+    const sm = new SelectionManager();
+    sm.clickWithIndirect('p1', new Set());
+    expect(sm.has('p1')).toBe(true);
+    expect(sm.size).toBe(1);
+    sm.clickWithIndirect('p1', new Set());
+    expect(sm.has('p1')).toBe(false);
+    expect(sm.size).toBe(0);
+  });
+
+  it('clickWithIndirect adds node + indirects when node unselected', () => {
+    const sm = new SelectionManager();
+    sm.clickWithIndirect('p1', new Set(['p2', 'p3']));
+    expect(sm.has('p1')).toBe(true);
+    expect(sm.has('p2')).toBe(true);
+    expect(sm.has('p3')).toBe(true);
+    expect(sm.size).toBe(3);
+  });
+
+  it('clickWithIndirect removes node + indirects when node selected, even if some indirects were selected via other means', () => {
+    const sm = new SelectionManager();
+    // p1 selected via direct click; p2 selected via a different action
+    sm.add('p1');
+    sm.add('p2');
+    // Click p1 again with p2, p3 as indirects — removes p1, p2 (unconditional), and p3 is no-op
+    sm.clickWithIndirect('p1', new Set(['p2', 'p3']));
+    expect(sm.has('p1')).toBe(false);
+    expect(sm.has('p2')).toBe(false); // removed even though selected via other means
+    expect(sm.has('p3')).toBe(false);
+    expect(sm.size).toBe(0);
+  });
+
+  it('clickWithIndirect does not remove indirects when adding (additive behavior)', () => {
+    const sm = new SelectionManager();
+    sm.add('p4'); // pre-existing selection
+    sm.clickWithIndirect('p1', new Set(['p2']));
+    expect(sm.has('p1')).toBe(true);
+    expect(sm.has('p2')).toBe(true);
+    expect(sm.has('p4')).toBe(true); // preserved
+    expect(sm.size).toBe(3);
+  });
+
+  it('addAll adds multiple handles', () => {
+    const sm = new SelectionManager();
+    sm.addAll(['p1', 'p2', 'p3']);
+    expect(sm.has('p1')).toBe(true);
+    expect(sm.has('p2')).toBe(true);
+    expect(sm.has('p3')).toBe(true);
+    expect(sm.size).toBe(3);
+  });
+
+  it('removeAll removes multiple handles', () => {
+    const sm = new SelectionManager();
+    sm.addAll(['p1', 'p2', 'p3']);
+    sm.removeAll(['p1', 'p2']);
+    expect(sm.has('p1')).toBe(false);
+    expect(sm.has('p2')).toBe(false);
+    expect(sm.has('p3')).toBe(true);
+    expect(sm.size).toBe(1);
+  });
+
+  it('addAll with already-selected handles is idempotent (no double-counting)', () => {
+    const sm = new SelectionManager();
+    sm.addAll(['p1', 'p2']);
+    sm.addAll(['p2', 'p3']);
+    expect(sm.size).toBe(3);
+    expect(sm.has('p1')).toBe(true);
+    expect(sm.has('p2')).toBe(true);
+    expect(sm.has('p3')).toBe(true);
+  });
+
+  it('removeAll with non-selected handles is idempotent', () => {
+    const sm = new SelectionManager();
+    sm.add('p1');
+    sm.removeAll(['p2', 'p3']); // not selected
+    expect(sm.size).toBe(1);
+    expect(sm.has('p1')).toBe(true);
+  });
+
+  it('addAll([]) is a no-op (empty iterable)', () => {
+    const sm = new SelectionManager();
+    sm.add('p1');
+    sm.addAll([]);
+    expect(sm.size).toBe(1);
+    expect(sm.has('p1')).toBe(true);
+  });
+
+  it('removeAll([]) is a no-op (empty iterable)', () => {
+    const sm = new SelectionManager();
+    sm.addAll(['p1', 'p2']);
+    sm.removeAll([]);
+    expect(sm.size).toBe(2);
+  });
 });
 
 describe('buildSelectedPeople', () => {

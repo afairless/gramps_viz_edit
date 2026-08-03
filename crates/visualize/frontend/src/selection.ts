@@ -37,6 +37,42 @@ export class SelectionManager {
     this.selected.delete(handle);
   }
 
+  /**
+   * Click with indirect selection support.
+   * If handle is NOT selected: add handle + all indirectHandles.
+   * If handle IS selected: remove handle + all indirectHandles (unconditional —
+   * indirects selected via other actions are also removed).
+   */
+  clickWithIndirect(handle: string, indirectHandles: Set<string>): void {
+    if (this.selected.has(handle)) {
+      // DESELECT: remove handle + all indirects
+      this.selected.delete(handle);
+      for (const h of indirectHandles) {
+        this.selected.delete(h);
+      }
+    } else {
+      // SELECT: add handle + all indirects
+      this.selected.add(handle);
+      for (const h of indirectHandles) {
+        this.selected.add(h);
+      }
+    }
+  }
+
+  /** Add multiple handles at once (no toggle — pure add). */
+  addAll(handles: Iterable<string>): void {
+    for (const h of handles) {
+      this.selected.add(h);
+    }
+  }
+
+  /** Remove multiple handles at once (no toggle — pure remove). */
+  removeAll(handles: Iterable<string>): void {
+    for (const h of handles) {
+      this.selected.delete(h);
+    }
+  }
+
   has(handle: string): boolean {
     return this.selected.has(handle);
   }
@@ -169,6 +205,24 @@ export function createSelectionPanel(
   const origClear = manager.clear.bind(manager);
   manager.clear = () => {
     origClear();
+    render();
+  };
+
+  const origClickWithIndirect = manager.clickWithIndirect.bind(manager);
+  manager.clickWithIndirect = (handle: string, indirectHandles: Set<string>) => {
+    origClickWithIndirect(handle, indirectHandles);
+    render();
+  };
+
+  const origAddAll = manager.addAll.bind(manager);
+  manager.addAll = (handles: Iterable<string>) => {
+    origAddAll(handles);
+    render();
+  };
+
+  const origRemoveAll = manager.removeAll.bind(manager);
+  manager.removeAll = (handles: Iterable<string>) => {
+    origRemoveAll(handles);
     render();
   };
 
