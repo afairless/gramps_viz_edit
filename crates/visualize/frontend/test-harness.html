@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Drag Test Harness</title>
+  <style>
+    body { margin: 0; padding: 0; font-family: sans-serif; }
+    #graph-container { width: 100vw; height: 100vh; }
+    #controls {
+      position: absolute; top: 8px; left: 8px; z-index: 1000;
+      display: flex; gap: 8px; align-items: center;
+      background: rgba(255,255,255,0.9); padding: 8px 12px;
+      border-radius: 6px; border: 1px solid #ccc;
+      font-size: 12px;
+    }
+    #controls button {
+      padding: 4px 10px; font-size: 12px; cursor: pointer;
+      border: 1px solid #999; border-radius: 4px; background: #fff;
+    }
+    #controls button:hover { background: #eee; }
+    #status {
+      position: absolute; bottom: 8px; left: 8px; z-index: 1000;
+      background: rgba(255,255,255,0.9); padding: 6px 10px;
+      border-radius: 4px; border: 1px solid #ccc; font-size: 11px;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <span><strong>Drag Test</strong></span>
+    <button id="btn-filter-all">All groups</button>
+    <button id="btn-filter-1">Group 1</button>
+    <button id="btn-filter-2">Group 2</button>
+    <button id="btn-reset">Reset layout</button>
+    <span id="click-log" style="color:#999;font-size:11px;"></span>
+  </div>
+  <div id="graph-container"></div>
+  <div id="status">Drag a node to test. Check: cursor, pin, zoom, filter.</div>
+  <script type="module">
+    import { renderGraph } from './src/graph.ts';
+
+    const data = {
+      nodes: [
+        { handle: 'p1', name: 'Alice', birth_date: '1850', death_date: '1910', birth_year: 1850, is_imputed: false, gender: 'female', family_group: 1, generation: 0 },
+        { handle: 'p2', name: 'Bob', birth_date: '1848', death_date: '1905', birth_year: 1848, is_imputed: false, gender: 'male', family_group: 1, generation: 0 },
+        { handle: 'p3', name: 'Charlie', birth_date: '1875', death_date: '1920', birth_year: 1875, is_imputed: false, gender: 'male', family_group: 1, generation: 1 },
+        { handle: 'p4', name: 'Diana', birth_date: '1880', death_date: '1930', birth_year: 1880, is_imputed: false, gender: 'female', family_group: 1, generation: 1 },
+        { handle: 'p5', name: 'Eve', birth_date: '1900', death_date: '1950', birth_year: 1900, is_imputed: false, gender: 'female', family_group: 1, generation: 2 },
+        { handle: 'p6', name: 'Frank', birth_date: '1905', death_date: '1960', birth_year: 1905, is_imputed: false, gender: 'male', family_group: 1, generation: 2 },
+        { handle: 'p7', name: 'Grace', birth_date: '1925', death_date: '2000', birth_year: 1925, is_imputed: false, gender: 'female', family_group: 1, generation: 3 },
+        { handle: 'p8', name: 'Hank', birth_date: '1920', death_date: '1995', birth_year: 1920, is_imputed: false, gender: 'male', family_group: 2, generation: 0 },
+        { handle: 'p9', name: 'Ivy', birth_date: '1950', death_date: null, birth_year: 1950, is_imputed: false, gender: 'female', family_group: 2, generation: 1 },
+        { handle: 'p10', name: 'Jack', birth_date: '1975', death_date: null, birth_year: 1975, is_imputed: false, gender: 'male', family_group: 2, generation: 2 },
+        { handle: 'p11', name: 'Imputed', birth_date: null, death_date: null, birth_year: null, is_imputed: true, gender: 'unknown', family_group: 1, generation: 1 },
+        { handle: 'p12', name: 'Kate', birth_date: '1860', death_date: '1900', birth_year: 1860, is_imputed: false, gender: 'female', family_group: 2, generation: 0 },
+      ],
+      links: [
+        { source: 'p1', target: 'p2', link_type: 'Spouse' },
+        { source: 'p1', target: 'p3', link_type: 'ParentChild' },
+        { source: 'p2', target: 'p3', link_type: 'ParentChild' },
+        { source: 'p3', target: 'p4', link_type: 'Spouse' },
+        { source: 'p3', target: 'p5', link_type: 'ParentChild' },
+        { source: 'p4', target: 'p5', link_type: 'ParentChild' },
+        { source: 'p5', target: 'p6', link_type: 'Spouse' },
+        { source: 'p5', target: 'p7', link_type: 'ParentChild' },
+        { source: 'p6', target: 'p7', link_type: 'ParentChild' },
+        { source: 'p8', target: 'p12', link_type: 'Spouse' },
+        { source: 'p8', target: 'p9', link_type: 'ParentChild' },
+        { source: 'p12', target: 'p9', link_type: 'ParentChild' },
+        { source: 'p9', target: 'p10', link_type: 'ParentChild' },
+        { source: 'p3', target: 'p11', link_type: 'ParentChild' },
+      ],
+      family_groups: [
+        { id: 1, size: 7, span: 4 },
+        { id: 2, size: 4, span: 3 },
+      ],
+    };
+
+    const legend = document.createElement('div');
+    legend.id = 'legend';
+    legend.style.display = 'none';
+    document.body.appendChild(legend);
+
+    const container = document.getElementById('graph-container');
+    if (!container) throw new Error('No container');
+
+    const controller = renderGraph(container, data);
+
+    const clickLog = document.getElementById('click-log');
+    controller.onNodeClick((handle) => {
+      if (clickLog) clickLog.textContent = 'Selected: ' + handle;
+      setTimeout(() => { if (clickLog) clickLog.textContent = ''; }, 2000);
+    });
+
+    controller.onNodeHover((handle, event) => {
+      const status = document.getElementById('status');
+      if (status) {
+        if (handle) {
+          const node = data.nodes.find((n) => n.handle === handle);
+          status.textContent = 'Hover: ' + (node ? node.name : handle);
+        } else {
+          status.textContent = 'Drag a node to test. Check: cursor, pin, zoom, filter.';
+        }
+      }
+    });
+
+    document.getElementById('btn-filter-all')?.addEventListener('click', () => { controller.setFamilyGroupFilter(null); });
+    document.getElementById('btn-filter-1')?.addEventListener('click', () => { controller.setFamilyGroupFilter(1); });
+    document.getElementById('btn-filter-2')?.addEventListener('click', () => { controller.setFamilyGroupFilter(2); });
+    document.getElementById('btn-reset')?.addEventListener('click', () => { controller.resetLayout(); });
+
+    (window).__CTRL__ = controller;
+    console.log('Graph rendered. Use __CTRL__ for console debugging.');
+    console.log('Checklist: grab cursor, dragging, pin behavior, filter preservation.');
+  </script>
+</body>
+</html>
