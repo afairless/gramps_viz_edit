@@ -38,7 +38,7 @@ export interface GraphController {
 
 // Internal node/link types for D3 simulation.
 // `source`/`target` are mutated by D3 from handles to node references.
-interface SimNode extends d3.SimulationNodeDatum {
+export interface SimNode extends d3.SimulationNodeDatum {
   handle: string;
   name: string;
   birth_date: string | null;
@@ -126,6 +126,68 @@ export function buildSimLinks(
     links.push({ source: src, target: tgt, link_type: l.link_type });
   }
   return links;
+}
+
+// ---------------------------------------------------------------------------
+// Drag handlers (exported for testing)
+// ---------------------------------------------------------------------------
+
+export function onDragStart(
+  d: SimNode,
+  event: d3.D3DragEvent<SVGGElement, SimNode, SimNode>,
+  simulation: d3.Simulation<SimNode, undefined>,
+  _svg: SVGSVGElement,
+): void {
+  if (!event.active) simulation.alphaTarget(0.3).restart();
+  d.fx = d.x ?? null;
+  d.fy = d.y ?? null;
+  d3.select(event.sourceEvent.currentTarget as SVGGElement).style(
+    'cursor',
+    'grabbing',
+  );
+}
+
+export function onDrag(
+  d: SimNode,
+  event: d3.D3DragEvent<SVGGElement, SimNode, SimNode>,
+  _simulation: d3.Simulation<SimNode, undefined>,
+  svg: SVGSVGElement,
+): void {
+  const transform = d3.zoomTransform(svg);
+  const [x, y] = transform.invert([event.x, event.y]);
+  d.fx = x;
+  d.fy = y;
+}
+
+export function onDragEnd(
+  _d: SimNode,
+  event: d3.D3DragEvent<SVGGElement, SimNode, SimNode>,
+  simulation: d3.Simulation<SimNode, undefined>,
+  _svg: SVGSVGElement,
+): void {
+  if (!event.active) simulation.alphaTarget(0);
+  // Pin the node where dropped — do NOT clear fx/fy
+  d3.select(event.sourceEvent.currentTarget as SVGGElement).style(
+    'cursor',
+    'grab',
+  );
+}
+
+export function createDragBehavior(
+  simulation: d3.Simulation<SimNode, undefined>,
+  svg: SVGSVGElement,
+): d3.DragBehavior<SVGGElement, SimNode, SimNode | d3.SubjectPosition> {
+  return d3
+    .drag<SVGGElement, SimNode>()
+    .on('start', (event: d3.D3DragEvent<SVGGElement, SimNode, SimNode>, d: SimNode) =>
+      onDragStart(d, event, simulation, svg),
+    )
+    .on('drag', (event: d3.D3DragEvent<SVGGElement, SimNode, SimNode>, d: SimNode) =>
+      onDrag(d, event, simulation, svg),
+    )
+    .on('end', (event: d3.D3DragEvent<SVGGElement, SimNode, SimNode>, d: SimNode) =>
+      onDragEnd(d, event, simulation, svg),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -224,7 +286,7 @@ export function renderGraph(
     const nodeEnter = nodeBind
       .enter()
       .append('g')
-      .attr('cursor', 'pointer')
+      .attr('cursor', 'grab')
       .on('click', (event: MouseEvent, d: SimNode) => {
         event.stopPropagation();
         if (nodeClickCb) nodeClickCb(d.handle);
@@ -294,6 +356,9 @@ export function renderGraph(
           (d: SimNode) => `translate(${d.x ?? 0},${d.y ?? 0})`,
         );
       });
+
+    // ---- drag behavior (re-bind all visible nodes with current simulation) ----
+    nodeGroup.call(createDragBehavior(simulation, svg.node() as SVGSVGElement));
 
     // Apply highlighting
     applyHighlight();
