@@ -208,6 +208,8 @@ function renderGraphFromData(
       maxYear: knownYears.length > 0 ? Math.max(...knownYears) : null,
       hasImputed: graphData.nodes.some((n) => n.is_imputed),
       hasUndated: graphData.nodes.some((n) => n.birth_year === null),
+      hasSpouseLinks: graphData.links.some((l) => l.link_type === 'Spouse'),
+      hasParentChildLinks: graphData.links.some((l) => l.link_type === 'ParentChild'),
     });
   }
 
