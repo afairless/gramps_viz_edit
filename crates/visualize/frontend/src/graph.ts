@@ -2,12 +2,15 @@
 // Manages the SVG canvas, force simulation, zoom/pan, and node/link rendering.
 
 import * as d3 from 'd3';
-import type { GraphData } from './types';
+import type { GraphData, LinkType } from './types';
 import {
   buildColorScale,
   getNodeColor,
   getNodeStrokeDash,
   getNodeOpacity,
+  getLinkColor,
+  getLinkStrokeDash,
+  getLinkStrokeWidth,
 } from './colors';
 
 // ---------------------------------------------------------------------------
@@ -50,7 +53,7 @@ interface SimNode extends d3.SimulationNodeDatum {
 interface SimLink {
   source: SimNode;
   target: SimNode;
-  link_type: 'Spouse' | 'ParentChild';
+  link_type: LinkType;
 }
 
 // ---------------------------------------------------------------------------
@@ -58,7 +61,6 @@ interface SimLink {
 // ---------------------------------------------------------------------------
 
 const NODE_RADIUS = 8;
-const LINK_STROKE_WIDTH = 1.5;
 const SELECTED_STROKE_WIDTH = 3;
 
 // ---------------------------------------------------------------------------
@@ -207,9 +209,10 @@ export function renderGraph(
     const linkEnter = linkBind
       .enter()
       .append('line')
-      .attr('stroke', '#999')
-      .attr('stroke-width', LINK_STROKE_WIDTH)
-      .attr('stroke-opacity', 0.6);
+      .attr('stroke', (d: SimLink) => getLinkColor(d.link_type))
+      .attr('stroke-width', (d: SimLink) => getLinkStrokeWidth(d.link_type))
+      .attr('stroke-dasharray', (d: SimLink) => getLinkStrokeDash(d.link_type))
+      .attr('stroke-opacity', 0.8);
     linkGroup = linkEnter.merge(linkBind);
 
     // ---- nodes ----

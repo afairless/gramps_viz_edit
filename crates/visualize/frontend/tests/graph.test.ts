@@ -7,7 +7,7 @@ import {
   buildSimLinks,
   validateGraphData,
 } from '../src/graph';
-import type { GraphData, PersonNode, FamilyLink } from '../src/types';
+import type { GraphData, PersonNode, FamilyLink, LinkType } from '../src/types';
 
 function makeNode(handle: string, overrides: Partial<PersonNode> = {}): PersonNode {
   return {
@@ -167,6 +167,50 @@ describe('buildSimLinks', () => {
     const nodeMap = new Map(nodes.map((n) => [n.handle, n]));
     const links = buildSimLinks(data, nodeMap);
     expect(links).toHaveLength(0);
+  });
+
+  it('preserves link_type as ParentChild through the mapping', () => {
+    const data = makeGraph(
+      [makeNode('p1'), makeNode('p2')],
+      [{ source: 'p1', target: 'p2', link_type: 'ParentChild' }],
+    );
+    const nodes = buildSimNodes(data);
+    const nodeMap = new Map(nodes.map((n) => [n.handle, n]));
+    const links = buildSimLinks(data, nodeMap);
+    expect(links).toHaveLength(1);
+    expect(links[0].link_type).toBe('ParentChild');
+  });
+
+  it('preserves link_type as Spouse through the mapping', () => {
+    const data = makeGraph(
+      [makeNode('p1'), makeNode('p2')],
+      [{ source: 'p1', target: 'p2', link_type: 'Spouse' }],
+    );
+    const nodes = buildSimNodes(data);
+    const nodeMap = new Map(nodes.map((n) => [n.handle, n]));
+    const links = buildSimLinks(data, nodeMap);
+    expect(links).toHaveLength(1);
+    expect(links[0].link_type).toBe('Spouse');
+  });
+
+  it('preserves link_type for mixed Spouse and ParentChild links', () => {
+    const data = makeGraph(
+      [makeNode('p1'), makeNode('p2'), makeNode('p3')],
+      [
+        { source: 'p1', target: 'p2', link_type: 'Spouse' },
+        { source: 'p1', target: 'p3', link_type: 'ParentChild' },
+      ],
+    );
+    const nodes = buildSimNodes(data);
+    const nodeMap = new Map(nodes.map((n) => [n.handle, n]));
+    const links = buildSimLinks(data, nodeMap);
+    expect(links).toHaveLength(2);
+    const spouseLink = links.find((l) => l.link_type === 'Spouse');
+    const parentChildLink = links.find((l) => l.link_type === 'ParentChild');
+    expect(spouseLink).toBeDefined();
+    expect(parentChildLink).toBeDefined();
+    expect(spouseLink!.source.handle).toBe('p1');
+    expect(parentChildLink!.source.handle).toBe('p1');
   });
 });
 
