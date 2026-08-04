@@ -436,11 +436,12 @@ describe('force simulation configuration shape', () => {
 });
 
 describe('DEFAULT_FORCE_CONFIG', () => {
-  it('has all three keys', () => {
+  it('has all four keys', () => {
     const cfg = DEFAULT_FORCE_CONFIG;
     expect(cfg).toHaveProperty('generationPull');
     expect(cfg).toHaveProperty('spouseStrength');
     expect(cfg).toHaveProperty('parentChildStrength');
+    expect(cfg).toHaveProperty('repelStrength');
   });
 
   it('values are within [0, 2] range', () => {
@@ -451,6 +452,8 @@ describe('DEFAULT_FORCE_CONFIG', () => {
     expect(cfg.spouseStrength).toBeLessThanOrEqual(2);
     expect(cfg.parentChildStrength).toBeGreaterThanOrEqual(0);
     expect(cfg.parentChildStrength).toBeLessThanOrEqual(2);
+    expect(cfg.repelStrength).toBeGreaterThanOrEqual(0);
+    expect(cfg.repelStrength).toBeLessThanOrEqual(2);
   });
 
   it('provides sensible defaults (not all zero)', () => {
@@ -458,6 +461,10 @@ describe('DEFAULT_FORCE_CONFIG', () => {
     expect(cfg.generationPull).toBeGreaterThan(0);
     expect(cfg.spouseStrength).toBeGreaterThan(0);
     expect(cfg.parentChildStrength).toBeGreaterThan(0);
+  });
+
+  it('repelStrength defaults to 0.00', () => {
+    expect(DEFAULT_FORCE_CONFIG.repelStrength).toBe(0.00);
   });
 });
 
@@ -534,11 +541,13 @@ describe('applyForceConfig roundtrip', () => {
       generationPull: 0.3,
       spouseStrength: 0.8,
       parentChildStrength: 0.5,
+      repelStrength: 0,
     };
     const config2: ForceConfig = {
       generationPull: 1.5,
       spouseStrength: 0.2,
       parentChildStrength: 0.9,
+      repelStrength: 0,
     };
 
     // Register forces with config1
@@ -591,6 +600,7 @@ describe('createSimulationForces', () => {
       generationPull: 0.5,
       spouseStrength: 0.6,
       parentChildStrength: 0.7,
+      repelStrength: 0,
     };
     const sim = d3.forceSimulation<SimNode>([]);
     createSimulationForces(sim, config, () => 0, [], [], 800, 600);
@@ -641,7 +651,7 @@ describe('restartSimulation', () => {
     controller.setFamilyGroupFilter(1);
 
     // Apply a non-default config — should not throw
-    const testConfig: ForceConfig = { generationPull: 0.5, spouseStrength: 0.5, parentChildStrength: 0.5 };
+    const testConfig: ForceConfig = { generationPull: 0.5, spouseStrength: 0.5, parentChildStrength: 0.5, repelStrength: 0 };
     expect(() => {
       controller.setForceConfig(testConfig);
     }).not.toThrow();

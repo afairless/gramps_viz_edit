@@ -58,6 +58,8 @@ export interface ForceConfig {
   spouseStrength: number;
   /** Multiplier for parent-child link spring stiffness. */
   parentChildStrength: number;
+  /** Multiplier for the selection-repel pairwise force. */
+  repelStrength: number;
 }
 
 /** Sensible defaults for ForceConfig (produces visible bands in typical 2-5 gen trees). */
@@ -65,6 +67,7 @@ export const DEFAULT_FORCE_CONFIG: ForceConfig = {
   generationPull: 0.30,
   spouseStrength: 0.80,
   parentChildStrength: 0.50,
+  repelStrength: 0.00,
 };
 
 // ---------------------------------------------------------------------------
