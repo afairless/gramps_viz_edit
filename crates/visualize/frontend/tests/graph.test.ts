@@ -552,7 +552,7 @@ describe('applyForceConfig roundtrip', () => {
     };
 
     // Register forces with config1
-    createSimulationForces(sim, config1, genY, [], [], 800, 600);
+    createSimulationForces(sim, config1, genY, [], [], 800, 600, () => new Set<string>());
 
     // Mutate to config2
     applyForceConfig(sim, config2, genY);
@@ -582,9 +582,9 @@ describe('applyForceConfig roundtrip', () => {
 });
 
 describe('createSimulationForces', () => {
-  it('registers all six named forces', () => {
+  it('registers all seven named forces', () => {
     const sim = d3.forceSimulation<SimNode>([]);
-    createSimulationForces(sim, DEFAULT_FORCE_CONFIG, () => 0, [], [], 800, 600);
+    createSimulationForces(sim, DEFAULT_FORCE_CONFIG, () => 0, [], [], 800, 600, () => new Set<string>());
 
     expect(sim.force('spouse-link')).toBeTruthy();
     expect(sim.force('pc-link')).toBeTruthy();
@@ -592,6 +592,18 @@ describe('createSimulationForces', () => {
     expect(sim.force('charge')).toBeTruthy();
     expect(sim.force('collision')).toBeTruthy();
     expect(sim.force('center')).toBeTruthy();
+    expect(sim.force('selection-repel')).toBeTruthy();
+
+    sim.stop();
+  });
+
+  it('selection-repel force has strength 0 by default', () => {
+    const sim = d3.forceSimulation<SimNode>([]);
+    createSimulationForces(sim, DEFAULT_FORCE_CONFIG, () => 0, [], [], 800, 600, () => new Set<string>());
+
+    const repel = sim.force('selection-repel') as any;
+    expect(repel).toBeTruthy();
+    expect(repel.strength()).toBe(0);
 
     sim.stop();
   });
@@ -604,7 +616,7 @@ describe('createSimulationForces', () => {
       repelStrength: 0,
     };
     const sim = d3.forceSimulation<SimNode>([]);
-    createSimulationForces(sim, config, () => 0, [], [], 800, 600);
+    createSimulationForces(sim, config, () => 0, [], [], 800, 600, () => new Set<string>());
 
     const spouseLink = sim.force('spouse-link') as d3.ForceLink<SimNode, d3.SimulationLinkDatum<SimNode>>;
     expect(spouseLink.strength()(null as unknown as d3.SimulationLinkDatum<SimNode>, 0, [])).toBe(0.6);

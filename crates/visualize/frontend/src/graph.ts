@@ -263,6 +263,7 @@ export function createSimulationForces(
   pcLinks: d3.SimulationLinkDatum<SimNode>[],
   width: number,
   height: number,
+  getSelected: () => Set<string>,
 ): void {
   sim
     .force(
@@ -284,7 +285,11 @@ export function createSimulationForces(
     .force('gen-field', d3.forceY<SimNode>().y(genY).strength(config.generationPull))
     .force('charge', d3.forceManyBody().strength(CHARGE_STRENGTH))
     .force('collision', d3.forceCollide(COLLIDE_RADIUS))
-    .force('center', d3.forceCenter(width / 2, height / 2).strength(CENTER_STRENGTH));
+    .force('center', d3.forceCenter(width / 2, height / 2).strength(CENTER_STRENGTH))
+    .force(
+      'selection-repel',
+      createSelectionRepelForce(getSelected).strength(config.repelStrength),
+    );
 }
 
 /**
@@ -435,6 +440,7 @@ export function renderGraph(
   let currentFilter: number | null = null;
   let currentConfig: ForceConfig = { ...DEFAULT_FORCE_CONFIG };
   let highlighted = new Set<string>();
+  const selectedSet = new Set<string>();
   let nodeClickCb: ((handle: string) => void) | null = null;
   let nodeHoverCb: ((handle: string | null, event: MouseEvent) => void) | null =
     null;
@@ -606,6 +612,7 @@ export function renderGraph(
       pcLinks,
       getSvgWidth(),
       getSvgHeight(),
+      () => selectedSet,
     );
 
     simulation.on('tick', () => {
