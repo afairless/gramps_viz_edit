@@ -313,6 +313,10 @@ export function applyForceConfig(
   if (gf) {
     (gf as d3.ForceY<SimNode>).strength(config.generationPull).y(genY);
   }
+  const repel = simulation.force('selection-repel') as SelectionRepelForce | undefined;
+  if (repel) {
+    repel.strength(config.repelStrength);
+  }
 }
 
 // ---------------------------------------------------------------------------

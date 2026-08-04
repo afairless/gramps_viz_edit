@@ -579,6 +579,20 @@ describe('applyForceConfig roundtrip', () => {
     }).not.toThrow();
     sim.stop();
   });
+
+  it('mutates selection-repel strength on applyForceConfig', () => {
+    const sim = d3.forceSimulation<SimNode>([]);
+    createSimulationForces(sim, DEFAULT_FORCE_CONFIG, () => 0, [], [], 800, 600, () => new Set<string>());
+
+    const config: ForceConfig = { generationPull: 0.3, spouseStrength: 0.8, parentChildStrength: 0.5, repelStrength: 1.5 };
+    applyForceConfig(sim, config, () => 0);
+
+    const repel = sim.force('selection-repel') as any;
+    expect(repel).toBeTruthy();
+    expect(repel.strength()).toBe(1.5);
+
+    sim.stop();
+  });
 });
 
 describe('createSimulationForces', () => {
