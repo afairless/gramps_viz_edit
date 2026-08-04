@@ -469,4 +469,137 @@ mod tests {
         let report = get_stats(path.to_str().unwrap()).unwrap();
         assert_eq!(report, gramps_reader::StatsReport::default());
     }
+
+    // ------------------------------------------------------------------
+    // load_graph_data_with_stats tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn load_graph_data_with_stats_valid_file() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <people>
+    <person handle="p1">
+      <gender>M</gender>
+      <name>
+        <first>John</first>
+        <surname>Smith</surname>
+      </name>
+      <birth><dateval val="1850-03-15"/></birth>
+    </person>
+    <person handle="p2">
+      <gender>F</gender>
+      <name>
+        <first>Jane</first>
+        <surname>Smith</surname>
+      </name>
+      <birth><dateval val="1855-06-01"/></birth>
+    </person>
+  </people>
+</database>"#;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "{}", xml).unwrap();
+        let path = tmp.path().with_extension("gramps");
+        std::fs::rename(tmp.path(), &path).unwrap();
+
+        let loaded = load_graph_data_with_stats(path.to_str().unwrap(), false, 25).unwrap();
+        assert_eq!(loaded.graph_data.nodes.len(), 2);
+        assert!(loaded.stats.counts.people > 0);
+        assert_eq!(loaded.stats.counts.people, 2);
+    }
+
+    #[test]
+    fn load_graph_data_with_stats_nonexistent_file() {
+        let result = load_graph_data_with_stats("/nonexistent/path.gramps", false, 25);
+        match result {
+            Err(msg) => assert!(msg.contains("Cannot read file"), "got: {}", msg),
+            Ok(_) => panic!("expected error for nonexistent file"),
+        }
+    }
+
+    #[test]
+    fn load_graph_data_with_stats_malformed_xml() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "<database><person></database>").unwrap();
+        let path = tmp.path().with_extension("gramps");
+        std::fs::rename(tmp.path(), &path).unwrap();
+
+        let result = load_graph_data_with_stats(path.to_str().unwrap(), false, 25);
+        match result {
+            Err(msg) => assert!(msg.contains("Failed to parse Gramps XML"), "got: {}", msg),
+            Ok(_) => panic!("expected error for malformed XML"),
+        }
+    }
+
+    #[test]
+    fn load_graph_data_with_stats_empty_file() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "").unwrap();
+        let path = tmp.path().with_extension("gramps");
+        std::fs::rename(tmp.path(), &path).unwrap();
+
+        let result = load_graph_data_with_stats(path.to_str().unwrap(), false, 25);
+        match result {
+            Err(msg) => assert!(msg.contains("No people found"), "got: {}", msg),
+            Ok(_) => panic!("expected error for empty file"),
+        }
+    }
+
+    #[test]
+    fn load_graph_data_delegates_to_with_stats() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <people>
+    <person handle="p1">
+      <gender>M</gender>
+      <name>
+        <first>John</first>
+        <surname>Smith</surname>
+      </name>
+      <birth><dateval val="1850-03-15"/></birth>
+    </person>
+    <person handle="p2">
+      <gender>F</gender>
+      <name>
+        <first>Jane</first>
+        <surname>Smith</surname>
+      </name>
+      <birth><dateval val="1855-06-01"/></birth>
+    </person>
+    <person handle="p3">
+      <name><first>Jim</first><surname>Smith</surname></name>
+    </person>
+  </people>
+  <families>
+    <family handle="f1">
+      <father hlink="p1"/><mother hlink="p2"/>
+      <childref hlink="p3"/>
+    </family>
+  </families>
+</database>"#;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "{}", xml).unwrap();
+        let path = tmp.path().with_extension("gramps");
+        std::fs::rename(tmp.path(), &path).unwrap();
+
+        let from_old = load_graph_data(path.to_str().unwrap(), false, 25).unwrap();
+        let from_new = load_graph_data_with_stats(path.to_str().unwrap(), false, 25).unwrap();
+        assert_eq!(from_old.nodes.len(), from_new.graph_data.nodes.len());
+        assert_eq!(from_old.links.len(), from_new.graph_data.links.len());
+        assert_eq!(from_old.family_groups.len(), from_new.graph_data.family_groups.len());
+    }
 }
