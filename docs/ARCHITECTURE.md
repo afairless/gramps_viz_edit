@@ -203,11 +203,17 @@ select which schema versions to compile in:
 
 | Feature | Version | Description |
 |---|---|---|
-| `schema-5-0` | 5.0 | Gramps 5.0.x support |
+| `schema-5-0` | 5.0 | Gramps 5.0.x support (forward-compat stub) |
 | `schema-5-1` | 5.1 | Gramps 5.1.x support |
 | `schema-5-2` (default) | 5.2 | Gramps 5.2.x support |
-| `schema-6-0` | 6.0 | Gramps 6.0.x support (experimental) |
+| `schema-6-0` | 6.0 | Gramps 6.0.x support (experimental, forward-compat stub) |
 | `all-schemas` | all | Enable all available versions |
+
+> **Note:** `schema-5-0` and `schema-6-0` exist as Cargo features for forward
+> compatibility, but no corresponding schema JSON files are committed to
+> `schemas/` yet. To use these versions, supply your own schema file (e.g.
+> `gramps-gen schema download <version>` or manually place `schema-5.0.json` /
+> `schema-6.0.json`) and rebuild with the corresponding feature flag.
 
 **Union merge algorithm**: When multiple versions are enabled, the build
 script merges them into a single set of Rust types:
