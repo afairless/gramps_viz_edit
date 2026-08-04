@@ -30,6 +30,7 @@ gramps_viz_edit/
 │   │           ├── mod.rs        # Re-exports
 │   │           ├── builder.rs    # GraphBuilder fluent API (separate from Graph)
 │   │           ├── random.rs     # Procedural name/date/place generators, generate_random()
+│   │           ├── densify.rs    # Connection densifier: component merging, orphan adoption, remarriage
 │   │           └── adversarial.rs # Adversarial strategies (Category A + B), apply_adversarial_strategies()
 │   │   ├── tests/
 │   │   │   ├── schema_convert_tests.rs   # Integration tests for schema_convert via #[path] include
@@ -150,7 +151,7 @@ of direct struct field access to support merged schemas.
 Generate → Validate (Gate 1) → Adversarial Transform → Validate (Gate 2) → Serialize
 ```
 
-- Random generation uses `generate_random(config, adversarial_config, schema)`.
+- Random generation uses `generate_random(config, adversarial_config, densify_config, schema)`.
 - Adversarial Category A strategies apply **during** generation via config flags.
 - Adversarial Category B strategies apply **after** Gate 1 via `apply_adversarial_strategies()`.
 - Validation uses `graph.validate(&schema)` which sets `ValidationState` on the graph.

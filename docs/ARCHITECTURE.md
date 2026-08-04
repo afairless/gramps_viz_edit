@@ -129,7 +129,7 @@ The tool follows a strict **five-stage pipeline** with validation gates after ev
 
 ### Stage 1: Generation
 
-`generate_random(config, adversarial_config, schema)` produces a `GenerationResult` containing the `Graph`, seed, warnings, and stats.
+`generate_random(config, adversarial_config, densify_config, schema)` produces a `GenerationResult` containing the `Graph`, seed, warnings, and stats.
 
 - Person generation with procedural names (Markov-chain syllable approach)
 - Parent selection with genealogical age constraints
@@ -345,7 +345,7 @@ pub enum ValidationError {
 
 ### Random generation (`generate_random`)
 
-Entry point: `generate_random(config: &RandomConfig, adversarial_config: &AdversarialConfig, schema: &Schema) -> Result<GenerationResult, GenerationError>`
+Entry point: `generate_random(config: &RandomConfig, adversarial_config: &AdversarialConfig, densify_config: Option<&DensifyConfig>, schema: &Schema) -> Result<GenerationResult, GenerationError>`
 
 **Algorithm:**
 
@@ -385,6 +385,40 @@ Hierarchical template system:
 - `modifier: Option<DateModifier>` (None, Before, After, About, Range, Span)
 - Generation layers determine birth years, death years calculated from life expectancy
 - Date quality randomized: ~80% Exact, ~15% Estimated, ~5% Calculated
+
+### Connection Densifier
+
+After generation (and before adversarial transforms), the connection densifier
+post-processes the graph to reduce disconnected components.
+
+Entry point: `densify_connections(graph: &mut Graph, config: &DensifyConfig, rng: &mut impl Rng) -> Result<(), GenerationError>`
+
+Controlled by `DensifyConfig`:
+
+```rust
+pub struct DensifyConfig {
+    pub enabled: bool,
+    pub cross_component_marriage: bool,
+    pub orphan_adoption: bool,
+    pub remarriage: bool,
+    pub merge_probability: f64,
+}
+```
+
+**4-pass algorithm:**
+
+1. **Find components** — Compute weakly connected components (WCC) over the
+   undirected graph (Person ↔ Family via spouse/child edges).
+2. **Cross-component marriage** — For each component with ≤4 persons, attempt
+   to merge it into a larger component by creating a marriage between a person
+   in the small component and a person in a larger one, then adding shared
+   children. Controlled by `merge_probability`.
+3. **Orphan adoption** — For lone persons (no family associations), find a
+   suitable family and add them as a sibling or child. Families are prioritized
+   by generation proximity.
+4. **Remarriage** — For single-parent families (one spouse), find a suitable
+   spouse candidate from the remaining unpartnered pool and create a marriage
+   event. Prioritizes candidates within the same generation.
 
 ### Configuration
 

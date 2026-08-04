@@ -343,6 +343,22 @@ The in-memory graph is a concrete typed directed multigraph:
 - **Places**: Hierarchical templates (city → county → state → country)
 - **Genealogical constraints**: Birth before death, plausible parent ages, generational alignment
 
+### Connection densifier
+
+After generation, a 4-pass post-processing step merges disconnected components into
+coherent family structures:
+
+1. **Find components** — Identify weakly connected components (WCC) in the graph
+2. **Cross-component marriage** — Merge small components (≤4 persons) into larger ones
+   by creating cross-component marriages with shared children
+3. **Orphan adoption** — Assign lone persons (no families) to existing families
+   as siblings or children
+4. **Remarriage** — Convert some single-parent families into two-parent families
+   by finding a suitable spouse from the remaining pool
+
+Controlled by `DensifyConfig` with flags for enabling each pass and a merge
+probability threshold. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
+
 ### Adversarial strategies
 
 Two categories of adversarial strategies:
