@@ -309,7 +309,7 @@ describe('renderForcePanel', () => {
 
     // First, modify a slider away from default
     const sliders = panel.querySelectorAll<HTMLInputElement>('.force-slider input[type="range"]');
-    expect(sliders.length).toBe(3);
+    expect(sliders.length).toBe(4);
 
     // Move first slider to a different value
     sliders[0].value = '200';
@@ -328,35 +328,38 @@ describe('renderForcePanel', () => {
 
     // Verify value spans updated
     const valSpans = panel.querySelectorAll<HTMLSpanElement>('.force-slider .value');
-    expect(valSpans.length).toBe(3);
+    expect(valSpans.length).toBe(4);
     expect(valSpans[0].textContent).toBe(DEFAULT_FORCE_CONFIG.generationPull.toFixed(2));
     expect(valSpans[1].textContent).toBe(DEFAULT_FORCE_CONFIG.spouseStrength.toFixed(2));
     expect(valSpans[2].textContent).toBe(DEFAULT_FORCE_CONFIG.parentChildStrength.toFixed(2));
+    expect(valSpans[3].textContent).toBe(DEFAULT_FORCE_CONFIG.repelStrength.toFixed(2));
 
     // Verify onChange was called with defaults
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenCalledWith(DEFAULT_FORCE_CONFIG);
   });
 
-  it('has three sliders with labels and value spans', () => {
+  it('has four sliders with labels and value spans', () => {
     const panel = renderForcePanel(DEFAULT_FORCE_CONFIG, vi.fn());
     const sliderRows = panel.querySelectorAll('.force-slider');
-    expect(sliderRows.length).toBe(3);
+    expect(sliderRows.length).toBe(4);
 
     const labels = panel.querySelectorAll('.force-slider label');
     expect(labels[0].textContent).toContain('Generation');
     expect(labels[1].textContent).toContain('Spouse');
     expect(labels[2].textContent).toContain('Parent-child');
+    expect(labels[3].textContent).toContain('Selection repel');
 
     const ranges = panel.querySelectorAll('.force-slider input[type="range"]');
-    expect(ranges.length).toBe(3);
+    expect(ranges.length).toBe(4);
     expect((ranges[0] as HTMLInputElement).min).toBe('0');
     expect((ranges[0] as HTMLInputElement).max).toBe('200');
 
     const values = panel.querySelectorAll('.force-slider .value');
-    expect(values.length).toBe(3);
+    expect(values.length).toBe(4);
     expect(values[0].textContent).toBe(DEFAULT_FORCE_CONFIG.generationPull.toFixed(2));
     expect(values[1].textContent).toBe(DEFAULT_FORCE_CONFIG.spouseStrength.toFixed(2));
     expect(values[2].textContent).toBe(DEFAULT_FORCE_CONFIG.parentChildStrength.toFixed(2));
+    expect(values[3].textContent).toBe(DEFAULT_FORCE_CONFIG.repelStrength.toFixed(2));
   });
 });

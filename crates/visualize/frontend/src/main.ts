@@ -312,6 +312,7 @@ export function renderForcePanel(
     { key: 'generationPull', label: 'Generation pull' },
     { key: 'spouseStrength', label: 'Spouse bond' },
     { key: 'parentChildStrength', label: 'Parent-child bond' },
+    { key: 'repelStrength', label: 'Selection repel' },
   ];
 
   const valueSpans: Record<string, HTMLSpanElement> = {};
