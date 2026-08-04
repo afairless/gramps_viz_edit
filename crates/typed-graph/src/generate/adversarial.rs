@@ -127,6 +127,33 @@ impl AdversarialStrategy {
     pub fn is_validity_breaking(&self) -> bool {
         self.is_category_b() && !self.is_validity_preserving()
     }
+
+    /// Parse a strategy from a human-readable name.
+    ///
+    /// Accepts hyphenated and underscored aliases for convenience.
+    /// Returns `None` for unrecognized names.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "one_parent" | "one-parent" | "one_parent_families" => {
+                Some(Self::OneParentFamilies(0.5))
+            }
+            "missing_events" | "missing-events" => Some(Self::MissingEvents(0.3)),
+            "solo" | "solo_persons" | "solo-persons" => Some(Self::SoloPersons(0.2)),
+            "many_names" | "many-names" | "many_alternate_names" => {
+                Some(Self::ManyAlternateNames(0.3))
+            }
+            "disconnected" | "disconnected_subgraphs" | "disconnected-subgraphs" => {
+                Some(Self::DisconnectedSubgraphs)
+            }
+            "deep_nesting" | "deep-nesting" => Some(Self::DeepNesting),
+            "max_ref_chains" | "max-ref-chains" => Some(Self::MaxRefChains),
+            "orphaned" | "orphaned_references" | "orphaned-references" => {
+                Some(Self::OrphanedReferences)
+            }
+            "double_gender" | "double-gender" => Some(Self::DoubleGender(0.2)),
+            _ => None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2104,6 +2131,52 @@ mod tests {
         assert!(
             matches!(result, Err(AdversarialError::TransformNotApplicable(_))),
             "Empty graph should return TransformNotApplicable"
+        );
+    }
+
+    // =======================================================================
+    // from_name tests
+    // =======================================================================
+
+    #[test]
+    fn from_name_unrecognized_returns_none() {
+        assert_eq!(AdversarialStrategy::from_name("nonexistent"), None);
+        assert_eq!(AdversarialStrategy::from_name(""), None);
+    }
+
+    #[test]
+    fn from_name_single_hyphenated() {
+        assert_eq!(
+            AdversarialStrategy::from_name("one-parent"),
+            Some(AdversarialStrategy::OneParentFamilies(0.5))
+        );
+    }
+
+    #[test]
+    fn from_name_single_underscored() {
+        assert_eq!(
+            AdversarialStrategy::from_name("missing_events"),
+            Some(AdversarialStrategy::MissingEvents(0.3))
+        );
+    }
+
+    #[test]
+    fn from_name_aliases_map_to_same_variant() {
+        let expected = AdversarialStrategy::DisconnectedSubgraphs;
+        assert_eq!(AdversarialStrategy::from_name("disconnected"), Some(expected.clone()));
+        assert_eq!(AdversarialStrategy::from_name("disconnected_subgraphs"), Some(expected.clone()));
+        assert_eq!(AdversarialStrategy::from_name("disconnected-subgraphs"), Some(expected.clone()));
+    }
+
+    #[test]
+    fn from_name_default_parameters_preserved() {
+        assert_eq!(
+            AdversarialStrategy::from_name("one_parent"),
+            Some(AdversarialStrategy::OneParentFamilies(0.5))
+        );
+        assert_eq!(
+            AdversarialStrategy::from_name("solo_persons"),
+            Some(AdversarialStrategy::SoloPersons(0.2))
         );
     }
 
