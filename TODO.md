@@ -1,114 +1,113 @@
-# Implementation Plan: Architecture Cleanup (3 Issues)
+# Implementation Plan: Move Stats Panel to Left Side
 
-Source: `docs/research/cleanup-plan.md` (based on `docs/research/architecture-cli-review.md`)
-
-Three independent cleanup issues in the gramps-gen workspace:
-
-- **#2** — Duplicate `strategy_from_name` private functions in two CLI files; deduplicate
-  into a single `AdversarialStrategy::from_name` constructor on the enum in `typed-graph`.
-- **#4** — Dead `extract-schema` CLI stub; remove from the CLI surface entirely.
-- **#5** — `visualize` reads the `.gramps` file twice (`load_graph` + `get_stats`); read
-  once and return both `GraphData` and `StatsReport` in a combined `LoadedGraph`.
-
-All three are independent. Implementation order = easiest first, per the plan.
+Source: `docs/research/move-stats-panel-to-left.md`
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `refactor(cli): remove extract-schema stub command` | Remove dead CLI stub | `crates/cli/src/commands/extract_schema.rs` (del), `crates/cli/src/commands/mod.rs`, `crates/cli/src/main.rs`, `crates/cli/tests/e2e.rs` | integration |
-| 2 | `feat(typed-graph): add AdversarialStrategy::from_name` | `from_name` constructor | `crates/typed-graph/src/generate/adversarial.rs` | unit |
-| 3 | `refactor(cli): deduplicate strategy_from_name onto from_name` | Replace both call sites | `crates/cli/src/commands/generate.rs`, `crates/cli/src/scenario.rs` | unit |
-| 4 | `feat(visualize): add LoadedGraph and load_graph_data_with_stats` | Combined loader | `crates/visualize/src/lib.rs` | unit |
-| 5 | `feat(visualize): return LoadedGraph from load_graph IPC` | Tauri IPC wiring | `crates/visualize/src/main.rs` | smoke |
-| 6 | `feat(visualize): consume LoadedGraph stats in frontend` | Frontend consumes stats | `crates/visualize/frontend/src/types.ts`, `crates/visualize/frontend/src/main.ts` | vitest |
-| 7 | `test(visualize): cover load_graph_data_with_stats` | Test pass | `crates/visualize/src/lib.rs` | unit |
+| 1 | `feat: add #main-row wrapper to index.html` | HTML layout wrapper | `crates/visualize/frontend/index.html` | — |
+| 2 | `feat: restructure CSS for left-side stats panel layout` | Flex layout CSS | `crates/visualize/frontend/styles/main.css` | — |
+| 3 | `feat: update toolbar and stats panel insertion in main.ts` | JS insertion logic | `crates/visualize/frontend/src/main.ts`, `crates/visualize/frontend/tests/main.test.ts` | Unit |
+| 4 | `feat: append stats tab to #main-row` | Tab parent change | `crates/visualize/frontend/src/stats-panel.ts`, `crates/visualize/frontend/tests/stats-panel.test.ts` | Unit |
 
-## Step details
+## Step Details
 
-### Step 1 — Remove `extract-schema` stub (Issue #4)
+### Step 1 — index.html: Add #main-row wrapper
 
-Delete `crates/cli/src/commands/extract_schema.rs`. Remove the `pub mod extract_schema;`
-line from `crates/cli/src/commands/mod.rs`. In `crates/cli/src/main.rs`, remove the
-`use cli::commands::extract_schema;` import, the `ExtractSchemaArgs` type alias, the
-`Command::ExtractSchema` enum variant, and the `Command::ExtractSchema(args) => ...`
-match arm. Users must see no mention of `extract-schema` in `--help`.
+**What:** Wrap `#graph-container` and all absolute overlays (tooltip, selection-panel, legend) in a new `<div id="main-row">`.
 
-Add a regression test in `crates/cli/tests/e2e.rs` asserting `extract-schema` and
-`extract_schema` do not appear in `--help` output.
+**Before:**
 
-**Verify:** `cargo test -p cli`, `cargo build --release`, then
-`./target/release/gramps-gen --help | grep -q extract-schema && echo FAIL || echo OK`.
+```html
+<div id="app">
+  <div id="graph-container"></div>
+  <div id="tooltip" class="hidden"></div>
+  <div id="selection-panel"></div>
+  <div id="legend"></div>
+</div>
+```
 
-### Step 2 — Add `AdversarialStrategy::from_name` (Issue #2, part 1)
+**After:**
 
-Add `pub fn from_name(name: &str) -> Option<Self>` to the `impl AdversarialStrategy`
-block in `crates/typed-graph/src/generate/adversarial.rs`. Accepts hyphenated and
-underscored aliases; returns `None` for unrecognized names. This is purely additive —
-the two private CLI functions remain in place until Step 3.
+```html
+<div id="app">
+  <div id="main-row">
+    <div id="graph-container"></div>
+    <div id="tooltip" class="hidden"></div>
+    <div id="selection-panel"></div>
+    <div id="legend"></div>
+  </div>
+</div>
+```
 
-Add unit tests (None-One-Many): unrecognized/empty → `None`; single hyphenated name;
-single underscored name; aliases mapping to the same variant; default fraction
-parameters preserved.
+**No tests needed** — structural HTML change only. Verify by checking index.html parses correctly.
 
-**Verify:** `cargo test -p typed-graph`.
+---
 
-### Step 3 — Replace both call sites (Issue #2, part 2)
+### Step 2 — CSS: Restructure layout styles
 
-In `crates/cli/src/commands/generate.rs`, delete the private `fn strategy_from_name`
-(~line 398) and replace its call in `parse_adversarial_flag` with
-`AdversarialStrategy::from_name(s)` (including the `ok_or_else` error closure). In
-`crates/cli/src/scenario.rs`, delete the private `fn strategy_from_name` (~line 116)
-and replace its call in `Scenario::to_adversarial_config` with
-`AdversarialStrategy::from_name(s)`.
+**Changes:**
 
-**Verify:** `cargo test -p cli` (existing `parse_adversarial_flag` and scenario tests
-catch regressions).
+| Selector | Change |
+|---|---|
+| `#app` | Add `display: flex; flex-direction: column;` |
+| `#main-row` (new) | `flex: 1; display: flex; flex-direction: row; position: relative; min-height: 0; overflow: hidden;` |
+| `#graph-container` | Remove `width: 100%; height: 100%;` → add `flex: 1; position: relative;` |
+| `#toolbar` | Remove `position: absolute; top: 20px; left: 20px; z-index: 500;`. Add `width: 100%; padding: 10px 12px; background: #fafafa; border-bottom: 1px solid #ddd;` |
+| `#stats-panel` | Remove `position: absolute; top: 10px; right: 10px; height: calc(100% - 20px);`. Add `flex-shrink: 0;` |
+| `#legend` | Change `right: 300px` → `right: 10px` |
+| `.stats-tab` | Change `right: 0` → `left: 0`; `border-radius: 6px 0 0 6px` → `border-radius: 0 6px 6px 0`; `border-right: none` → `border-left: none` |
+| `#selection-panel` | No change needed |
+| `#tooltip` | No change needed |
 
-### Step 4 — Add `LoadedGraph` + `load_graph_data_with_stats` (Issue #5a)
+**No tests needed** — CSS layout cannot be tested in happy-dom. Verification via manual QA checklist.
 
-In `crates/visualize/src/lib.rs`, add a `LoadedGraph` struct (with `serde` derives)
-holding `graph_data: GraphData` and `stats: gramps_reader::StatsReport`, and a
-`load_graph_data_with_stats(path, no_impute, generation_gap)` function that reads the
-file **once**, runs `count_gramps_xml` + the existing extraction pipeline on the same
-in-memory `&str`, and returns `LoadedGraph`. Make `load_graph_data` delegate to it
-(discarding `stats`) to preserve the public API and eliminate pipeline duplication.
+---
 
-**Verify:** `cargo test -p visualize` (existing `load_graph_data` tests must still pass).
+### Step 3 — main.ts: Update toolbar and stats panel insertion
 
-### Step 5 — Wire into Tauri `load_graph` IPC (Issue #5b)
+**Changes to `renderToolbar()`:**
 
-In `crates/visualize/src/main.rs`, change the `load_graph` Tauri command's return type
-from `Result<GraphData, String>` to `Result<visualize::LoadedGraph, String>` and call
-`load_graph_data_with_stats` instead of `load_graph_data`. Keep `get_stats` unchanged
-for standalone use.
+- Remove inline `position: absolute`, `top: 20px`, `left: 20px`, `z-index: 500` styles from the toolbar element.
 
-**Verify:** compile check (`cargo check -p visualize` / `cargo build --release --features visualize`).
+**Changes to `renderGraphFromData()`:**
 
-### Step 6 — Frontend consumes `LoadedGraph` (Issue #5c)
+- Change `appEl.insertBefore(toolbar, document.getElementById('legend'))` → `appEl.prepend(toolbar)`.
 
-In `crates/visualize/frontend/src/types.ts`, add an `LoadedGraph` interface wrapping
-`graph_data: GraphData` and `stats: StatsReport`. In `main.ts`, update
-`openAndRenderFile` and `openAndRenderFileFromPath` to destructure the `LoadedGraph`
-response and pass `stats` to `renderGraphFromData`. Update `renderGraphFromData` to
-accept an optional `StatsReport` and render it directly (falling back to
-`fetchAndRenderStats` when absent, e.g. dev mode). Keep `fetchAndRenderStats` for
-standalone `get_stats` use.
+**Changes to `main()`:**
 
-**Verify:** `npx vitest run` in `crates/visualize/frontend`.
+- Change `appEl.appendChild(statsPanelEl)` → `mainRow.prepend(statsPanelEl)` where `mainRow = document.getElementById('main-row')`.
 
-### Step 7 — Test `load_graph_data_with_stats` (Issue #5d)
+**Test changes (`main.test.ts`):**
 
-Add unit tests in `crates/visualize/src/lib.rs`: valid file (graph data matches
-`load_graph_data` output, stats populated), nonexistent file ("Cannot read file"),
-malformed XML ("Failed to parse Gramps XML"), empty file ("No people found"), and
-backward-compatibility delegation (`load_graph_data` == `load_graph_data_with_stats().graph_data`).
+- Update "is styled as a flex container with absolute positioning" test to check that toolbar does NOT have absolute positioning, and still has `display: flex`, `align-items: center`, `gap: 8px`.
+- Add a new test "prepends toolbar as first child of #app".
 
-**Verify:** `cargo test -p visualize`, `cargo test -p gramps-reader`, `cargo test -p cli`,
-`cargo build --release --features visualize`. Manual smoke test of the visualizer.
+---
 
-## Notes
+### Step 4 — stats-panel.ts: Append tab to #main-row
 
-- No new dependencies; no `Cargo.toml` changes required.
-- Issue #5's IPC contract change (returning `LoadedGraph` instead of `GraphData`) is
-  the only breaking change; the visualizer should be manually smoke-tested after Step 7.
-- The deeper DSU/generation duplication between `count_gramps_xml` and
-  `build_graph_data` is explicitly deferred to a future pass.
+**Changes to `create()`:**
+
+- Change `document.body.appendChild(tab)` → `(document.getElementById('main-row') ?? document.body).appendChild(tab)`.
+
+**Test changes (`stats-panel.test.ts`):**
+
+- Add test "appends tab to #main-row when available" — creates #main-row, calls create(), verifies tab parent is #main-row.
+- Add test "inserts panel into #main-row when available" — creates #main-row, calls create(), verifies panel parent is #main-row.
+- Existing tests must pass unchanged (fallback to `document.body` in test environment).
+
+---
+
+## Manual QA Checklist
+
+After all steps are implemented:
+
+- [ ] Stats panel is on the left, below the toolbar
+- [ ] Toolbar controls are functional (Mode, Select All, Group filter, Reset)
+- [ ] Force panel expands/collapses without affecting stats panel position
+- [ ] Legend is at top-right (not offset by 300px)
+- [ ] Stats panel toggle shows/hides panel and the collapsed tab appears on the left edge
+- [ ] Collapsed tab click re-expands the panel
+- [ ] Window resize: toolbar wraps, stats panel stays positioned correctly
+- [ ] Welcome screen (no data loaded) still renders correctly
+- [ ] No visual regressions in the D3 graph area (zoom, pan, node selection)
