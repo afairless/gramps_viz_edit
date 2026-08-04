@@ -508,6 +508,68 @@ export function createSelectedAttractForce(
   return force as unknown as AttractForce;
 }
 
+/**
+ * Create a custom D3 force that pulls unselected nodes toward the centroid
+ * of the unselected set, forming a cluster. Mirror of the selected-attract
+ * force operating on the complement. Only active when there is at least
+ * one selected node (an "other cluster" to separate from) and at least
+ * 2 unselected nodes.
+ *
+ * @param getSelected - Callback returning the current set of selected handles.
+ * @returns An AttractForce instance.
+ */
+export function createUnselectedAttractForce(
+  getSelected: () => Set<string>,
+): AttractForce {
+  let nodes: SimNode[] = [];
+  let strengthValue = 0;
+
+  function force(tickAlpha: number): void {
+    const selected = getSelected();
+    // No-op without selected nodes: nothing to cluster away from
+    if (strengthValue === 0 || selected.size === 0) return;
+
+    // Partition nodes into unselected and check for selected complement
+    const unselectedNodes: SimNode[] = [];
+    let hasSelected = false;
+    for (const n of nodes) {
+      if (selected.has(n.handle)) {
+        hasSelected = true;
+      } else {
+        unselectedNodes.push(n);
+      }
+    }
+
+    // No-op if fewer than 2 unselected nodes (need a cluster to form)
+    if (!hasSelected || unselectedNodes.length < 2) return;
+
+    // Compute centroid of unselected nodes
+    let cx = 0, cy = 0;
+    for (const n of unselectedNodes) {
+      cx += n.x ?? 0;
+      cy += n.y ?? 0;
+    }
+    cx /= unselectedNodes.length;
+    cy /= unselectedNodes.length;
+
+    // Apply impulse toward centroid
+    const impulse = tickAlpha * strengthValue;
+    for (const n of unselectedNodes) {
+      n.vx = (n.vx ?? 0) + (cx - (n.x ?? 0)) * impulse;
+      n.vy = (n.vy ?? 0) + (cy - (n.y ?? 0)) * impulse;
+    }
+  }
+
+  force.initialize = (nodeList: SimNode[]) => { nodes = nodeList; };
+  force.strength = (s?: number) => {
+    if (s === undefined) return strengthValue;
+    strengthValue = s;
+    return force;
+  };
+
+  return force as unknown as AttractForce;
+}
+
 // ---------------------------------------------------------------------------
 // Main render function
 // ---------------------------------------------------------------------------
