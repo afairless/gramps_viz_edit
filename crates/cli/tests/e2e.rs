@@ -598,6 +598,17 @@ fn e2e_stats_nonexistent_file_fails() {
 }
 
 // ---------------------------------------------------------------------------
+// extract-schema not present in help
+// ---------------------------------------------------------------------------
+
+#[test]
+fn extract_schema_not_in_help() {
+    let (stdout, _stderr, _code) = gramps_gen(&["--help"]);
+    assert!(!stdout.contains("extract-schema"), "extract-schema should not appear in --help");
+    assert!(!stdout.contains("extract_schema"), "extract_schema should not appear in --help");
+}
+
+// ---------------------------------------------------------------------------
 // visualize subcommand
 // ---------------------------------------------------------------------------
 
