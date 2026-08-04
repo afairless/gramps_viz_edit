@@ -1,146 +1,84 @@
-# Implementation Plan: Selection Cluster Forces
+# Implementation Plan: Force-Freeze Mode for D3 Force-Directed Graph
 
-Source: `docs/research/selection-cluster-force.md`
+Source: `docs/research/force-freeze-mode.md`
 
-## Overview
+## Summary
 
-Add two custom D3 forces — `selected-attract` and `unselected-attract` — that
-pull each subset of nodes (selected vs. unselected) toward its own centroid.
-Together with the existing `selection-repel` force, this creates two visually
-distinct clusters. All work is in `crates/visualize/frontend/`; no Rust-side
-changes are needed.
-
-**Pre-work verification** (done): `npm test` passes (197 tests, 8 files).
-
-**Per-step verify commands** (run from `crates/visualize/frontend/`):
-
-```bash
-npm test                  # vitest run — all tests must pass
-npx tsc --noEmit          # strict type-check of src/ (tsconfig excludes tests/)
-```
-
-Each step is implemented, tested, verified, and committed before the next
-begins (incremental-development workflow). No step may include code belonging
-to a later step.
-
----
+Add a "force freeze" toggle to the D3 force-directed graph visualization. When frozen, all force-based movement is suspended via `simulation.stop()`. Dragged nodes move in isolation (manual SVG update), selection changes have no visual effect, and unfreezing resumes normal force layout with `simulation.alpha(1).restart()`.
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `feat: extend ForceConfig with attract strength fields` | ForceConfig extension | `src/types.ts` — add `selectedAttractStrength`, `unselectedAttractStrength` to `ForceConfig` interface and `DEFAULT_FORCE_CONFIG` (both `0.00`); update the 5 literal `ForceConfig` objects in `tests/graph.test.ts` (`config1`, `config2`, two `config` literals, `testConfig`) so the build stays green | unit |
-| 2 | `feat: add selected-attract centroid force` | Selected-attract force | `src/graph.ts` — export `AttractForce` interface (extends `d3.Force<SimNode, undefined>` with `strength()` getter/setter + `initialize()`); export `createSelectedAttractForce(getSelected)` implementing the centroid-spring contract (no-op if strength 0, selected < 2, or no unselected complement) | unit |
-| 3 | `feat: add unselected-attract centroid force` | Unselected-attract force | `src/graph.ts` — export `createUnselectedAttractForce(getSelected)`, mirror of selected-attract operating on the unselected complement (no-op if no selected nodes exist) | unit |
-| 4 | `feat: register attract forces in simulation config` | Force registration + runtime mutation | `src/graph.ts` — register `'selected-attract'` and `'unselected-attract'` in `createSimulationForces()` with strengths from config; mutate both via `AttractForce` casts in `applyForceConfig()` (guarded by `if (force)`) | unit |
-| 5 | `feat: add attract sliders to force panel` | Force panel sliders | `src/main.ts` — append `{ key: 'selectedAttractStrength', label: 'Selected attract' }` and `{ key: 'unselectedAttractStrength', label: 'Unselected attract' }` to the `sliders` array in `renderForcePanel()`; update `tests/main.test.ts` slider-count assertions (4 → 6: `sliders.length`, `sliderRows.length`, `values.length`) and the test name `'has four sliders…'` → `'has six sliders…'` (literal configs there spread `DEFAULT_FORCE_CONFIG`, so no key additions needed) | unit |
-| 6 | `test: cover attract forces with unit tests` | Attract-force test suite | `tests/graph.test.ts` — follow the `createSelectionRepelForce` pattern: strength getter/setter + initialize + is-a-`d3.Force`; centroid direction tests (3 selected at (0,0),(100,0),(0,100), tick with strength 1, alpha 1); edge cases (empty set, single selected, all selected, no unselected, strength 0 → no velocity change); unselected-attract mirror; registration in `createSimulationForces` (default strength 0); `applyForceConfig` mutation without restart | unit |
+| 1 | `feat: add frozen state and freeze-aware drag handlers to graph module` | Freeze core in graph.ts | `crates/visualize/frontend/src/graph.ts` — `frozen` state, `getFrozen` param on drag handlers, `setFrozen()`/`isFrozen()` on `GraphController`, update `createDragBehavior` call sites | Unit — freeze-aware drag paths (onDragStart/onDrag/onDragEnd), setFrozen calls simulation.stop/alpha(1).restart, isFrozen returns state, createDragBehavior wiring |
+| 2 | `feat: add freeze toggle button and toolbar wiring in main.ts` | Freeze UI in toolbar | `crates/visualize/frontend/src/main.ts` — freeze button, `syncFreezeUI()` helper, unfreeze on reset/filter | Unit — freeze button renders/toggles, controller.setFrozen called, syncFreezeUI toggles class, reset unfreezes, filter unfreezes |
+| 3 | `feat: add force-frozen CSS class and freeze button styles` | Freeze visual styling | `crates/visualize/frontend/styles/main.css` — `.force-frozen` inset box-shadow, freeze button styles | — |
+| 4 | `docs: add manual smoke test results for force-freeze mode` | Manual QA verification | (none — manual verification only) | — |
 
----
+## Step details
 
-## Step detail
+### Step 1 — graph.ts: frozen state + freeze-aware drag handlers + tests
 
-### Step 1 — `ForceConfig` extension (types.ts)
+**Changes to `graph.ts`:**
 
-- Add to `ForceConfig` interface:
-  - `selectedAttractStrength: number;` (doc: multiplier for selected-attract centroid pull)
-  - `unselectedAttractStrength: number;` (doc: multiplier for unselected-attract centroid pull)
-- Add both to `DEFAULT_FORCE_CONFIG` with value `0.00` (off by default).
-- **Same commit:** update the 5 literal `ForceConfig` objects in
-  `tests/graph.test.ts` (TypeScript errors otherwise — new keys are required):
-  - `applyForceConfig roundtrip`: `config1`, `config2`, and the mutation-test `config`
-  - `createSimulationForces` "uses the provided config values": `config`
-  - `restartSimulation`: `testConfig`
-- Optionally extend the `DEFAULT_FORCE_CONFIG` describe block in `graph.test.ts`
-  to assert the two new keys exist (also done in Step 6's key-property test).
+- Add `let frozen = false` variable inside `renderGraph()`.
+- Add `getFrozen: () => boolean` parameter to `createDragBehavior`, `onDragStart`, `onDrag`, `onDragEnd`.
+- Implement frozen paths in each handler:
+  - `onDragStart` (frozen): set `fx/fy`, set cursor to `grabbing`, return early — no `simulation.alphaTarget(0.3).restart()`.
+  - `onDrag` (frozen): set `fx/fy` + `x/y`, manually update SVG `transform` attribute on the dragged `<g>` element via `d3.select(event.sourceEvent.currentTarget as SVGGElement).attr('transform', 'translate(${d.x ?? 0},${d.y ?? 0})')`.
+  - `onDragEnd` (frozen): set cursor to `grab`, return early — no `simulation.alphaTarget(0)`, keep `fx/fy` pinned.
+- Add `setFrozen(f: boolean)` to the `GraphController` interface and implementation:
+  - `setFrozen(true)`: calls `simulation.stop()`.
+  - `setFrozen(false)`: calls `simulation.alpha(1).restart()`.
+  - Rebinds drag behavior so `getFrozen` closure sees updated value.
+- Add `isFrozen()` to the `GraphController` interface and implementation.
+- Update existing drag call sites in `restartSimulation()`: `nodeGroup.call(createDragBehavior(simulation))` → `nodeGroup.call(createDragBehavior(simulation, () => frozen))`.
 
-### Step 2 — `createSelectedAttractForce` (graph.ts)
+**Tests in `tests/graph.test.ts`:**
 
-- Export `AttractForce` interface (needed by Step 4):
-  `extends d3.Force<SimNode, undefined>` with `strength(s: number): this`,
-  `strength(): number`, `initialize(nodes: SimNode[]): void`.
-- Export `createSelectedAttractForce(getSelected: () => Set<string>): AttractForce`:
-  - Closure state: `nodes: SimNode[]`, `strengthValue = 0`.
-  - Tick: early-return if `strengthValue === 0`, `selected.size < 2`, or no
-    unselected complement. Partition nodes; compute centroid of selected;
-    apply `n.vx += (cx - n.x) * tickAlpha * strengthValue` per selected node.
-  - `force.initialize` stores node list; `force.strength` getter/setter with
-    chaining; return `force as unknown as AttractForce`.
-- Tests for this step's behavior live in Step 6 (keep the per-step loop green
-  by verifying with existing tests + `tsc`; the full unit suite is step 6).
+- `onDragStart` with `getFrozen() === true`: assert `fx/fy` set, cursor set to grabbing, simulation NOT restarted.
+- `onDragStart` with `getFrozen() === false`: existing behavior preserved (no regression).
+- `onDrag` with `getFrozen() === true`: assert `fx/fy`/`x`/`y` set, SVG transform attribute updated on the dragged `<g>` element.
+- `onDrag` with `getFrozen() === false`: existing behavior preserved.
+- `onDragEnd` with `getFrozen() === true`: assert cursor set to grab, `alphaTarget` NOT called, `fx/fy` preserved.
+- `onDragEnd` with `getFrozen() === false`: existing behavior preserved.
+- `createDragBehavior` with `getFrozen` callback: assert callback is wired; assert second-parameter requirement.
+- `setFrozen(true)` calls `simulation.stop()`.
+- `setFrozen(false)` calls `simulation.alpha(1).restart()`.
+- `isFrozen()` returns current state.
+- `restartSimulation` rebinds drag with freeze-aware behavior.
 
-### Step 3 — `createUnselectedAttractForce` (graph.ts)
+### Step 2 — main.ts: freeze toggle button + toolbar wiring + tests
 
-- Mirror of Step 2, operating on the unselected complement: partition into
-  unselected/selected, early-return if `selected.size === 0` (no "other
-  cluster"), compute the **unselected** centroid, apply impulse to unselected
-  nodes only.
+**Changes to `main.ts`:**
 
-### Step 4 — Registration + `applyForceConfig` (graph.ts)
+- Add freeze button to `renderToolbar()` (inserted after the filter dropdown / separator, before the reset button).
+- Add `syncFreezeUI(frozen: boolean)` helper inside `renderToolbar()` to keep button text, background, border color, and `.force-frozen` CSS class on `#graph-container` in sync.
+- Modify reset button's click handler: if frozen, call `controller.setFrozen(false)` and `syncFreezeUI(false)` before proceeding with reset.
+- Modify family-group filter's change handler: if frozen, call `controller.setFrozen(false)` and `syncFreezeUI(false)` before applying the filter. This requires passing `syncFreezeUI` into the filter handler or wiring the unfreeze after `renderFilterDropdown` returns.
 
-- In `createSimulationForces()`, after `'selection-repel'`:
+**Tests in `tests/main.test.ts`:**
 
-  ```typescript
-  .force('selected-attract', createSelectedAttractForce(getSelected).strength(config.selectedAttractStrength))
-  .force('unselected-attract', createUnselectedAttractForce(getSelected).strength(config.unselectedAttractStrength))
-  ```
+- Freeze button renders with text "❄ Freeze".
+- Clicking freeze button toggles text to "❄ Unfreeze" and back.
+- Clicking freeze button calls `controller.setFrozen()`.
+- Reset button calls `controller.setFrozen(false)` when frozen.
+- `syncFreezeUI` adds/removes `.force-frozen` on `#graph-container`.
 
-- In `applyForceConfig()`:
+### Step 3 — main.css: freeze visual styling
 
-  ```typescript
-  const selAttract = simulation.force('selected-attract') as AttractForce | undefined;
-  if (selAttract) selAttract.strength(config.selectedAttractStrength);
-  const unselAttract = simulation.force('unselected-attract') as AttractForce | undefined;
-  if (unselAttract) unselAttract.strength(config.unselectedAttractStrength);
-  ```
+**Changes to `main.css`:**
 
-- Note: D3 v7 `simulation.force()` returns the base `Force` type; the cast is
-  safe because `createSimulationForces` created these forces.
+- Add `.force-frozen` rule: `box-shadow: inset 0 0 0 3px #2266aa` (blue-tinted inset border).
+- Optionally add freeze button base + active state styles (inline styles in `main.ts` are primary, but CSS classes can supplement).
 
-### Step 5 — Force panel sliders (main.ts) + main.test.ts assertions
+### Step 4 — Manual smoke test
 
-- Append the two entries to the `sliders` array in `renderForcePanel()` (the
-  existing slider loop and Restore-defaults button handle them automatically;
-  both default to 0.00).
-- **Same commit:** update `tests/main.test.ts`:
-  - `expect(sliders.length).toBe(4)` → `.toBe(6)` (restore-defaults test)
-  - `expect(sliderRows.length).toBe(4)` → `.toBe(6)` (six-sliders test)
-  - `expect(values.length).toBe(4)` → `.toBe(6)` (six-sliders test)
-  - Test name `'has four sliders with labels and value spans'` →
-    `'has six sliders with labels and value spans'`; extend label assertions
-    to cover `Selected attract` / `Unselected attract`.
+Manual QA (no code changes):
 
-### Step 6 — Attract-force unit tests (graph.test.ts)
-
-Follow the `createSelectionRepelForce` suite:
-
-1. **Properties:** strength defaults to 0; setter chains and getter returns
-   the set value; `initialize` and tick are callable (`is a d3.Force`).
-2. **Centroid direction:** selected nodes at (0,0), (100,0), (0,100); tick
-   with strength 1, alpha 1; centroid ≈ (33.3, 33.3):
-   - (100,0): `vx < 0`, `vy > 0`
-   - (0,100): `vx > 0`, `vy < 0`
-   - (0,0): `vx > 0`, `vy > 0`
-3. **Edge cases:** empty selected set; single selected; all nodes selected;
-   no unselected complement; strength 0 — all no-ops (velocities unchanged).
-4. **Unselected mirror:** selected nodes stay stationary; unselected cluster
-   toward their centroid.
-5. **Registration:** both forces present after `createSimulationForces` with
-   default strength 0.
-6. **`applyForceConfig` mutation:** config change updates both forces' strength
-   without a simulation restart.
-7. Extend the `DEFAULT_FORCE_CONFIG` describe block: `'has all four keys'` →
-   `'has all six keys'` (this test lives in **graph.test.ts**, not main.test.ts),
-   asserting `selectedAttractStrength` / `unselectedAttractStrength` exist;
-   both default to `0.00` (mirroring the `repelStrength` default test).
-
----
-
-## Notes / plan corrections
-
-- The research plan attributes the `'has all four keys'` test to
-  `tests/main.test.ts`; it actually lives in `tests/graph.test.ts`. Corrected above.
-- `tests/main.test.ts` contains no literal `ForceConfig` objects (all use
-  `{ ...DEFAULT_FORCE_CONFIG }` spread), so it needs **no** key additions in
-  Step 1 — only the slider-count changes in Step 5.
-- No Rust-side changes; no schema changes; `docs/ARCHITECTURE.md` unaffected
-  (frontend-only feature — no update required per project doc-sync rule since
-  no crate/module/CLI surface changes).
+- Open a `.gramps` file in the visualization app.
+- Toggle freeze: verify button text/color changes and blue border appears.
+- Drag a node while frozen: verify only the dragged node moves; others stay still.
+- Select nodes while frozen: verify no visual movement (selection forces suspended).
+- Unfreeze: verify simulation resumes and nodes settle normally.
+- Freeze, then click Reset: verify layout resets and freeze is released.
+- Freeze, then change family-group filter: verify filter applies and freeze is released.
+- Drag a node while frozen, unfreeze: verify dragged node stays at its dragged position (pinned) until Reset is clicked.
