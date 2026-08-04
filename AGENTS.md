@@ -213,3 +213,5 @@ cargo clippy --all-targets --all-features -- -D warnings
 - Tests cover: normal cases, empty/null edge cases, error conditions, type shape existence, and validation state transitions.
 - Doc comments use `///` with `# Examples` for public API, `//` for internal notes.
 - Procedural generators (names, places) take `&mut impl Rng` explicitly — no global state.
+- Update `AGENTS.md`, `README.md`, and `docs/ARCHITECTURE.md` when adding or removing
+  crates, modules, or CLI commands to keep documentation in sync with the codebase.
