@@ -543,12 +543,16 @@ describe('applyForceConfig roundtrip', () => {
       spouseStrength: 0.8,
       parentChildStrength: 0.5,
       repelStrength: 0,
+      selectedAttractStrength: 0,
+      unselectedAttractStrength: 0,
     };
     const config2: ForceConfig = {
       generationPull: 1.5,
       spouseStrength: 0.2,
       parentChildStrength: 0.9,
       repelStrength: 0,
+      selectedAttractStrength: 0,
+      unselectedAttractStrength: 0,
     };
 
     // Register forces with config1
@@ -584,7 +588,7 @@ describe('applyForceConfig roundtrip', () => {
     const sim = d3.forceSimulation<SimNode>([]);
     createSimulationForces(sim, DEFAULT_FORCE_CONFIG, () => 0, [], [], 800, 600, () => new Set<string>());
 
-    const config: ForceConfig = { generationPull: 0.3, spouseStrength: 0.8, parentChildStrength: 0.5, repelStrength: 1.5 };
+    const config: ForceConfig = { generationPull: 0.3, spouseStrength: 0.8, parentChildStrength: 0.5, repelStrength: 1.5, selectedAttractStrength: 0, unselectedAttractStrength: 0 };
     applyForceConfig(sim, config, () => 0);
 
     const repel = sim.force('selection-repel') as any;
@@ -628,6 +632,8 @@ describe('createSimulationForces', () => {
       spouseStrength: 0.6,
       parentChildStrength: 0.7,
       repelStrength: 0,
+      selectedAttractStrength: 0,
+      unselectedAttractStrength: 0,
     };
     const sim = d3.forceSimulation<SimNode>([]);
     createSimulationForces(sim, config, () => 0, [], [], 800, 600, () => new Set<string>());
@@ -678,7 +684,7 @@ describe('restartSimulation', () => {
     controller.setFamilyGroupFilter(1);
 
     // Apply a non-default config — should not throw
-    const testConfig: ForceConfig = { generationPull: 0.5, spouseStrength: 0.5, parentChildStrength: 0.5, repelStrength: 0 };
+    const testConfig: ForceConfig = { generationPull: 0.5, spouseStrength: 0.5, parentChildStrength: 0.5, repelStrength: 0, selectedAttractStrength: 0, unselectedAttractStrength: 0 };
     expect(() => {
       controller.setForceConfig(testConfig);
     }).not.toThrow();
