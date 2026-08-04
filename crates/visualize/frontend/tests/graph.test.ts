@@ -16,6 +16,7 @@ import {
   computeGenerationSpacing,
   createSimulationForces,
   applyForceConfig,
+  createSelectionRepelForce,
   renderGraph,
 } from '../src/graph';
 import type { SimNode } from '../src/graph';
@@ -658,6 +659,228 @@ describe('restartSimulation', () => {
 
     controller.destroy();
     document.body.removeChild(container);
+  });
+});
+
+describe('createSelectionRepelForce', () => {
+  it('initializes with strength 0 and returns it via getter', () => {
+    const force = createSelectionRepelForce(() => new Set<string>());
+    expect(force.strength()).toBe(0);
+  });
+
+  it('strength setter returns the force for chaining', () => {
+    const force = createSelectionRepelForce(() => new Set<string>());
+    const result = force.strength(1.5);
+    expect(result).toBe(force);
+  });
+
+  it('strength getter returns the value set by the setter', () => {
+    const force = createSelectionRepelForce(() => new Set<string>());
+    force.strength(2);
+    expect(force.strength()).toBe(2);
+  });
+
+  it('is a d3.Force with initialize and tick callable', () => {
+    const force = createSelectionRepelForce(() => new Set<string>());
+    expect(typeof force.initialize).toBe('function');
+    expect(typeof force.strength).toBe('function');
+  });
+
+  it('does nothing when no nodes are selected (empty set)', () => {
+    const nodes: SimNode[] = [
+      { handle: 'p1', name: 'A', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0 },
+      { handle: 'p2', name: 'B', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'female', family_group: 0, generation: 0 },
+    ];
+    const force = createSelectionRepelForce(() => new Set<string>());
+    force.initialize(nodes);
+    force.strength(1);
+    force(0.5);
+    // Velocities should remain undefined (or 0) since no pairs
+    expect(nodes[0].vx).toBeUndefined();
+    expect(nodes[1].vy).toBeUndefined();
+  });
+
+  it('does nothing when all nodes are selected', () => {
+    const nodes: SimNode[] = [
+      { handle: 'p1', name: 'A', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0 },
+      { handle: 'p2', name: 'B', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'female', family_group: 0, generation: 0 },
+    ];
+    const force = createSelectionRepelForce(() => new Set<string>(['p1', 'p2']));
+    force.initialize(nodes);
+    force.strength(1);
+    force(0.5);
+    expect(nodes[0].vx).toBeUndefined();
+    expect(nodes[1].vy).toBeUndefined();
+  });
+
+  it('does nothing when only one node exists and it is selected (no unselected)', () => {
+    const nodes: SimNode[] = [
+      { handle: 'p1', name: 'A', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0 },
+    ];
+    const force = createSelectionRepelForce(() => new Set<string>(['p1']));
+    force.initialize(nodes);
+    force.strength(1);
+    force(0.5);
+    expect(nodes[0].vx).toBeUndefined();
+  });
+
+  it('repels selected node away from unselected node (direction test)', () => {
+    // Selected at (0,0), unselected at (100,0)
+    const nodes: SimNode[] = [
+      { handle: 'sel', name: 'S', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0, x: 0, y: 0, vx: 0, vy: 0 },
+      { handle: 'unsel', name: 'U', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'female', family_group: 0, generation: 0, x: 100, y: 0, vx: 0, vy: 0 },
+    ];
+    const force = createSelectionRepelForce(() => new Set<string>(['sel']));
+    force.initialize(nodes);
+    force.strength(1);
+    force(1); // alpha = 1
+
+    // Selected node should move left (negative vx), unselected should move right (positive vx)
+    expect(nodes[0].vx!).toBeLessThan(0);
+    expect(nodes[1].vx!).toBeGreaterThan(0);
+    // vy should be unchanged (both on same y)
+    expect(nodes[0].vy).toBe(0);
+    expect(nodes[1].vy).toBe(0);
+  });
+
+  it('applies symmetric impulses (equal magnitude, opposite direction)', () => {
+    const nodes: SimNode[] = [
+      { handle: 'sel', name: 'S', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0, x: 0, y: 0, vx: 0, vy: 0 },
+      { handle: 'unsel', name: 'U', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'female', family_group: 0, generation: 0, x: 100, y: 0, vx: 0, vy: 0 },
+    ];
+    const force = createSelectionRepelForce(() => new Set<string>(['sel']));
+    force.initialize(nodes);
+    force.strength(1);
+    force(1);
+
+    // With 1 selected and 1 unselected, division by max(1,N) means each gets the full impulse
+    // so magnitudes should be equal
+    expect(Math.abs(nodes[0].vx!)).toBeCloseTo(Math.abs(nodes[1].vx!), 5);
+  });
+
+  it('handles multiple selected nodes among many unselected', () => {
+    const nodes: SimNode[] = [
+      { handle: 's1', name: 'S1', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0, x: 0, y: 0, vx: 0, vy: 0 },
+      { handle: 's2', name: 'S2', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'female', family_group: 0, generation: 0, x: 10, y: 10, vx: 0, vy: 0 },
+      { handle: 'u1', name: 'U1', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0, x: 100, y: 0, vx: 0, vy: 0 },
+      { handle: 'u2', name: 'U2', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'female', family_group: 0, generation: 0, x: 0, y: 100, vx: 0, vy: 0 },
+    ];
+    const force = createSelectionRepelForce(() => new Set<string>(['s1', 's2']));
+    force.initialize(nodes);
+    force.strength(1);
+    force(1);
+
+    // Selected nodes should have non-zero velocities (repelled away from unselected)
+    expect(nodes[0].vx).not.toBe(0);
+    expect(nodes[0].vy).not.toBe(0);
+    expect(nodes[1].vx).not.toBe(0);
+    expect(nodes[1].vy).not.toBe(0);
+
+    // Unselected nodes should also have non-zero velocities
+    expect(nodes[2].vx).not.toBe(0);
+    expect(nodes[3].vy).not.toBe(0);
+  });
+
+  it('handles coincident nodes without producing NaN', () => {
+    const nodes: SimNode[] = [
+      { handle: 'sel', name: 'S', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0, x: 0, y: 0, vx: 0, vy: 0 },
+      { handle: 'unsel', name: 'U', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'female', family_group: 0, generation: 0, x: 0, y: 0, vx: 0, vy: 0 },
+    ];
+    const force = createSelectionRepelForce(() => new Set<string>(['sel']));
+    force.initialize(nodes);
+    force.strength(1);
+    force(1);
+
+    // Velocities should be finite (no NaN from division by zero)
+    expect(Number.isFinite(nodes[0].vx)).toBe(true);
+    expect(Number.isFinite(nodes[0].vy)).toBe(true);
+    expect(Number.isFinite(nodes[1].vx)).toBe(true);
+    expect(Number.isFinite(nodes[1].vy)).toBe(true);
+  });
+
+  it('strength of 0 results in no velocity change', () => {
+    const nodes: SimNode[] = [
+      { handle: 'sel', name: 'S', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0, x: 0, y: 0, vx: 0, vy: 0 },
+      { handle: 'unsel', name: 'U', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'female', family_group: 0, generation: 0, x: 100, y: 0, vx: 0, vy: 0 },
+    ];
+    const force = createSelectionRepelForce(() => new Set<string>(['sel']));
+    force.initialize(nodes);
+    force.strength(0);
+    force(1);
+
+    expect(nodes[0].vx).toBe(0);
+    expect(nodes[1].vx).toBe(0);
+  });
+
+  it('resets the warning sentinel on initialize', () => {
+    // Test that warned flag is reset on re-initialize
+    const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const force = createSelectionRepelForce(() => new Set<string>(['p1', 'p2']));
+
+    // Create many nodes to exceed the pair limit
+    const manyNodes: SimNode[] = [];
+    for (let i = 0; i < 200; i++) {
+      manyNodes.push({
+        handle: `p${i}`,
+        name: `P${i}`,
+        birth_date: null,
+        death_date: null,
+        birth_year: null,
+        is_imputed: false,
+        gender: 'male',
+        family_group: 0,
+        generation: 0,
+        x: i,
+        y: 0,
+        vx: 0,
+        vy: 0,
+      });
+    }
+
+    // First initialize with 2 selected + 200 nodes → 2*199 = 398 pairs, under limit
+    // Actually need 2*199 > 10000... Let me make it so pair count exceeds limit
+    // 2 selected * 9998 unselected = 19996 > 10000
+    force.initialize(manyNodes.slice(0, 2));
+    force.strength(1);
+    force(1);
+    // Should not warn with only 2 nodes
+    expect(consoleSpy).not.toHaveBeenCalled();
+
+    // Now re-initialize with enough nodes to trigger warning
+    // Make 1000 nodes: 2 selected * 998 unselected = 1996 — still under 10000
+    // Need 2 * 5000 = 10000 — just at limit, not over
+    // Need 2 * 5001 = 10002 — over limit
+    const bigNodes: SimNode[] = [];
+    for (let i = 0; i < 5002; i++) {
+      bigNodes.push({
+        handle: `q${i}`,
+        name: `Q${i}`,
+        birth_date: null,
+        death_date: null,
+        birth_year: null,
+        is_imputed: false,
+        gender: 'male',
+        family_group: 0,
+        generation: 0,
+        x: i,
+        y: 0,
+        vx: 0,
+        vy: 0,
+      });
+    }
+    force.initialize(bigNodes);
+    force(1);
+    expect(consoleSpy).toHaveBeenCalledTimes(1);
+    expect(consoleSpy.mock.calls[0][0]).toContain('Skipping tick');
+
+    // Re-initialize should reset the sentinel
+    force.initialize(manyNodes);
+    consoleSpy.mockClear();
+    force(1);
+    // Should not warn again since now under limit
+    expect(consoleSpy).not.toHaveBeenCalled();
+
+    consoleSpy.mockRestore();
   });
 });
 

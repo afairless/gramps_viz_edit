@@ -81,6 +81,12 @@ const COLLIDE_RADIUS = 18;
 /** Weak X-centering only — the gen-field handles vertical placement. */
 const CENTER_STRENGTH = 0.05;
 
+/** Base repulsion constant for the selection-repel pairwise force. */
+const BASE_REPEL = 500;
+
+/** Max selected×unselected pairs before the repel force is skipped. */
+const REPEL_PAIR_LIMIT = 10_000;
+
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
@@ -302,6 +308,119 @@ export function applyForceConfig(
   if (gf) {
     (gf as d3.ForceY<SimNode>).strength(config.generationPull).y(genY);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Selection-repel custom force
+// ---------------------------------------------------------------------------
+
+/**
+ * Interface for the selection-repel custom D3 force.
+ * Exposes strength() getter/setter so callers can mutate it at runtime.
+ */
+export interface SelectionRepelForce extends d3.Force<SimNode, undefined> {
+  /** Get or set the repel multiplier in [0, 2]. */
+  strength(s: number): this;
+  strength(): number;
+  /** Initialize the force with the simulation's node array. */
+  initialize(nodes: SimNode[]): void;
+}
+
+/**
+ * Create a custom D3 force that repels selected nodes from unselected nodes
+ * (and vice versa) using pairwise Coulomb-like repulsion.
+ *
+ * The force reads the current selected set via the getter on every tick, so
+ * callers can mutate the set without restarting the simulation.
+ *
+ * @param getSelected - Callback returning the current set of selected handles.
+ * @returns A SelectionRepelForce instance.
+ */
+export function createSelectionRepelForce(
+  getSelected: () => Set<string>,
+): SelectionRepelForce {
+  let nodes: SimNode[] = [];
+  let strengthValue = 0;
+  let warned = false;
+
+  function force(tickAlpha: number): void {
+    const selected = getSelected();
+    const selCount = selected.size;
+
+    // Degenerate cases: no strength, zero selected, or all/none unselected
+    if (strengthValue === 0 || selCount === 0) return;
+
+    // Separate selected from unselected nodes
+    const selectedNodes: SimNode[] = [];
+    const unselectedNodes: SimNode[] = [];
+    for (const n of nodes) {
+      if (selected.has(n.handle)) {
+        selectedNodes.push(n);
+      } else {
+        unselectedNodes.push(n);
+      }
+    }
+
+    const unselCount = unselectedNodes.length;
+    if (unselCount === 0) return;
+
+    // O(N·M) guard: skip if too many pairs
+    const pairCount = selCount * unselCount;
+    if (pairCount > REPEL_PAIR_LIMIT) {
+      if (!warned) {
+        console.warn(
+          `[selection-repel] Skipping tick: ${pairCount} pairs exceeds limit of ${REPEL_PAIR_LIMIT}`,
+        );
+        warned = true;
+      }
+      return;
+    }
+
+    const impulseScale = strengthValue * BASE_REPEL;
+
+    for (const s of selectedNodes) {
+      for (const u of unselectedNodes) {
+        let dx = (s.x ?? 0) - (u.x ?? 0);
+        let dy = (s.y ?? 0) - (u.y ?? 0);
+        let dist = Math.sqrt(dx * dx + dy * dy);
+
+        // Tie-breaking: coincident nodes get a small random offset
+        if (dist < 1) {
+          dx = (Math.random() - 0.5);
+          dy = (Math.random() - 0.5);
+          dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+        }
+
+        const r = Math.max(1, dist);
+        const impulse = tickAlpha * impulseScale / (r * r);
+
+        // Normalise direction
+        const nx = dx / r;
+        const ny = dy / r;
+
+        // Push selected node away from unselected, divided by selected count
+        s.vx = (s.vx ?? 0) + nx * impulse / Math.max(1, selCount);
+        s.vy = (s.vy ?? 0) + ny * impulse / Math.max(1, selCount);
+
+        // Push unselected node away from selected (opposite direction), divided by unselected count
+        u.vx = (u.vx ?? 0) - nx * impulse / Math.max(1, unselCount);
+        u.vy = (u.vy ?? 0) - ny * impulse / Math.max(1, unselCount);
+      }
+    }
+  }
+
+  force.initialize = (nodeList: SimNode[]) => {
+    nodes = nodeList;
+    warned = false;
+  };
+
+  force.strength = (s?: number) => {
+    if (s === undefined) return strengthValue;
+    strengthValue = s;
+    return force;
+  };
+
+  return force as unknown as SelectionRepelForce;
 }
 
 // ---------------------------------------------------------------------------
