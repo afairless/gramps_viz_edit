@@ -713,7 +713,7 @@ async function main(): Promise<void> {
 
   // Create the stats panel and append to #app
   const appEl = document.getElementById('app');
-  const statsPanel = new StatsPanel();
+  statsPanel = new StatsPanel();
   const statsPanelEl = statsPanel.create();
   if (appEl) {
     appEl.appendChild(statsPanelEl);
