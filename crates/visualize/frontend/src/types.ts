@@ -68,6 +68,38 @@ export const DEFAULT_FORCE_CONFIG: ForceConfig = {
 };
 
 // ---------------------------------------------------------------------------
+// StatsReport types (matching gramps_reader::StatsReport over IPC)
+// ---------------------------------------------------------------------------
+
+export interface PrimaryTypeCounts {
+  people: number;
+  families: number;
+  events: number;
+  places: number;
+  sources: number;
+  citations: number;
+  repositories: number;
+  media: number;
+  notes: number;
+  tags: number;
+}
+
+export type FamilySizeDistribution = Record<string, number>;
+export type FamilyGroupDistribution = Record<string, number>;
+
+export interface StatsReport {
+  file: string;
+  counts: PrimaryTypeCounts;
+  family_size_distribution: FamilySizeDistribution;
+  family_group_distribution: FamilyGroupDistribution;
+  /** Row: group-size, Column: generation-span, Cell: group count. Unused by frontend. */
+  family_group_generation_table: Record<string, Record<string, number>>;
+  people_not_in_family: number;
+  dangling_refs: number;
+  warnings: string[];
+}
+
+// ---------------------------------------------------------------------------
 // Selection mode types
 // ---------------------------------------------------------------------------
 
