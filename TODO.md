@@ -1,129 +1,146 @@
-# Implementation Plan: Selection Repel Force
+# Implementation Plan: Selection Cluster Forces
 
-Source: `docs/research/selection-repel-force.md`
+Source: `docs/research/selection-cluster-force.md`
+
+## Overview
+
+Add two custom D3 forces — `selected-attract` and `unselected-attract` — that
+pull each subset of nodes (selected vs. unselected) toward its own centroid.
+Together with the existing `selection-repel` force, this creates two visually
+distinct clusters. All work is in `crates/visualize/frontend/`; no Rust-side
+changes are needed.
+
+**Pre-work verification** (done): `npm test` passes (197 tests, 8 files).
+
+**Per-step verify commands** (run from `crates/visualize/frontend/`):
+
+```bash
+npm test                  # vitest run — all tests must pass
+npx tsc --noEmit          # strict type-check of src/ (tsconfig excludes tests/)
+```
+
+Each step is implemented, tested, verified, and committed before the next
+begins (incremental-development workflow). No step may include code belonging
+to a later step.
+
+---
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `feat: add repelStrength to ForceConfig and defaults` | Types & defaults | `crates/visualize/frontend/src/types.ts` | Unit |
-| 2 | `feat: add Selection repel slider to Force Controls panel` | Slider UI | `crates/visualize/frontend/src/main.ts` | Unit |
-| 3 | `feat: build custom selection-repel D3 force` | Repel force function | `crates/visualize/frontend/src/graph.ts`, `crates/visualize/frontend/tests/graph.test.ts` | Unit, property-based (symmetry) |
-| 4 | `feat: register selection-repel force in simulation and thread selected set` | Force wiring | `crates/visualize/frontend/src/graph.ts`, `crates/visualize/frontend/tests/graph.test.ts` | Unit |
-| 5 | `feat: sync selected set to repel force on highlight change` | Selection sync | `crates/visualize/frontend/src/graph.ts` | Unit |
-| 6 | `feat: live-update repel strength in applyForceConfig` | Live slider feedback | `crates/visualize/frontend/src/graph.ts`, `crates/visualize/frontend/tests/graph.test.ts` | Unit |
+| 1 | `feat: extend ForceConfig with attract strength fields` | ForceConfig extension | `src/types.ts` — add `selectedAttractStrength`, `unselectedAttractStrength` to `ForceConfig` interface and `DEFAULT_FORCE_CONFIG` (both `0.00`); update the 5 literal `ForceConfig` objects in `tests/graph.test.ts` (`config1`, `config2`, two `config` literals, `testConfig`) so the build stays green | unit |
+| 2 | `feat: add selected-attract centroid force` | Selected-attract force | `src/graph.ts` — export `AttractForce` interface (extends `d3.Force<SimNode, undefined>` with `strength()` getter/setter + `initialize()`); export `createSelectedAttractForce(getSelected)` implementing the centroid-spring contract (no-op if strength 0, selected < 2, or no unselected complement) | unit |
+| 3 | `feat: add unselected-attract centroid force` | Unselected-attract force | `src/graph.ts` — export `createUnselectedAttractForce(getSelected)`, mirror of selected-attract operating on the unselected complement (no-op if no selected nodes exist) | unit |
+| 4 | `feat: register attract forces in simulation config` | Force registration + runtime mutation | `src/graph.ts` — register `'selected-attract'` and `'unselected-attract'` in `createSimulationForces()` with strengths from config; mutate both via `AttractForce` casts in `applyForceConfig()` (guarded by `if (force)`) | unit |
+| 5 | `feat: add attract sliders to force panel` | Force panel sliders | `src/main.ts` — append `{ key: 'selectedAttractStrength', label: 'Selected attract' }` and `{ key: 'unselectedAttractStrength', label: 'Unselected attract' }` to the `sliders` array in `renderForcePanel()`; update `tests/main.test.ts` slider-count assertions (4 → 6: `sliders.length`, `sliderRows.length`, `values.length`) and the test name `'has four sliders…'` → `'has six sliders…'` (literal configs there spread `DEFAULT_FORCE_CONFIG`, so no key additions needed) | unit |
+| 6 | `test: cover attract forces with unit tests` | Attract-force test suite | `tests/graph.test.ts` — follow the `createSelectionRepelForce` pattern: strength getter/setter + initialize + is-a-`d3.Force`; centroid direction tests (3 selected at (0,0),(100,0),(0,100), tick with strength 1, alpha 1); edge cases (empty set, single selected, all selected, no unselected, strength 0 → no velocity change); unselected-attract mirror; registration in `createSimulationForces` (default strength 0); `applyForceConfig` mutation without restart | unit |
 
 ---
 
-## Step details
+## Step detail
 
-### Step 1 — Types & defaults (`types.ts`)
+### Step 1 — `ForceConfig` extension (types.ts)
 
-**Deliverables:**
+- Add to `ForceConfig` interface:
+  - `selectedAttractStrength: number;` (doc: multiplier for selected-attract centroid pull)
+  - `unselectedAttractStrength: number;` (doc: multiplier for unselected-attract centroid pull)
+- Add both to `DEFAULT_FORCE_CONFIG` with value `0.00` (off by default).
+- **Same commit:** update the 5 literal `ForceConfig` objects in
+  `tests/graph.test.ts` (TypeScript errors otherwise — new keys are required):
+  - `applyForceConfig roundtrip`: `config1`, `config2`, and the mutation-test `config`
+  - `createSimulationForces` "uses the provided config values": `config`
+  - `restartSimulation`: `testConfig`
+- Optionally extend the `DEFAULT_FORCE_CONFIG` describe block in `graph.test.ts`
+  to assert the two new keys exist (also done in Step 6's key-property test).
 
-- Add `repelStrength: number` to `ForceConfig` interface
-- Add `repelStrength: 0.00` to `DEFAULT_FORCE_CONFIG`
+### Step 2 — `createSelectedAttractForce` (graph.ts)
 
-**Test updates:**
+- Export `AttractForce` interface (needed by Step 4):
+  `extends d3.Force<SimNode, undefined>` with `strength(s: number): this`,
+  `strength(): number`, `initialize(nodes: SimNode[]): void`.
+- Export `createSelectedAttractForce(getSelected: () => Set<string>): AttractForce`:
+  - Closure state: `nodes: SimNode[]`, `strengthValue = 0`.
+  - Tick: early-return if `strengthValue === 0`, `selected.size < 2`, or no
+    unselected complement. Partition nodes; compute centroid of selected;
+    apply `n.vx += (cx - n.x) * tickAlpha * strengthValue` per selected node.
+  - `force.initialize` stores node list; `force.strength` getter/setter with
+    chaining; return `force as unknown as AttractForce`.
+- Tests for this step's behavior live in Step 6 (keep the per-step loop green
+  by verifying with existing tests + `tsc`; the full unit suite is step 6).
 
-- `DEFAULT_FORCE_CONFIG has all three keys` → change to four keys
-- Add `repelStrength` default value and range check
+### Step 3 — `createUnselectedAttractForce` (graph.ts)
 
-**How to test:** TypeScript compilation passes; `DEFAULT_FORCE_CONFIG.repelStrength === 0.00`.
+- Mirror of Step 2, operating on the unselected complement: partition into
+  unselected/selected, early-return if `selected.size === 0` (no "other
+  cluster"), compute the **unselected** centroid, apply impulse to unselected
+  nodes only.
+
+### Step 4 — Registration + `applyForceConfig` (graph.ts)
+
+- In `createSimulationForces()`, after `'selection-repel'`:
+
+  ```typescript
+  .force('selected-attract', createSelectedAttractForce(getSelected).strength(config.selectedAttractStrength))
+  .force('unselected-attract', createUnselectedAttractForce(getSelected).strength(config.unselectedAttractStrength))
+  ```
+
+- In `applyForceConfig()`:
+
+  ```typescript
+  const selAttract = simulation.force('selected-attract') as AttractForce | undefined;
+  if (selAttract) selAttract.strength(config.selectedAttractStrength);
+  const unselAttract = simulation.force('unselected-attract') as AttractForce | undefined;
+  if (unselAttract) unselAttract.strength(config.unselectedAttractStrength);
+  ```
+
+- Note: D3 v7 `simulation.force()` returns the base `Force` type; the cast is
+  safe because `createSimulationForces` created these forces.
+
+### Step 5 — Force panel sliders (main.ts) + main.test.ts assertions
+
+- Append the two entries to the `sliders` array in `renderForcePanel()` (the
+  existing slider loop and Restore-defaults button handle them automatically;
+  both default to 0.00).
+- **Same commit:** update `tests/main.test.ts`:
+  - `expect(sliders.length).toBe(4)` → `.toBe(6)` (restore-defaults test)
+  - `expect(sliderRows.length).toBe(4)` → `.toBe(6)` (six-sliders test)
+  - `expect(values.length).toBe(4)` → `.toBe(6)` (six-sliders test)
+  - Test name `'has four sliders with labels and value spans'` →
+    `'has six sliders with labels and value spans'`; extend label assertions
+    to cover `Selected attract` / `Unselected attract`.
+
+### Step 6 — Attract-force unit tests (graph.test.ts)
+
+Follow the `createSelectionRepelForce` suite:
+
+1. **Properties:** strength defaults to 0; setter chains and getter returns
+   the set value; `initialize` and tick are callable (`is a d3.Force`).
+2. **Centroid direction:** selected nodes at (0,0), (100,0), (0,100); tick
+   with strength 1, alpha 1; centroid ≈ (33.3, 33.3):
+   - (100,0): `vx < 0`, `vy > 0`
+   - (0,100): `vx > 0`, `vy < 0`
+   - (0,0): `vx > 0`, `vy > 0`
+3. **Edge cases:** empty selected set; single selected; all nodes selected;
+   no unselected complement; strength 0 — all no-ops (velocities unchanged).
+4. **Unselected mirror:** selected nodes stay stationary; unselected cluster
+   toward their centroid.
+5. **Registration:** both forces present after `createSimulationForces` with
+   default strength 0.
+6. **`applyForceConfig` mutation:** config change updates both forces' strength
+   without a simulation restart.
+7. Extend the `DEFAULT_FORCE_CONFIG` describe block: `'has all four keys'` →
+   `'has all six keys'` (this test lives in **graph.test.ts**, not main.test.ts),
+   asserting `selectedAttractStrength` / `unselectedAttractStrength` exist;
+   both default to `0.00` (mirroring the `repelStrength` default test).
 
 ---
 
-### Step 2 — Slider UI (`main.ts`)
+## Notes / plan corrections
 
-**Deliverables:**
-
-- Add `{ key: 'repelStrength', label: 'Selection repel' }` to the `sliders` array in `renderForcePanel()`
-- "Restore defaults" button already iterates `sliders` array, so it automatically resets `repelStrength` to 0.00
-
-**Test updates:**
-
-- `has three sliders` → assert four sliders exist
-- `restore defaults` test already iterates all sliders — it should still pass (fourth slider is reset to 0.00)
-- Restore defaults test's `sliders.length === 3` assertion → change to 4
-
-**How to test:** Open Force Controls panel; fourth slider "Selection repel" is visible and responds to drag. Clicking "Restore defaults" resets it to 0.00.
-
----
-
-### Step 3 — Repel force function (`graph.ts`)
-
-**Deliverables:**
-
-- Export `SelectionRepelForce` interface extending `d3.Force<SimNode, undefined>` with `strength()` getter/setter
-- Export `createSelectionRepelForce(getSelected: () => Set<string>): SelectionRepelForce`
-- Implement pairwise repulsion: for each selected↔unselected pair, compute impulse `alpha * strength * BASE_REPEL / r²` where `r = max(1, distance)`
-- Divide impulse by `max(1, selectedCount)` for selected nodes, `max(1, unselectedCount)` for unselected nodes (symmetric)
-- **O(N·M) guard:** If `selectedCount * unselectedCount > 10_000`, skip the force for that tick. Log a `console.warn` at most once per simulation restart (use a boolean sentinel).
-- **Tie-breaking:** If distance < 1px, apply a small random offset (±0.5px in both x/y) then compute force normally
-- `BASE_REPEL = 500` constant (module-level, not exported)
-- Degenerate cases: zero or one selected nodes → no-op; all nodes selected or none unselected → no-op
-
-**Test updates:**
-
-- New tests: force registration & strength default, pairwise repulsion math (direction + symmetry), edge cases (empty selected set, all selected, coincident nodes, single selected node among many unselected)
-
-**How to test:** Unit tests with synthetic simulation and known positions. Verify velocity direction and symmetry.
-
----
-
-### Step 4 — Force wiring (`graph.ts`)
-
-**Deliverables:**
-
-- Add `selectedSet` variable to `renderGraph` closure alongside `highlighted` (line ~477)
-- Add `getSelected: () => Set<string>` parameter to `createSimulationForces()`
-- In `restartSimulation()`, pass `() => selectedSet` as the getter to `createSimulationForces()`
-- Register the `selection-repel` force: `.force('selection-repel', createSelectionRepelForce(getSelected).strength(config.repelStrength))`
-- Export `createSelectionRepelForce` from `graph.ts` (already exported in Step 3)
-
-**Test updates:**
-
-- Update all existing `createSimulationForces` callers in `graph.test.ts` (lines 545, 577, 596) to pass a noop getter `() => new Set<string>()`
-- `registers all six named forces` → change to seven forces and assert `selection-repel` exists with strength 0
-
-**How to test:** Select some nodes. Verify no runtime error (the force is registered even at strength 0). Increase repel slider; selected nodes should move apart from unselected.
-
----
-
-### Step 5 — Selection sync (`graph.ts`)
-
-**Deliverables:**
-
-- In the `setHighlighted` method of the `GraphController`, add `selectedSet = handles;` alongside the existing `highlighted = handles;`
-
-**How to test:** Select a node; the force begins repelling on the next tick. Deselect; repulsion stops. No simulation restart is triggered.
-
----
-
-### Step 6 — Live slider feedback (`graph.ts`)
-
-**Deliverables:**
-
-- In `applyForceConfig()`, look up the `selection-repel` force via `simulation.force('selection-repel')`, cast to `SelectionRepelForce`, and call `.strength(config.repelStrength)`
-
-**Test updates:**
-
-- Add test: register simulation with `createSimulationForces`, call `applyForceConfig` with `repelStrength = 1.5`, assert `selection-repel` force's strength returns 1.5
-
-**How to test:** With nodes selected, drag the repel slider. Nodes visibly separate in real time. Set slider back to 0; separation stops.
-
----
-
-## Files changed
-
-| File | Changes |
-|---|---|
-| `crates/visualize/frontend/src/types.ts` | Add `repelStrength` to `ForceConfig` and `DEFAULT_FORCE_CONFIG` |
-| `crates/visualize/frontend/src/main.ts` | Add slider entry to `renderForcePanel()` |
-| `crates/visualize/frontend/src/graph.ts` | `createSelectionRepelForce()`, `createSimulationForces()` getter param, `setHighlighted()` sync, `applyForceConfig()` mutation |
-| `crates/visualize/frontend/tests/graph.test.ts` | Existing callers updated, new tests for repel force math, wiring, and live feedback |
-| `crates/visualize/frontend/tests/main.test.ts` | Slider count assertions updated (3→4) |
-
-## Reference
-
-- Full design rationale: `docs/research/selection-repel-force.md`
-- Existing force simulation API: `crates/visualize/frontend/src/graph.ts` — `createSimulationForces`, `applyForceConfig`, `renderGraph`
-- Existing test patterns: `crates/visualize/frontend/tests/graph.test.ts`, `crates/visualize/frontend/tests/main.test.ts`
+- The research plan attributes the `'has all four keys'` test to
+  `tests/main.test.ts`; it actually lives in `tests/graph.test.ts`. Corrected above.
+- `tests/main.test.ts` contains no literal `ForceConfig` objects (all use
+  `{ ...DEFAULT_FORCE_CONFIG }` spread), so it needs **no** key additions in
+  Step 1 — only the slider-count changes in Step 5.
+- No Rust-side changes; no schema changes; `docs/ARCHITECTURE.md` unaffected
+  (frontend-only feature — no update required per project doc-sync rule since
+  no crate/module/CLI surface changes).
