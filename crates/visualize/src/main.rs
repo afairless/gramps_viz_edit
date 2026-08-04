@@ -38,7 +38,7 @@ fn main() {
                 }
                 Ok(())
             })
-            .invoke_handler(tauri::generate_handler![load_graph, export_selections])
+            .invoke_handler(tauri::generate_handler![load_graph, export_selections, get_stats])
             .run(tauri::generate_context!())
             .expect("error while running gramps-gen-visualize");
     }
@@ -67,4 +67,11 @@ fn export_selections(
         .map_err(|e| format!("Serialization error: {}", e))?;
     std::fs::write(&path, &export).map_err(|e| format!("Cannot write to '{}': {}", path, e))?;
     Ok(path)
+}
+
+/// Tauri IPC command: return summary statistics for a `.gramps` file.
+#[cfg(feature = "visualize")]
+#[tauri::command]
+fn get_stats(path: &str) -> Result<gramps_reader::StatsReport, String> {
+    visualize::get_stats(path)
 }

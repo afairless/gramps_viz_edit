@@ -67,6 +67,21 @@ pub fn load_graph_data(
     Ok(gd)
 }
 
+/// Read a `.gramps` file and return summary statistics.
+///
+/// This is a pure function (no Tauri dependency) that re-reads the file
+/// from disk and runs the streaming `count_gramps_xml` pass. The file
+/// content is typically already cached by the OS after the initial
+/// `load_graph_data` call, so the second read is fast.
+///
+/// Returns a user-friendly error string on failure.
+pub fn get_stats(path: &str) -> Result<gramps_reader::StatsReport, String> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| format!("Cannot read file '{}': {}", path, e))?;
+    gramps_reader::count_gramps_xml(&content)
+        .map_err(|e| format!("Failed to parse Gramps XML: {}", e))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -349,5 +364,72 @@ mod tests {
         assert_eq!(p1.birth_date.as_deref(), Some("1845-01-01"));
         // Death comes only from the eventref (no inline death).
         assert_eq!(p1.death_date.as_deref(), Some("1920-03-01"));
+    }
+
+    // ------------------------------------------------------------------
+    // get_stats tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn get_stats_nonexistent_file() {
+        let result = get_stats("/nonexistent/path.gramps");
+        match result {
+            Err(msg) => assert!(msg.contains("Cannot read file"), "got: {}", msg),
+            Ok(_) => panic!("expected error for nonexistent file"),
+        }
+    }
+
+    #[test]
+    fn get_stats_malformed_xml() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "<database><person></database>").unwrap();
+        let path = tmp.path().with_extension("gramps");
+        std::fs::rename(tmp.path(), &path).unwrap();
+
+        let result = get_stats(path.to_str().unwrap());
+        match result {
+            Err(msg) => assert!(msg.contains("Failed to parse Gramps XML"), "got: {}", msg),
+            Ok(_) => panic!("expected error for malformed XML"),
+        }
+    }
+
+    #[test]
+    fn get_stats_valid_file() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <people>
+    <person handle="p1"/>
+  </people>
+</database>"#;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "{}", xml).unwrap();
+        let path = tmp.path().with_extension("gramps");
+        std::fs::rename(tmp.path(), &path).unwrap();
+
+        let report = get_stats(path.to_str().unwrap()).unwrap();
+        assert_eq!(report.counts.people, 1);
+        // No families, so people-not-in-family should be 1
+        assert_eq!(report.people_not_in_family, 1);
+    }
+
+    #[test]
+    fn get_stats_empty_file() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "").unwrap();
+        let path = tmp.path().with_extension("gramps");
+        std::fs::rename(tmp.path(), &path).unwrap();
+
+        let report = get_stats(path.to_str().unwrap()).unwrap();
+        assert_eq!(report, gramps_reader::StatsReport::default());
     }
 }
