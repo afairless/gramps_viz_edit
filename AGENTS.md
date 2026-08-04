@@ -86,8 +86,10 @@ gramps_viz_edit/
 │       │   └── commands/
 │       │       ├── mod.rs
 │       │       ├── generate.rs   # Full 5-stage pipeline
+│       │       ├── schema.rs     # Schema list/download subcommands
 │       │       ├── stats/        # Streaming count & report (stats command)
 │       │       ├── validate.rs   # Minimal XML structure check
+│       │       ├── visualize.rs  # Spawns gramps-gen-visualize binary
 │       │       └── extract_schema.rs # Stub
 │       └── tests/
 │           ├── e2e.rs              # Subprocess-based E2E tests
@@ -195,11 +197,13 @@ cargo clippy --all-targets --all-features -- -D warnings
 | Dependency | Use |
 |---|---|
 | `serde` / `serde_json` | Schema parsing in build.rs |
-| `quick-xml` | XML serialization in output crate |
+| `quick-xml` | XML serialization (output, cli, gramps-reader crates) |
 | `clap` (derive) | CLI argument parsing |
 | `serde_yaml` | YAML scenario file parsing |
 | `rand` | RNG for procedural generation |
 | `uuid` (v4) | Auto-generated handles |
+| `log` / `env_logger` | Logging in CLI crate |
+| `ureq` | HTTP requests for `schema download` |
 
 ## Code Conventions
 

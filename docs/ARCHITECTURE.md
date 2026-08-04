@@ -85,6 +85,7 @@ A **Python extractor** (`extract/extract_schema.py`) introspects Gramps Python c
 │  gramps-gen generate ──────── 5-stage pipeline                 │
 │  gramps-gen validate ──────── XML structure check              │
 │  gramps-gen stats ──────────── File summary                    │
+│  gramps-gen schema list/download ── Schema management          │
 │  gramps-gen visualize ──────── Spawns gramps-gen-visualize     │
 │  gramps-gen extract-schema ── Stub                              │
 └────────────────────────────────────────────────────────────────┘
@@ -741,6 +742,7 @@ cargo test -p cli --test e2e    # E2E tests
 | `clap` (derive) | cli | CLI argument parsing |
 | `serde_yaml` | cli | YAML scenario parsing |
 | `log` / `env_logger` | cli | Logging |
+| `ureq` | cli | HTTP requests for `schema download` |
 
 ---
 

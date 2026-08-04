@@ -21,7 +21,7 @@ Or install globally:
 cargo install --path .
 
 # With visualization (gramps-gen-visualize, requires system deps - see below)
-cargo install -p visualize -F visualize --path .
+cargo install -p visualize -F visualize --path crates/visualize
 ```
 
 ## Usage
@@ -135,16 +135,6 @@ gramps-gen stats output.gramps
 gramps-gen stats --json output.gramps
 ```
 
-### Inspect a `.gramps` file
-
-```bash
-# Human-readable summary
-cargo run --release -- stats output.gramps
-
-# Machine-readable JSON
-cargo run --release -- stats --json output.gramps
-```
-
 ### Visualize a `.gramps` file
 
 Requires the `visualize` feature and system dependencies (see [Build Dependencies](#build-dependencies) below).
@@ -256,7 +246,7 @@ Both binaries are installed to the same directory by:
 
 ```bash
 cargo install --path .
-cargo install -p visualize -F visualize --path .
+cargo install -p visualize -F visualize --path crates/visualize
 ```
 
 ### Data Flow
