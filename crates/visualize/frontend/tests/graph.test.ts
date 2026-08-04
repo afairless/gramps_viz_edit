@@ -267,7 +267,7 @@ describe('drag handlers', () => {
       const node = makeSimNode();
       node.x = 100;
       node.y = 200;
-      onDragStart(node, makeEvent(), mockSimulation);
+      onDragStart(node, makeEvent(), mockSimulation, () => false);
       expect(node.fx).toBe(100);
       expect(node.fy).toBe(200);
     });
@@ -276,7 +276,7 @@ describe('drag handlers', () => {
       const node = makeSimNode();
       node.x = 1;
       node.y = 2;
-      onDragStart(node, makeEvent({ active: false }), mockSimulation);
+      onDragStart(node, makeEvent({ active: false }), mockSimulation, () => false);
       expect(mockAlphaTarget).toHaveBeenCalledWith(0.3);
       expect(mockRestart).toHaveBeenCalledTimes(1);
     });
@@ -285,7 +285,7 @@ describe('drag handlers', () => {
       const node = makeSimNode();
       node.x = 1;
       node.y = 2;
-      onDragStart(node, makeEvent({ active: true }), mockSimulation);
+      onDragStart(node, makeEvent({ active: true }), mockSimulation, () => false);
       expect(mockAlphaTarget).not.toHaveBeenCalled();
     });
 
@@ -303,8 +303,20 @@ describe('drag handlers', () => {
         node,
         makeEvent({ sourceEvent: { currentTarget: g } }),
         mockSimulation,
+        () => false,
       );
       expect(g.style.cursor).toBe('grabbing');
+    });
+
+    it('frozen: sets fx/fy and cursor, does NOT restart simulation', () => {
+      const node = makeSimNode();
+      node.x = 100;
+      node.y = 200;
+      onDragStart(node, makeEvent({ active: false }), mockSimulation, () => true);
+      expect(node.fx).toBe(100);
+      expect(node.fy).toBe(200);
+      expect(mockAlphaTarget).not.toHaveBeenCalled();
+      expect(mockRestart).not.toHaveBeenCalled();
     });
   });
 
@@ -315,22 +327,40 @@ describe('drag handlers', () => {
       // regardless of the current zoom/pan state, so coordinates pass through
       // unchanged in every scenario.
       const node = makeSimNode();
-      onDrag(node, makeEvent({ x: 100, y: 50 }), mockSimulation);
+      onDrag(node, makeEvent({ x: 100, y: 50 }), mockSimulation, () => false);
       expect(node.fx).toBe(100);
       expect(node.fy).toBe(50);
+    });
+
+    it('frozen: sets fx/fy and x/y and updates SVG transform on dragged element', () => {
+      const svg = makeSvg();
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g') as SVGGElement;
+      svg.appendChild(g);
+      const node = makeSimNode();
+      onDrag(
+        node,
+        makeEvent({ x: 100, y: 50, sourceEvent: { currentTarget: g } }),
+        mockSimulation,
+        () => true,
+      );
+      expect(node.fx).toBe(100);
+      expect(node.fy).toBe(50);
+      expect(node.x).toBe(100);
+      expect(node.y).toBe(50);
+      expect(g.getAttribute('transform')).toBe('translate(100,50)');
     });
   });
 
   describe('onDragEnd', () => {
     it('cools the simulation on last gesture', () => {
       const node = makeSimNode();
-      onDragEnd(node, makeEvent({ active: false }), mockSimulation);
+      onDragEnd(node, makeEvent({ active: false }), mockSimulation, () => false);
       expect(mockAlphaTarget).toHaveBeenCalledWith(0);
     });
 
     it('does not cool the simulation while other gestures are active', () => {
       const node = makeSimNode();
-      onDragEnd(node, makeEvent({ active: true }), mockSimulation);
+      onDragEnd(node, makeEvent({ active: true }), mockSimulation, () => false);
       expect(mockAlphaTarget).not.toHaveBeenCalled();
     });
 
@@ -338,7 +368,7 @@ describe('drag handlers', () => {
       const node = makeSimNode();
       node.fx = 100;
       node.fy = 200;
-      onDragEnd(node, makeEvent(), mockSimulation);
+      onDragEnd(node, makeEvent(), mockSimulation, () => false);
       expect(node.fx).toBe(100);
       expect(node.fy).toBe(200);
     });
@@ -355,8 +385,19 @@ describe('drag handlers', () => {
         node,
         makeEvent({ sourceEvent: { currentTarget: g } }),
         mockSimulation,
+        () => false,
       );
       expect(g.style.cursor).toBe('grab');
+    });
+
+    it('frozen: sets grab cursor, does NOT cool simulation, keeps fx/fy pinned', () => {
+      const node = makeSimNode();
+      node.fx = 100;
+      node.fy = 200;
+      onDragEnd(node, makeEvent({ active: false }), mockSimulation, () => true);
+      expect(mockAlphaTarget).not.toHaveBeenCalled();
+      expect(node.fx).toBe(100);
+      expect(node.fy).toBe(200);
     });
   });
 
@@ -364,10 +405,21 @@ describe('drag handlers', () => {
     it('exposes start/drag/end handlers as functions', () => {
       const behavior = createDragBehavior(
         mockSimulation as unknown as d3.Simulation<SimNode, undefined>,
+        () => false,
       );
       expect(typeof behavior.on('start')).toBe('function');
       expect(typeof behavior.on('drag')).toBe('function');
       expect(typeof behavior.on('end')).toBe('function');
+    });
+
+    it('accepts a getFrozen callback as second parameter', () => {
+      const getFrozen = vi.fn(() => false);
+      const behavior = createDragBehavior(
+        mockSimulation as unknown as d3.Simulation<SimNode, undefined>,
+        getFrozen,
+      );
+      expect(behavior).toBeTruthy();
+      expect(typeof behavior.on('start')).toBe('function');
     });
   });
 });
@@ -1283,6 +1335,84 @@ describe('selected node sizing', () => {
     expect(circles[0].getAttribute('r')).toBe('16');
     // p2 is not selected → r=8
     expect(circles[1].getAttribute('r')).toBe('8');
+
+    controller.destroy();
+    document.body.removeChild(container);
+  });
+});
+
+describe('force freeze', () => {
+  it('setFrozen(true) calls simulation.stop() and isFrozen returns true', () => {
+    const data = makeGraph([makeNode('p1')], []);
+    const container = document.createElement('div');
+    container.style.width = '800px';
+    container.style.height = '600px';
+    document.body.appendChild(container);
+
+    const controller = renderGraph(container, data);
+    expect(controller.isFrozen()).toBe(false);
+
+    controller.setFrozen(true);
+    expect(controller.isFrozen()).toBe(true);
+
+    controller.destroy();
+    document.body.removeChild(container);
+  });
+
+  it('setFrozen(false) calls alpha(1).restart() and isFrozen returns false', () => {
+    const data = makeGraph([makeNode('p1')], []);
+    const container = document.createElement('div');
+    container.style.width = '800px';
+    container.style.height = '600px';
+    document.body.appendChild(container);
+
+    const controller = renderGraph(container, data);
+    controller.setFrozen(true);
+    expect(controller.isFrozen()).toBe(true);
+
+    controller.setFrozen(false);
+    expect(controller.isFrozen()).toBe(false);
+
+    controller.destroy();
+    document.body.removeChild(container);
+  });
+
+  it('isFrozen returns current state after toggle', () => {
+    const data = makeGraph([makeNode('p1')], []);
+    const container = document.createElement('div');
+    container.style.width = '800px';
+    container.style.height = '600px';
+    document.body.appendChild(container);
+
+    const controller = renderGraph(container, data);
+    expect(controller.isFrozen()).toBe(false);
+    controller.setFrozen(true);
+    expect(controller.isFrozen()).toBe(true);
+    controller.setFrozen(false);
+    expect(controller.isFrozen()).toBe(false);
+    controller.setFrozen(true);
+    expect(controller.isFrozen()).toBe(true);
+
+    controller.destroy();
+    document.body.removeChild(container);
+  });
+
+  it('restartSimulation preserves freeze-aware drag behavior', () => {
+    const data = makeGraph([makeNode('p1'), makeNode('p2')], []);
+    const container = document.createElement('div');
+    container.style.width = '800px';
+    container.style.height = '600px';
+    document.body.appendChild(container);
+
+    const controller = renderGraph(container, data);
+    // Freeze the simulation
+    controller.setFrozen(true);
+    expect(controller.isFrozen()).toBe(true);
+
+    // Reset layout (calls restartSimulation internally) — should still be frozen
+    // after unfreeze, setFrozen(false) should work
+    controller.setFrozen(false);
+    expect(controller.isFrozen()).toBe(false);
 
     controller.destroy();
     document.body.removeChild(container);

@@ -39,6 +39,11 @@ export interface GraphController {
   resetLayout(): void;
   /** Update force configuration and reheat the simulation. */
   setForceConfig(config: ForceConfig): void;
+  /** Enable or disable force freeze. When frozen, only explicitly dragged
+   *  nodes move; all other forces are suspended. */
+  setFrozen(frozen: boolean): void;
+  /** Query whether freeze is currently active. */
+  isFrozen(): boolean;
 }
 
 // Internal node/link types for D3 simulation.
@@ -160,36 +165,47 @@ export function onDragStart(
   d: SimNode,
   event: d3.D3DragEvent<SVGGElement, SimNode, SimNode>,
   simulation: d3.Simulation<SimNode, undefined>,
+  getFrozen: () => boolean,
 ): void {
-  if (!event.active) simulation.alphaTarget(0.3).restart();
   d.fx = d.x ?? null;
   d.fy = d.y ?? null;
   d3.select(event.sourceEvent.currentTarget as SVGGElement).style(
     'cursor',
     'grabbing',
   );
+  if (getFrozen()) return;  // frozen: no simulation restart
+  if (!event.active) simulation.alphaTarget(0.3).restart();
 }
 
 export function onDrag(
   d: SimNode,
   event: d3.D3DragEvent<SVGGElement, SimNode, SimNode>,
   _simulation: d3.Simulation<SimNode, undefined>,
+  getFrozen: () => boolean,
 ): void {
   d.fx = event.x;
   d.fy = event.y;
+  if (getFrozen()) {
+    // Manually update SVG transform: the tick handler is not firing.
+    d.x = event.x;
+    d.y = event.y;
+    d3.select(event.sourceEvent.currentTarget as SVGGElement)
+      .attr('transform', `translate(${d.x ?? 0},${d.y ?? 0})`);
+  }
 }
 
 export function onDragEnd(
   _d: SimNode,
   event: d3.D3DragEvent<SVGGElement, SimNode, SimNode>,
   simulation: d3.Simulation<SimNode, undefined>,
+  getFrozen: () => boolean,
 ): void {
-  if (!event.active) simulation.alphaTarget(0);
-  // Pin the node where dropped — do NOT clear fx/fy
   d3.select(event.sourceEvent.currentTarget as SVGGElement).style(
     'cursor',
     'grab',
   );
+  if (getFrozen()) return;  // frozen: keep fx/fy pinned, no alphaTarget reset
+  if (!event.active) simulation.alphaTarget(0);
 }
 
 /** Reset all pinned positions and reheat the simulation. */
@@ -206,17 +222,18 @@ export function resetNodePositions(
 
 export function createDragBehavior(
   simulation: d3.Simulation<SimNode, undefined>,
+  getFrozen: () => boolean,
 ): d3.DragBehavior<SVGGElement, SimNode, SimNode | d3.SubjectPosition> {
   return d3
     .drag<SVGGElement, SimNode>()
     .on('start', (event: d3.D3DragEvent<SVGGElement, SimNode, SimNode>, d: SimNode) =>
-      onDragStart(d, event, simulation),
+      onDragStart(d, event, simulation, getFrozen),
     )
     .on('drag', (event: d3.D3DragEvent<SVGGElement, SimNode, SimNode>, d: SimNode) =>
-      onDrag(d, event, simulation),
+      onDrag(d, event, simulation, getFrozen),
     )
     .on('end', (event: d3.D3DragEvent<SVGGElement, SimNode, SimNode>, d: SimNode) =>
-      onDragEnd(d, event, simulation),
+      onDragEnd(d, event, simulation, getFrozen),
     );
 }
 
@@ -597,6 +614,7 @@ export function renderGraph(
   data: GraphData,
 ): GraphController {
   // --- state ---
+  let frozen = false;
   let currentFilter: number | null = null;
   let currentConfig: ForceConfig = { ...DEFAULT_FORCE_CONFIG };
   let highlighted = new Set<string>();
@@ -789,7 +807,7 @@ export function renderGraph(
       });
 
     // ---- drag behavior (re-bind all visible nodes with current simulation) ----
-    nodeGroup.call(createDragBehavior(simulation));
+    nodeGroup.call(createDragBehavior(simulation, () => frozen));
 
     // Apply highlighting
     applyHighlight();
@@ -901,6 +919,23 @@ export function renderGraph(
       const targetY = (d: SimNode) => (d.generation - minGen) * spacing;
       applyForceConfig(simulation, currentConfig, targetY);
       simulation.alpha(0.3).restart();
+    },
+
+    setFrozen(f: boolean) {
+      frozen = f;
+      if (frozen) {
+        simulation.stop();
+      } else {
+        // alpha(1) because the simulation was completely stopped — needs a
+        // strong kick, matching resetLayout's behavior.
+        simulation.alpha(1).restart();
+      }
+      // Rebind drag so getFrozen closure sees updated value.
+      nodeGroup.call(createDragBehavior(simulation, () => frozen));
+    },
+
+    isFrozen() {
+      return frozen;
     },
   };
 
