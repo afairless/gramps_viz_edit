@@ -413,10 +413,6 @@ export function renderToolbar(
 ): HTMLElement {
   const toolbar = document.createElement('div');
   toolbar.id = 'toolbar';
-  toolbar.style.position = 'absolute';
-  toolbar.style.top = '20px';
-  toolbar.style.left = '20px';
-  toolbar.style.zIndex = '500';
   toolbar.style.display = 'flex';
   toolbar.style.alignItems = 'center';
   toolbar.style.gap = '8px';
@@ -608,9 +604,8 @@ function renderGraphFromData(
       currentMode = mode;
     },
   );
-  if (appEl) {
-    appEl.insertBefore(toolbar, document.getElementById('legend'));
-  }
+  // Prepend toolbar to #app so it becomes the top bar above the main-row
+  appEl?.prepend(toolbar);
 
   // Wire up color legend
   const legendEl = document.getElementById('legend');
@@ -718,8 +713,10 @@ async function main(): Promise<void> {
   const appEl = document.getElementById('app');
   statsPanel = new StatsPanel();
   const statsPanelEl = statsPanel.create();
-  if (appEl) {
-    appEl.appendChild(statsPanelEl);
+  const mainRow = document.getElementById('main-row');
+  if (mainRow) {
+    // Insert stats panel as the first child of main-row (left sidebar)
+    mainRow.prepend(statsPanelEl);
   }
 
   // Check if we're running inside Tauri

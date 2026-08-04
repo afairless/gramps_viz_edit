@@ -172,7 +172,7 @@ describe('renderToolbar', () => {
     expect(resetLayout).toHaveBeenCalledTimes(1);
   });
 
-  it('is styled as a flex container with absolute positioning', () => {
+  it('is styled as a flex container with no absolute positioning', () => {
     const data = makeGraph([makeNode('p1')], []);
     const mockController = {
       resetLayout: vi.fn(),
@@ -181,13 +181,29 @@ describe('renderToolbar', () => {
 
     const toolbar = renderToolbar(data, mockController);
 
-    expect(toolbar.style.position).toBe('absolute');
+    expect(toolbar.style.position).not.toBe('absolute');
     expect(toolbar.style.display).toBe('flex');
     expect(toolbar.style.alignItems).toBe('center');
     expect(toolbar.style.gap).toBe('8px');
-    expect(toolbar.style.top).toBe('20px');
-    expect(toolbar.style.left).toBe('20px');
-    expect(toolbar.style.zIndex).toBe('500');
+  });
+
+  it('prepends toolbar as first child of #app', () => {
+    const appEl = document.createElement('div');
+    appEl.id = 'app';
+    document.body.appendChild(appEl);
+
+    const data = makeGraph([makeNode('p1')], []);
+    const mockController = {
+      resetLayout: vi.fn(),
+      setForceConfig: vi.fn(),
+    } as unknown as GraphController;
+
+    const toolbar = renderToolbar(data, mockController);
+    appEl.prepend(toolbar);
+
+    expect(appEl.firstChild).toBe(toolbar);
+
+    document.body.removeChild(appEl);
   });
 });
 
