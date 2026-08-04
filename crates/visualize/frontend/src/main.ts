@@ -9,12 +9,32 @@ import { buildAdjacency, getIndirectSet } from './graph-query';
 import { createHoverHandler } from './tooltip';
 import { createSelectionPanel, exportToFile } from './selection';
 import { renderLegend, buildColorScale } from './colors';
+import { StatsPanel } from './stats-panel';
+import type { StatsReport } from './types';
 
 /** Default generation gap in years when not specified via CLI. */
 const DEFAULT_GENERATION_GAP = 25;
 
 /** Default for --no-impute when not specified via CLI. */
 const DEFAULT_NO_IMPUTE = false;
+
+/** Global stats panel instance, created in main(). */
+let statsPanel!: StatsPanel;
+
+/**
+ * Fetch file statistics via Tauri IPC and render them in the stats panel.
+ * Handles errors gracefully, showing a non-intrusive error message.
+ */
+async function fetchAndRenderStats(filePath: string): Promise<void> {
+  const tauri = await import('@tauri-apps/api/core');
+  try {
+    const report: StatsReport = await tauri.invoke('get_stats', { path: filePath });
+    statsPanel.render(report);
+  } catch (err) {
+    console.warn('Failed to load stats:', err);
+    statsPanel.renderError('Failed to load statistics. The file may have been moved or deleted.');
+  }
+}
 
 function showError(container: HTMLElement, message: string): void {
   container.textContent = '';
@@ -133,7 +153,7 @@ async function openAndRenderFile(
     return false;
   }
 
-  renderGraphFromData(container, appEl, graphData);
+  renderGraphFromData(container, appEl, graphData, selected);
   return true;
 }
 
@@ -168,7 +188,7 @@ async function openAndRenderFileFromPath(
     return;
   }
 
-  renderGraphFromData(container, appEl, graphData);
+  renderGraphFromData(container, appEl, graphData, filePath);
 }
 
 export function renderModeSelector(onChange: (mode: SelectionMode) => void): HTMLElement {
@@ -539,6 +559,7 @@ function renderGraphFromData(
   container: HTMLElement,
   appEl: HTMLElement,
   graphData: GraphData,
+  filePath?: string,
 ): void {
   // Clear any previous content (e.g. the open-file prompt)
   container.textContent = '';
@@ -620,6 +641,11 @@ function renderGraphFromData(
   // Store controller for dev console access
   (window as unknown as Record<string, GraphController>).__GRAPH_CONTROLLER__ =
     controller;
+
+  // Fetch and render stats if a file path is available
+  if (filePath) {
+    fetchAndRenderStats(filePath);
+  }
 }
 
 /**
@@ -683,6 +709,14 @@ async function main(): Promise<void> {
   if (!container) {
     console.error('graph-container element not found');
     return;
+  }
+
+  // Create the stats panel and append to #app
+  const appEl = document.getElementById('app');
+  const statsPanel = new StatsPanel();
+  const statsPanelEl = statsPanel.create();
+  if (appEl) {
+    appEl.appendChild(statsPanelEl);
   }
 
   // Check if we're running inside Tauri
