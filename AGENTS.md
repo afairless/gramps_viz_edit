@@ -31,11 +31,50 @@ gramps_viz_edit/
 │   │           ├── builder.rs    # GraphBuilder fluent API (separate from Graph)
 │   │           ├── random.rs     # Procedural name/date/place generators, generate_random()
 │   │           └── adversarial.rs # Adversarial strategies (Category A + B), apply_adversarial_strategies()
+│   │   ├── tests/
+│   │   │   ├── schema_convert_tests.rs   # Integration tests for schema_convert via #[path] include
+│   │   │   └── merged_schema.rs          # Integration tests for merged 5.1+5.2 schema
 │   ├── output/                   # Gramps XML serialization
 │   │   └── src/
 │   │       ├── lib.rs            # Re-exports
 │   │       ├── xml.rs            # GraphXmlWriter (quick-xml based)
 │   │       └── serialization_map.rs # Hand-coded mapping to XML element/attribute names
+│   ├── gramps-reader/            # Shared library for streaming .gramps XML parsing
+│   │   └── src/
+│   │       ├── lib.rs            # Library root, re-exports
+│   │       ├── types.rs          # FamilyRecord, ParsedPerson, ParsedFamily, Dsu
+│   │       ├── graph.rs          # DSU operations, compute_generations
+│   │       ├── xml.rs            # XML attribute helpers
+│   │       ├── error.rs          # Parser error types
+│   │       └── xml/
+│   │           ├── count.rs      # Streaming element count
+│   │           └── extract.rs    # Streaming person/family extraction
+│   ├── visualize/                # Tauri v2 desktop app with D3.js force-directed graph
+│   │   ├── tauri.conf.json       # Tauri v2 configuration
+│   │   ├── src/
+│   │   │   ├── main.rs           # Tauri entry point, IPC commands
+│   │   │   ├── lib.rs            # load_graph_data() orchestrator
+│   │   │   ├── graph_data.rs     # DSU components, generation layering, gender mapping
+│   │   │   ├── dates.rs          # Multi-source BFS date imputation
+│   │   │   └── args.rs           # CLI argument parsing
+│   │   ├── frontend/
+│   │   │   ├── src/
+│   │   │   │   ├── main.ts       # Entry point, IPC wiring, filter dropdown, legend
+│   │   │   │   ├── graph.ts      # d3.forceSimulation, SVG, zoom/pan
+│   │   │   │   ├── graph-query.ts # Adjacency indices, indirect-set queries
+│   │   │   │   ├── selection.ts  # Click-to-select, Shift multi-select, export
+│   │   │   │   ├── colors.ts     # d3.interpolateViridis, imputed dashed, gray null
+│   │   │   │   ├── tooltip.ts    # 200ms hover tooltip
+│   │   │   │   └── types.ts      # TypeScript interfaces matching Rust types
+│   │   │   ├── styles/
+│   │   │   │   └── main.css
+│   │   │   ├── tests/            # Vitest frontend tests
+│   │   │   ├── test-harness.html # Standalone HTML for D3 rendering tests
+│   │   │   ├── package.json
+│   │   │   ├── tsconfig.json
+│   │   │   └── vite.config.ts
+│   │   ├── capabilities/         # Tauri v2 capability manifests
+│   │   └── tests/                # Rust integration tests
 │   └── cli/                      # CLI binary
 │       ├── src/
 │       │   ├── main.rs           # Clap parser, command dispatch
@@ -52,9 +91,6 @@ gramps_viz_edit/
 │       └── tests/
 │           ├── e2e.rs              # Subprocess-based E2E tests
 │           └── integration.rs    # Integration tests
-│   ├── typed-graph/tests/
-│       ├── schema_convert_tests.rs   # Integration tests for schema_convert via #[path] include
-│       └── merged_schema.rs          # Integration tests for merged 5.1+5.2 schema
 ```
 
 ## Key Design Rules
