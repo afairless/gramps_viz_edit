@@ -69,13 +69,15 @@ A **Python extractor** (`extract/extract_schema.py`) introspects Gramps Python c
 │  │  count.rs        │  │  Dsu (disjoint    │                    │
 │  │  extract.rs      │  │  set union)       │                    │
 │  │  (person/family  │  │  compute_genera-  │                    │
-│  │   streaming)     │  │  tions            │                    │
+│  │   streaming)     │  │  tions, compute_  │                    │
+│  │                  │  │  generation_table │                    │
 │  └──────────────────┘  └──────────────────┘                    │
 │  ┌──────────────────┐  ┌──────────────────┐                    │
 │  │  types.rs        │  │  xml.rs (helpers) │                    │
 │  │  FamilyRecord,   │  │  strip_prefix,    │                    │
 │  │  ParsedPerson,   │  │  read_handle_attr,│                    │
-│  │  ParsedFamily    │  │  read_hlink_attr  │                    │
+│  │  ParsedFamily,   │  │  read_hlink_attr  │                    │
+│  │  ParsedEvent     │  │                    │                    │
 │  └──────────────────┘  └──────────────────┘                    │
 └──────────────────────────┬─────────────────────────────────────┘
                            │
@@ -96,13 +98,17 @@ A **Python extractor** (`extract/extract_schema.py`) introspects Gramps Python c
 │                                                                │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐ │
 │  │ graph_data.rs │  │ dates.rs     │  │ lib.rs               │ │
-│  │ (adapter:     │  │ (multi-source│  │ load_graph_data()    │ │
-│  │  ParsedPerson │  │  BFS date    │  │ (pure function,      │ │
-│  │  → PersonNode,│  │  imputation) │  │  testable)           │ │
-│  │  FamilyLink)  │  │              │  │                      │ │
+│  │ (adapter:     │  │ (multi-source│  │ load_graph_data(     │ │
+│  │  ParsedPerson │  │  BFS date    │  │   no_impute,         │ │
+│  │  → PersonNode,│  │  imputation) │  │   generation_gap)    │ │
+│  │  FamilyLink)  │  │              │  │ (pure function,      │ │
+│  │               │  │              │  │  testable)           │ │
 │  └──────┬───────┘  └──────┬───────┘  └──────────┬───────────┘ │
-│         │                 │                      │            │
-│         └─────────────────┴──────────────────────┘            │
+│  ┌──────┴───────┐         │                      │            │
+│  │ args.rs       │         │                      │            │
+│  │ (CLI flag     │         │                      │            │
+│  │  parsing)     │         │                      │            │
+│  └──────────────┘         │                      │            │
 │                           │  GraphData (JSON via Tauri IPC)    │
 │                           ▼                                    │
 │  ┌──────────────────────────────────────────────────────────┐ │
@@ -592,6 +598,7 @@ the **gramps-reader** shared crate for data parsing.
 │  visualize::lib.rs            │  load_graph_data() — pure function that
 │                                │  orchestrates the full pipeline
 │                                │  (unit-testable, IPC-agnostic)
+│                                │  Params: no_impute, generation_gap
 └──────────┬───────────────────┘
            │  GraphData → serde_json
            ▼
@@ -607,6 +614,7 @@ the **gramps-reader** shared crate for data parsing.
 │  Frontend (D3.js + TypeScript)│
 │                                │
 │  src/graph.ts                  │  d3.forceSimulation, SVG, zoom/pan
+│  src/graph-query.ts            │  Adjacency indices, indirect-set queries
 │  src/tooltip.ts                │  200ms hover tooltip (name, birth, death)
 │  src/selection.ts              │  Click-to-select, Shift multi-select, export
 │  src/colors.ts                 │  d3.interpolateViridis, imputed dashed, gray null
@@ -675,9 +683,12 @@ The generation gap is configurable (default: 25 years, validated range: 1-100).
 | Force simulation | `graph.ts` | d3.forceSimulation with collision, zoom/pan, SVG circles+lines |
 | Hover tooltips | `tooltip.ts` | 200ms delay, name+birth+death, cursor-follow, mouse-out hide |
 | Selection | `selection.ts` | Click toggle, Shift multi-select, Export via Tauri save dialog |
+| Graph queries | `graph-query.ts` | Adjacency indices, ancestor/descendant/indirect-set queries for selection modes |
 | Color gradient | `colors.ts` | d3.interpolateViridis, imputed dashed border, undated gray |
 | Filter | `main.ts` | Dropdown to filter by family group (connected component) |
+| Force layout tuning | `types.ts` | `ForceConfig` with generationPull, spouseStrength, parentChildStrength; UI sliders |
 | Legend | `colors.ts` | Gradient bar with year labels, undated/imputed caption items |
+| Standalone test page | `test-harness.html` | HTML page for manual D3 rendering tests outside Tauri |
 
 ---
 

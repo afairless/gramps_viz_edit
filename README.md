@@ -191,12 +191,16 @@ shell and **D3.js** for graph rendering.
 - **Zoom and pan**: Scroll to zoom, drag to pan
 - **Hover tooltips**: 200ms delay tooltip showing name, birth date, and death date
 - **Selection and export**: Click to select nodes (Shift-click for multi-select),
-  export selections as JSON
+  export selections as JSON. Adjacency-based queries (`graph-query.ts`) support
+  ancestor/descendant/first-degree/second-degree/indirect selection modes
 - **Color gradient**: Nodes are colored by birth year using
   `d3.interpolateViridis` (perceptually uniform, colorblind-friendly).
   Imputed dates shown with dashed borders; undated nodes shown in neutral gray
 - **Family group filter**: Dropdown to filter the view to a single connected
   component
+- **Force layout tuning**: Sliders adjust `ForceConfig` parameters —
+  per-generation Y-field pull (`generationPull`), spouse link strength
+  (`spouseStrength`), and parent-child link strength (`parentChildStrength`)
 - **Legend**: Color gradient bar showing the year range with labels
 
 ### Build Dependencies
