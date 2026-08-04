@@ -100,6 +100,15 @@ export interface StatsReport {
 }
 
 // ---------------------------------------------------------------------------
+// LoadedGraph — combined result from the load_graph IPC command
+// ---------------------------------------------------------------------------
+
+export interface LoadedGraph {
+  graph_data: GraphData;
+  stats: StatsReport;
+}
+
+// ---------------------------------------------------------------------------
 // Selection mode types
 // ---------------------------------------------------------------------------
 

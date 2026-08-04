@@ -3,7 +3,7 @@
 
 import { renderGraph, validateGraphData } from './graph';
 import type { GraphController } from './graph';
-import type { GraphData, SelectionMode } from './types';
+import type { GraphData, LoadedGraph, SelectionMode } from './types';
 import { DEFAULT_FORCE_CONFIG, SELECTION_MODES, type ForceConfig } from './types';
 import { buildAdjacency, getIndirectSet } from './graph-query';
 import { createHoverHandler } from './tooltip';
@@ -129,7 +129,7 @@ async function openAndRenderFile(
   if (!selected) return false; // user cancelled
 
   const tauri = await import('@tauri-apps/api/core');
-  let graphData: GraphData;
+  let loadedGraph: LoadedGraph;
   try {
     const gap: number =
       (window as unknown as Record<string, number>).__GENERATION_GAP__ ??
@@ -137,7 +137,7 @@ async function openAndRenderFile(
     const noImpute: boolean =
       (window as unknown as Record<string, boolean>).__NO_IMPUTE__ ??
       DEFAULT_NO_IMPUTE;
-    graphData = await tauri.invoke('load_graph', {
+    loadedGraph = await tauri.invoke('load_graph', {
       path: selected,
       noImpute: noImpute,
       generationGap: gap,
@@ -153,7 +153,7 @@ async function openAndRenderFile(
     return false;
   }
 
-  renderGraphFromData(container, appEl, graphData, selected);
+  renderGraphFromData(container, appEl, loadedGraph.graph_data, selected, loadedGraph.stats);
   return true;
 }
 
@@ -175,9 +175,9 @@ async function openAndRenderFileFromPath(
     (window as unknown as Record<string, boolean>).__NO_IMPUTE__ ??
     DEFAULT_NO_IMPUTE;
 
-  let graphData: GraphData;
+  let loadedGraph: LoadedGraph;
   try {
-    graphData = await tauri.invoke('load_graph', {
+    loadedGraph = await tauri.invoke('load_graph', {
       path: filePath,
       noImpute: noImpute,
       generationGap: gap,
@@ -188,7 +188,7 @@ async function openAndRenderFileFromPath(
     return;
   }
 
-  renderGraphFromData(container, appEl, graphData, filePath);
+  renderGraphFromData(container, appEl, loadedGraph.graph_data, filePath, loadedGraph.stats);
 }
 
 export function renderModeSelector(onChange: (mode: SelectionMode) => void): HTMLElement {
@@ -560,6 +560,7 @@ function renderGraphFromData(
   appEl: HTMLElement,
   graphData: GraphData,
   filePath?: string,
+  statsReport?: StatsReport,
 ): void {
   // Clear any previous content (e.g. the open-file prompt)
   container.textContent = '';
@@ -642,8 +643,10 @@ function renderGraphFromData(
   (window as unknown as Record<string, GraphController>).__GRAPH_CONTROLLER__ =
     controller;
 
-  // Fetch and render stats if a file path is available
-  if (filePath) {
+  // Render stats from the preloaded report when available, otherwise fetch
+  if (statsReport) {
+    statsPanel.render(statsReport);
+  } else if (filePath) {
     fetchAndRenderStats(filePath);
   }
 }
