@@ -249,7 +249,7 @@ export function computeGenerationSpacing(
 }
 
 /**
- * Register all four named forces on a fresh simulation.
+ * Register all six named forces on a fresh simulation.
  *
  * Spouse and parent-child links get separate forces with their own base
  * distances; a generation field force pulls nodes toward their generation
@@ -289,6 +289,14 @@ export function createSimulationForces(
     .force(
       'selection-repel',
       createSelectionRepelForce(getSelected).strength(config.repelStrength),
+    )
+    .force(
+      'selected-attract',
+      createSelectedAttractForce(getSelected).strength(config.selectedAttractStrength),
+    )
+    .force(
+      'unselected-attract',
+      createUnselectedAttractForce(getSelected).strength(config.unselectedAttractStrength),
     );
 }
 
@@ -316,6 +324,16 @@ export function applyForceConfig(
   const repel = simulation.force('selection-repel') as SelectionRepelForce | undefined;
   if (repel) {
     repel.strength(config.repelStrength);
+  }
+
+  const selAttract = simulation.force('selected-attract') as AttractForce | undefined;
+  if (selAttract) {
+    selAttract.strength(config.selectedAttractStrength);
+  }
+
+  const unselAttract = simulation.force('unselected-attract') as AttractForce | undefined;
+  if (unselAttract) {
+    unselAttract.strength(config.unselectedAttractStrength);
   }
 }
 
