@@ -32,14 +32,16 @@ describe('renderToolbar', () => {
     const mockController = {
       resetLayout: vi.fn(),
       setForceConfig: vi.fn(),
+      isFrozen: vi.fn().mockReturnValue(false),
+      setFrozen: vi.fn(),
     } as unknown as GraphController;
 
     const toolbar = renderToolbar(data, mockController);
 
     expect(toolbar.id).toBe('toolbar');
-    const resetBtn = toolbar.querySelector('button');
+    const buttons = toolbar.querySelectorAll('button');
+    const resetBtn = Array.from(buttons).find((b) => b.textContent === '↺ Reset');
     expect(resetBtn).toBeTruthy();
-    expect(resetBtn!.textContent).toContain('↺');
     expect(resetBtn!.title).toBe('Reset node positions to force-directed layout');
   });
 
@@ -50,6 +52,8 @@ describe('renderToolbar', () => {
       setForceConfig: vi.fn(),
       getVisibleNodes: vi.fn().mockReturnValue([]),
       setHighlighted: vi.fn(),
+      isFrozen: vi.fn().mockReturnValue(false),
+      setFrozen: vi.fn(),
     } as unknown as GraphController;
 
     const toolbar = renderToolbar(data, mockController, undefined, undefined, undefined, vi.fn());
@@ -70,6 +74,8 @@ describe('renderToolbar', () => {
       setForceConfig: vi.fn(),
       getVisibleNodes: vi.fn().mockReturnValue([]),
       setHighlighted: vi.fn(),
+      isFrozen: vi.fn().mockReturnValue(false),
+      setFrozen: vi.fn(),
     } as unknown as GraphController;
 
     const onChange = vi.fn();
@@ -95,6 +101,8 @@ describe('renderToolbar', () => {
       setForceConfig: vi.fn(),
       getVisibleNodes: vi.fn().mockReturnValue([]),
       setHighlighted: vi.fn(),
+      isFrozen: vi.fn().mockReturnValue(false),
+      setFrozen: vi.fn(),
     } as unknown as GraphController;
 
     const mockSelectionManager = {
@@ -122,6 +130,8 @@ describe('renderToolbar', () => {
       getVisibleNodes: vi.fn().mockReturnValue([]),
       setHighlighted: vi.fn(),
       setFamilyGroupFilter: vi.fn(),
+      isFrozen: vi.fn().mockReturnValue(false),
+      setFrozen: vi.fn(),
     } as unknown as GraphController;
 
     const mockSelectionManager = {
@@ -149,6 +159,8 @@ describe('renderToolbar', () => {
     const mockController = {
       resetLayout: vi.fn(),
       setForceConfig: vi.fn(),
+      isFrozen: vi.fn().mockReturnValue(false),
+      setFrozen: vi.fn(),
     } as unknown as GraphController;
 
     const toolbar = renderToolbar(data, mockController);
@@ -163,13 +175,69 @@ describe('renderToolbar', () => {
     const mockController = {
       resetLayout,
       setForceConfig: vi.fn(),
+      isFrozen: vi.fn().mockReturnValue(false),
+      setFrozen: vi.fn(),
     } as unknown as GraphController;
 
     const toolbar = renderToolbar(data, mockController);
-    const resetBtn = toolbar.querySelector('button')!;
-    resetBtn.click();
+    const buttons = toolbar.querySelectorAll('button');
+    const resetBtn = Array.from(buttons).find((b) => b.textContent === '↺ Reset');
+    expect(resetBtn).toBeTruthy();
+    resetBtn!.click();
 
     expect(resetLayout).toHaveBeenCalledTimes(1);
+  });
+
+  it('reset button calls controller.setFrozen(false) when frozen', () => {
+    const data = makeGraph([makeNode('p1')], []);
+    const setFrozen = vi.fn();
+    const resetLayout = vi.fn();
+    const mockController = {
+      resetLayout,
+      setForceConfig: vi.fn(),
+      isFrozen: vi.fn().mockReturnValue(true),
+      setFrozen,
+    } as unknown as GraphController;
+
+    const toolbar = renderToolbar(data, mockController);
+    const buttons = toolbar.querySelectorAll('button');
+    const resetBtn = Array.from(buttons).find((b) => b.textContent === '↺ Reset');
+    expect(resetBtn).toBeTruthy();
+
+    resetBtn!.click();
+    expect(setFrozen).toHaveBeenCalledWith(false);
+    expect(resetLayout).toHaveBeenCalledTimes(1);
+  });
+
+  it('syncFreezeUI adds/removes .force-frozen on #graph-container', () => {
+    const data = makeGraph([makeNode('p1')], []);
+    let frozenState = false;
+    const mockController = {
+      resetLayout: vi.fn(),
+      setForceConfig: vi.fn(),
+      isFrozen: vi.fn(() => frozenState),
+      setFrozen: vi.fn((f: boolean) => { frozenState = f; }),
+    } as unknown as GraphController;
+
+    // Create a graph-container element for the CSS class toggle
+    const gc = document.createElement('div');
+    gc.id = 'graph-container';
+    document.body.appendChild(gc);
+
+    const toolbar = renderToolbar(data, mockController);
+    const buttons = toolbar.querySelectorAll('button');
+    const freezeBtn = Array.from(buttons).find((b) => b.textContent === '❄ Freeze');
+    expect(freezeBtn).toBeTruthy();
+
+    // Click to freeze — should add .force-frozen
+    freezeBtn!.click();
+    expect(gc.classList.contains('force-frozen')).toBe(true);
+
+    // Click to unfreeze — should remove .force-frozen
+    freezeBtn!.click();
+    expect(gc.classList.contains('force-frozen')).toBe(false);
+
+    document.body.removeChild(gc);
   });
 
   it('is styled as a flex container with no absolute positioning', () => {
@@ -177,6 +245,8 @@ describe('renderToolbar', () => {
     const mockController = {
       resetLayout: vi.fn(),
       setForceConfig: vi.fn(),
+      isFrozen: vi.fn().mockReturnValue(false),
+      setFrozen: vi.fn(),
     } as unknown as GraphController;
 
     const toolbar = renderToolbar(data, mockController);
@@ -185,6 +255,67 @@ describe('renderToolbar', () => {
     expect(toolbar.style.display).toBe('flex');
     expect(toolbar.style.alignItems).toBe('center');
     expect(toolbar.style.gap).toBe('8px');
+  });
+
+  it('includes a freeze button with text ❄ Freeze', () => {
+    const data = makeGraph([makeNode('p1')], []);
+    const mockController = {
+      resetLayout: vi.fn(),
+      setForceConfig: vi.fn(),
+      isFrozen: vi.fn().mockReturnValue(false),
+      setFrozen: vi.fn(),
+    } as unknown as GraphController;
+
+    const toolbar = renderToolbar(data, mockController);
+    const buttons = toolbar.querySelectorAll('button');
+    const freezeBtn = Array.from(buttons).find((b) => b.textContent === '❄ Freeze');
+    expect(freezeBtn).toBeTruthy();
+    expect(freezeBtn!.title).toBe('Freeze all forces (only dragged nodes move)');
+  });
+
+  it('clicking freeze button toggles text to ❄ Unfreeze and back', () => {
+    const data = makeGraph([makeNode('p1')], []);
+    let frozenState = false;
+    const mockController = {
+      resetLayout: vi.fn(),
+      setForceConfig: vi.fn(),
+      isFrozen: vi.fn(() => frozenState),
+      setFrozen: vi.fn((f: boolean) => { frozenState = f; }),
+    } as unknown as GraphController;
+
+    const toolbar = renderToolbar(data, mockController);
+    const buttons = toolbar.querySelectorAll('button');
+    const freezeBtn = Array.from(buttons).find((b) => b.textContent === '❄ Freeze');
+    expect(freezeBtn).toBeTruthy();
+
+    // Click to freeze
+    freezeBtn!.click();
+    expect(mockController.setFrozen).toHaveBeenCalledWith(true);
+    expect(freezeBtn!.textContent).toBe('❄ Unfreeze');
+
+    // Click to unfreeze
+    freezeBtn!.click();
+    expect(mockController.setFrozen).toHaveBeenCalledWith(false);
+    expect(freezeBtn!.textContent).toBe('❄ Freeze');
+  });
+
+  it('clicking freeze button calls controller.setFrozen()', () => {
+    const data = makeGraph([makeNode('p1')], []);
+    const setFrozen = vi.fn();
+    const mockController = {
+      resetLayout: vi.fn(),
+      setForceConfig: vi.fn(),
+      isFrozen: vi.fn().mockReturnValue(false),
+      setFrozen,
+    } as unknown as GraphController;
+
+    const toolbar = renderToolbar(data, mockController);
+    const buttons = toolbar.querySelectorAll('button');
+    const freezeBtn = Array.from(buttons).find((b) => b.textContent === '❄ Freeze');
+    expect(freezeBtn).toBeTruthy();
+
+    freezeBtn!.click();
+    expect(setFrozen).toHaveBeenCalledWith(true);
   });
 
   it('prepends toolbar as first child of #app', () => {
@@ -196,6 +327,8 @@ describe('renderToolbar', () => {
     const mockController = {
       resetLayout: vi.fn(),
       setForceConfig: vi.fn(),
+      isFrozen: vi.fn().mockReturnValue(false),
+      setFrozen: vi.fn(),
     } as unknown as GraphController;
 
     const toolbar = renderToolbar(data, mockController);
@@ -215,13 +348,17 @@ describe('renderToolbar with forceConfig', () => {
     const mockController = {
       setForceConfig,
       resetLayout,
+      isFrozen: vi.fn().mockReturnValue(false),
+      setFrozen: vi.fn(),
     } as unknown as GraphController;
 
     const forceConfig: ForceConfig = { ...DEFAULT_FORCE_CONFIG };
     const onChange = vi.fn();
     const toolbar = renderToolbar(data, mockController, forceConfig, onChange);
-    const resetBtn = toolbar.querySelector('button')!;
-    resetBtn.click();
+    const buttons = toolbar.querySelectorAll('button');
+    const resetBtn = Array.from(buttons).find((b) => b.textContent === '↺ Reset');
+    expect(resetBtn).toBeTruthy();
+    resetBtn!.click();
 
     expect(setForceConfig).toHaveBeenCalledWith(forceConfig);
     expect(resetLayout).toHaveBeenCalledTimes(1);
@@ -236,6 +373,8 @@ describe('renderToolbar with forceConfig', () => {
     const mockController = {
       setForceConfig: vi.fn(),
       resetLayout: vi.fn(),
+      isFrozen: vi.fn().mockReturnValue(false),
+      setFrozen: vi.fn(),
     } as unknown as GraphController;
 
     const forceConfig: ForceConfig = { ...DEFAULT_FORCE_CONFIG };
@@ -250,6 +389,8 @@ describe('renderToolbar with forceConfig', () => {
     const mockController = {
       setForceConfig: vi.fn(),
       resetLayout: vi.fn(),
+      isFrozen: vi.fn().mockReturnValue(false),
+      setFrozen: vi.fn(),
     } as unknown as GraphController;
 
     const toolbar = renderToolbar(data, mockController);

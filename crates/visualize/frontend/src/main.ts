@@ -69,6 +69,7 @@ function showEmpty(container: HTMLElement): void {
 function renderFilterDropdown(
   data: GraphData,
   controller: GraphController,
+  onBeforeChange?: () => void,
 ): { container: HTMLElement; select: HTMLSelectElement } | null {
   const container = document.createElement('div');
   container.id = 'filter-container';
@@ -105,6 +106,7 @@ function renderFilterDropdown(
   }
 
   select.addEventListener('change', () => {
+    if (onBeforeChange) onBeforeChange();
     const val = select.value;
     controller.setFamilyGroupFilter(val === '' ? null : Number(val));
   });
@@ -451,7 +453,12 @@ export function renderToolbar(
   toolbar.appendChild(sep);
 
   // Family group filter dropdown + group select/deselect buttons
-  const filterResult = renderFilterDropdown(graphData, controller);
+  const filterResult = renderFilterDropdown(graphData, controller, () => {
+    if (controller.isFrozen()) {
+      controller.setFrozen(false);
+      syncFreezeUI(false);
+    }
+  });
   if (filterResult) {
     filterResult.container.style.position = 'relative';
     filterResult.container.style.top = 'auto';
@@ -519,7 +526,36 @@ export function renderToolbar(
     }
   }
 
-  // Reset layout button
+  // ---- freeze button ----
+  const freezeBtn = document.createElement('button');
+  freezeBtn.textContent = '❄ Freeze';
+  freezeBtn.title = 'Freeze all forces (only dragged nodes move)';
+  freezeBtn.style.padding = '4px 10px';
+  freezeBtn.style.fontSize = '12px';
+  freezeBtn.style.borderRadius = '4px';
+  freezeBtn.style.border = '1px solid #ccc';
+  freezeBtn.style.background = '#fff';
+  freezeBtn.style.cursor = 'pointer';
+  freezeBtn.style.color = '#333';
+
+  /** Update freeze button AND #graph-container CSS class in one place. */
+  function syncFreezeUI(frozen: boolean): void {
+    freezeBtn.textContent = frozen ? '❄ Unfreeze' : '❄ Freeze';
+    freezeBtn.style.background = frozen ? '#e8f0fe' : '#fff';
+    freezeBtn.style.borderColor = frozen ? '#2266aa' : '#ccc';
+    const gc = document.getElementById('graph-container');
+    if (gc) gc.classList.toggle('force-frozen', frozen);
+  }
+
+  freezeBtn.addEventListener('click', () => {
+    const nowFrozen = !controller.isFrozen();
+    controller.setFrozen(nowFrozen);
+    syncFreezeUI(nowFrozen);
+  });
+
+  toolbar.appendChild(freezeBtn);
+
+  // ---- Reset layout button ----
   const resetBtn = document.createElement('button');
   resetBtn.textContent = '↺ Reset';
   resetBtn.title = 'Reset node positions to force-directed layout';
@@ -537,6 +573,11 @@ export function renderToolbar(
     resetBtn.style.background = '#fff';
   });
   resetBtn.addEventListener('click', () => {
+    // Unfreeze implicitly so the reset takes visible effect
+    if (controller.isFrozen()) {
+      controller.setFrozen(false);
+      syncFreezeUI(false);
+    }
     if (forceConfig) {
       controller.setForceConfig(forceConfig);
     }
