@@ -433,6 +433,82 @@ export function createSelectionRepelForce(
 }
 
 // ---------------------------------------------------------------------------
+// Attract-force interface and implementations
+// ---------------------------------------------------------------------------
+
+/**
+ * Interface for the selected-attract and unselected-attract custom D3 forces.
+ * Exposes strength() getter/setter so callers can mutate it at runtime.
+ */
+export interface AttractForce extends d3.Force<SimNode, undefined> {
+  /** Get or set the attract multiplier in [0, 2]. */
+  strength(s: number): this;
+  strength(): number;
+  /** Initialize the force with the simulation's node array. */
+  initialize(nodes: SimNode[]): void;
+}
+
+/**
+ * Create a custom D3 force that pulls selected nodes toward the centroid
+ * of the selected set, forming a cluster. Only active when there are at
+ * least 2 selected nodes and at least 1 unselected node (a complement to
+ * separate from).
+ *
+ * @param getSelected - Callback returning the current set of selected handles.
+ * @returns An AttractForce instance.
+ */
+export function createSelectedAttractForce(
+  getSelected: () => Set<string>,
+): AttractForce {
+  let nodes: SimNode[] = [];
+  let strengthValue = 0;
+
+  function force(tickAlpha: number): void {
+    const selected = getSelected();
+    if (strengthValue === 0 || selected.size < 2) return;
+
+    // Partition nodes into selected and check for unselected complement
+    const selectedNodes: SimNode[] = [];
+    let hasUnselected = false;
+    for (const n of nodes) {
+      if (selected.has(n.handle)) {
+        selectedNodes.push(n);
+      } else {
+        hasUnselected = true;
+      }
+    }
+
+    // No-op if no unselected nodes to separate from
+    if (!hasUnselected) return;
+
+    // Compute centroid of selected nodes
+    let cx = 0, cy = 0;
+    for (const n of selectedNodes) {
+      cx += n.x ?? 0;
+      cy += n.y ?? 0;
+    }
+    cx /= selectedNodes.length;
+    cy /= selectedNodes.length;
+
+    // Apply impulse toward centroid
+    const impulse = tickAlpha * strengthValue;
+    for (const n of selectedNodes) {
+      n.vx = (n.vx ?? 0) + (cx - (n.x ?? 0)) * impulse;
+      n.vy = (n.vy ?? 0) + (cy - (n.y ?? 0)) * impulse;
+    }
+  }
+
+  force.initialize = (nodeList: SimNode[]) => { nodes = nodeList; };
+  force.strength = (s?: number) => {
+    if (s === undefined) return strengthValue;
+    strengthValue = s;
+    return force;
+  };
+
+  return force as unknown as AttractForce;
+}
+
+// ---------------------------------------------------------------------------
 // Main render function
 // ---------------------------------------------------------------------------
 
