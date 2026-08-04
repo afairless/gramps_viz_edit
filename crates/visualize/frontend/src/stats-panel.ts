@@ -59,8 +59,9 @@ export class StatsPanel {
 
     this.panel = panel;
     this.expanded = true;
-    // Append the tab to the document body so it's in the DOM for toggle/destroy
-    document.body.appendChild(tab);
+    // Append the tab to #main-row so it's positioned relative to the graph area
+    const mainRow = document.getElementById('main-row');
+    (mainRow ?? document.body).appendChild(tab);
     return panel;
   }
 

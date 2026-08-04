@@ -268,4 +268,40 @@ describe('StatsPanel', () => {
       panel.destroy();
     });
   });
+
+  describe('main-row integration', () => {
+    it('appends tab to #main-row when available', () => {
+      const mainRow = document.createElement('div');
+      mainRow.id = 'main-row';
+      document.body.appendChild(mainRow);
+
+      const newPanel = new StatsPanel();
+      const el = newPanel.create();
+      document.body.appendChild(el);
+
+      const tab = mainRow.querySelector('.stats-tab')!;
+      expect(tab).toBeTruthy();
+      expect(tab.parentElement).toBe(mainRow);
+
+      newPanel.destroy();
+      document.body.removeChild(mainRow);
+    });
+
+    it('inserts panel into #main-row when available', () => {
+      const mainRow = document.createElement('div');
+      mainRow.id = 'main-row';
+      document.body.appendChild(mainRow);
+
+      const newPanel = new StatsPanel();
+      const el = newPanel.create();
+      mainRow.prepend(el);
+
+      const panel = mainRow.querySelector('#stats-panel');
+      expect(panel).toBeTruthy();
+      expect(panel!.parentElement).toBe(mainRow);
+
+      newPanel.destroy();
+      document.body.removeChild(mainRow);
+    });
+  });
 });
