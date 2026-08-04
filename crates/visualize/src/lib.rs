@@ -17,6 +17,14 @@ pub use graph_data::{
     FamilyGroupMeta, FamilyLink, GraphData, LinkType, PersonNode, SelectedPerson, SelectionExport,
 };
 
+/// Combined result of loading a .gramps file: graph data for
+/// rendering plus summary statistics for the stats panel.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LoadedGraph {
+    pub graph_data: GraphData,
+    pub stats: gramps_reader::StatsReport,
+}
+
 /// Load a `.gramps` file and produce the full `GraphData` for visualization.
 ///
 /// This is a pure function (no Tauri dependency) that orchestrates the
@@ -28,14 +36,40 @@ pub use graph_data::{
 /// 4. Impute birth dates for undated nodes (unless `no_impute` is `true`).
 ///
 /// Returns a user-friendly error string on failure.
+///
+/// This function delegates to [`load_graph_data_with_stats`] and discards
+/// the statistics. Users who need both graph data and statistics should
+/// call [`load_graph_data_with_stats`] directly to avoid a second file read.
 pub fn load_graph_data(
     path: &str,
     no_impute: bool,
     generation_gap: u32,
 ) -> Result<GraphData, String> {
+    load_graph_data_with_stats(path, no_impute, generation_gap)
+        .map(|loaded| loaded.graph_data)
+}
+
+/// Load a `.gramps` file and return both graph data and summary statistics.
+///
+/// This is a pure function (no Tauri dependency) that reads the file **once**
+/// and runs both the extraction pipeline and the streaming count pass on the
+/// same in-memory content. This eliminates the redundant file I/O that
+/// occurred when calling `load_graph_data` and `get_stats` separately.
+///
+/// Returns a user-friendly error string on failure.
+pub fn load_graph_data_with_stats(
+    path: &str,
+    no_impute: bool,
+    generation_gap: u32,
+) -> Result<LoadedGraph, String> {
     let content =
         std::fs::read_to_string(path).map_err(|e| format!("Cannot read file '{}': {}", path, e))?;
 
+    // Compute stats from the same in-memory content.
+    let stats = gramps_reader::count_gramps_xml(&content)
+        .map_err(|e| format!("Failed to parse Gramps XML: {}", e))?;
+
+    // Existing extraction pipeline (unchanged).
     let mut persons = gramps_reader::extract_persons(&content)
         .map_err(|e| format!("Not a valid Gramps XML file: {}", e))?;
     let events = gramps_reader::extract_events(&content)
@@ -64,7 +98,10 @@ pub fn load_graph_data(
         }
     }
 
-    Ok(gd)
+    Ok(LoadedGraph {
+        graph_data: gd,
+        stats,
+    })
 }
 
 /// Read a `.gramps` file and return summary statistics.
