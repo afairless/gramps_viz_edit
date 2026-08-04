@@ -313,6 +313,8 @@ export function renderForcePanel(
     { key: 'spouseStrength', label: 'Spouse bond' },
     { key: 'parentChildStrength', label: 'Parent-child bond' },
     { key: 'repelStrength', label: 'Selection repel' },
+    { key: 'selectedAttractStrength', label: 'Selected attract' },
+    { key: 'unselectedAttractStrength', label: 'Unselected attract' },
   ];
 
   const valueSpans: Record<string, HTMLSpanElement> = {};
