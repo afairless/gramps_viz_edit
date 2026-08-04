@@ -44,15 +44,16 @@ fn main() {
     }
 }
 
-/// Tauri IPC command: load a `.gramps` file and return the graph data.
+/// Tauri IPC command: load a `.gramps` file and return the graph data
+/// and summary statistics as a `LoadedGraph`.
 #[cfg(feature = "visualize")]
 #[tauri::command]
 fn load_graph(
     path: &str,
     no_impute: bool,
     generation_gap: u32,
-) -> Result<visualize::GraphData, String> {
-    visualize::load_graph_data(path, no_impute, generation_gap)
+) -> Result<visualize::LoadedGraph, String> {
+    visualize::load_graph_data_with_stats(path, no_impute, generation_gap)
 }
 
 /// Tauri IPC command: export selected persons to a JSON file.
