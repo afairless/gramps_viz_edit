@@ -264,7 +264,7 @@ describe('drag handlers', () => {
       const node = makeSimNode();
       node.x = 100;
       node.y = 200;
-      onDragStart(node, makeEvent(), mockSimulation, makeSvg());
+      onDragStart(node, makeEvent(), mockSimulation);
       expect(node.fx).toBe(100);
       expect(node.fy).toBe(200);
     });
@@ -273,7 +273,7 @@ describe('drag handlers', () => {
       const node = makeSimNode();
       node.x = 1;
       node.y = 2;
-      onDragStart(node, makeEvent({ active: false }), mockSimulation, makeSvg());
+      onDragStart(node, makeEvent({ active: false }), mockSimulation);
       expect(mockAlphaTarget).toHaveBeenCalledWith(0.3);
       expect(mockRestart).toHaveBeenCalledTimes(1);
     });
@@ -282,7 +282,7 @@ describe('drag handlers', () => {
       const node = makeSimNode();
       node.x = 1;
       node.y = 2;
-      onDragStart(node, makeEvent({ active: true }), mockSimulation, makeSvg());
+      onDragStart(node, makeEvent({ active: true }), mockSimulation);
       expect(mockAlphaTarget).not.toHaveBeenCalled();
     });
 
@@ -300,44 +300,34 @@ describe('drag handlers', () => {
         node,
         makeEvent({ sourceEvent: { currentTarget: g } }),
         mockSimulation,
-        svg,
       );
       expect(g.style.cursor).toBe('grabbing');
     });
   });
 
   describe('onDrag', () => {
-    it('updates fx/fy to event coords at identity zoom', () => {
-      const svg = makeSvg();
-      (svg as unknown as { __zoom: d3.ZoomTransform }).__zoom =
-        d3.zoomIdentity;
+    it('sets fx/fy directly from event coordinates (already in SVG space)', () => {
+      // After the fix, onDrag no longer references the SVG element or zoom
+      // transform at all. event.x / event.y are always in SVG coordinate space
+      // regardless of the current zoom/pan state, so coordinates pass through
+      // unchanged in every scenario.
       const node = makeSimNode();
-      onDrag(node, makeEvent({ x: 42, y: 77 }), mockSimulation, svg);
-      expect(node.fx).toBe(42);
-      expect(node.fy).toBe(77);
-    });
-
-    it('inverts zoomed event coords back to base SVG space', () => {
-      const svg = makeSvg();
-      (svg as unknown as { __zoom: d3.ZoomTransform }).__zoom =
-        d3.zoomIdentity.scale(2);
-      const node = makeSimNode();
-      onDrag(node, makeEvent({ x: 100, y: 50 }), mockSimulation, svg);
-      expect(node.fx).toBe(50);
-      expect(node.fy).toBe(25);
+      onDrag(node, makeEvent({ x: 100, y: 50 }), mockSimulation);
+      expect(node.fx).toBe(100);
+      expect(node.fy).toBe(50);
     });
   });
 
   describe('onDragEnd', () => {
     it('cools the simulation on last gesture', () => {
       const node = makeSimNode();
-      onDragEnd(node, makeEvent({ active: false }), mockSimulation, makeSvg());
+      onDragEnd(node, makeEvent({ active: false }), mockSimulation);
       expect(mockAlphaTarget).toHaveBeenCalledWith(0);
     });
 
     it('does not cool the simulation while other gestures are active', () => {
       const node = makeSimNode();
-      onDragEnd(node, makeEvent({ active: true }), mockSimulation, makeSvg());
+      onDragEnd(node, makeEvent({ active: true }), mockSimulation);
       expect(mockAlphaTarget).not.toHaveBeenCalled();
     });
 
@@ -345,7 +335,7 @@ describe('drag handlers', () => {
       const node = makeSimNode();
       node.fx = 100;
       node.fy = 200;
-      onDragEnd(node, makeEvent(), mockSimulation, makeSvg());
+      onDragEnd(node, makeEvent(), mockSimulation);
       expect(node.fx).toBe(100);
       expect(node.fy).toBe(200);
     });
@@ -362,7 +352,6 @@ describe('drag handlers', () => {
         node,
         makeEvent({ sourceEvent: { currentTarget: g } }),
         mockSimulation,
-        svg,
       );
       expect(g.style.cursor).toBe('grab');
     });
@@ -370,10 +359,8 @@ describe('drag handlers', () => {
 
   describe('createDragBehavior', () => {
     it('exposes start/drag/end handlers as functions', () => {
-      const svg = makeSvg();
       const behavior = createDragBehavior(
         mockSimulation as unknown as d3.Simulation<SimNode, undefined>,
-        svg,
       );
       expect(typeof behavior.on('start')).toBe('function');
       expect(typeof behavior.on('drag')).toBe('function');

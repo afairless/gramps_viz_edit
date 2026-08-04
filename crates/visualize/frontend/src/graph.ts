@@ -154,7 +154,6 @@ export function onDragStart(
   d: SimNode,
   event: d3.D3DragEvent<SVGGElement, SimNode, SimNode>,
   simulation: d3.Simulation<SimNode, undefined>,
-  _svg: SVGSVGElement,
 ): void {
   if (!event.active) simulation.alphaTarget(0.3).restart();
   d.fx = d.x ?? null;
@@ -169,19 +168,15 @@ export function onDrag(
   d: SimNode,
   event: d3.D3DragEvent<SVGGElement, SimNode, SimNode>,
   _simulation: d3.Simulation<SimNode, undefined>,
-  svg: SVGSVGElement,
 ): void {
-  const transform = d3.zoomTransform(svg);
-  const [x, y] = transform.invert([event.x, event.y]);
-  d.fx = x;
-  d.fy = y;
+  d.fx = event.x;
+  d.fy = event.y;
 }
 
 export function onDragEnd(
   _d: SimNode,
   event: d3.D3DragEvent<SVGGElement, SimNode, SimNode>,
   simulation: d3.Simulation<SimNode, undefined>,
-  _svg: SVGSVGElement,
 ): void {
   if (!event.active) simulation.alphaTarget(0);
   // Pin the node where dropped — do NOT clear fx/fy
@@ -205,18 +200,17 @@ export function resetNodePositions(
 
 export function createDragBehavior(
   simulation: d3.Simulation<SimNode, undefined>,
-  svg: SVGSVGElement,
 ): d3.DragBehavior<SVGGElement, SimNode, SimNode | d3.SubjectPosition> {
   return d3
     .drag<SVGGElement, SimNode>()
     .on('start', (event: d3.D3DragEvent<SVGGElement, SimNode, SimNode>, d: SimNode) =>
-      onDragStart(d, event, simulation, svg),
+      onDragStart(d, event, simulation),
     )
     .on('drag', (event: d3.D3DragEvent<SVGGElement, SimNode, SimNode>, d: SimNode) =>
-      onDrag(d, event, simulation, svg),
+      onDrag(d, event, simulation),
     )
     .on('end', (event: d3.D3DragEvent<SVGGElement, SimNode, SimNode>, d: SimNode) =>
-      onDragEnd(d, event, simulation, svg),
+      onDragEnd(d, event, simulation),
     );
 }
 
@@ -509,7 +503,7 @@ export function renderGraph(
       });
 
     // ---- drag behavior (re-bind all visible nodes with current simulation) ----
-    nodeGroup.call(createDragBehavior(simulation, svg.node() as SVGSVGElement));
+    nodeGroup.call(createDragBehavior(simulation));
 
     // Apply highlighting
     applyHighlight();
