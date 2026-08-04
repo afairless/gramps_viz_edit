@@ -113,39 +113,6 @@ pub fn load_scenario(path: &str) -> Result<Scenario, ScenarioError> {
 }
 
 /// Convert a strategy name string to an `AdversarialStrategy` with default parameters.
-fn strategy_from_name(name: &str) -> Option<typed_graph::generate::AdversarialStrategy> {
-    match name {
-        "one_parent" | "one-parent" | "one_parent_families" => {
-            Some(typed_graph::generate::AdversarialStrategy::OneParentFamilies(0.5))
-        }
-        "missing_events" | "missing-events" => Some(
-            typed_graph::generate::AdversarialStrategy::MissingEvents(0.3),
-        ),
-        "solo" | "solo_persons" | "solo-persons" => {
-            Some(typed_graph::generate::AdversarialStrategy::SoloPersons(0.2))
-        }
-        "many_names" | "many-names" | "many_alternate_names" => {
-            Some(typed_graph::generate::AdversarialStrategy::ManyAlternateNames(0.3))
-        }
-        "disconnected" | "disconnected_subgraphs" | "disconnected-subgraphs" => {
-            Some(typed_graph::generate::AdversarialStrategy::DisconnectedSubgraphs)
-        }
-        "deep_nesting" | "deep-nesting" => {
-            Some(typed_graph::generate::AdversarialStrategy::DeepNesting)
-        }
-        "max_ref_chains" | "max-ref-chains" => {
-            Some(typed_graph::generate::AdversarialStrategy::MaxRefChains)
-        }
-        "orphaned" | "orphaned_references" | "orphaned-references" => {
-            Some(typed_graph::generate::AdversarialStrategy::OrphanedReferences)
-        }
-        "double_gender" | "double-gender" => Some(
-            typed_graph::generate::AdversarialStrategy::DoubleGender(0.2),
-        ),
-        _ => None,
-    }
-}
-
 impl Scenario {
     /// Convert this scenario to a `RandomConfig`, using defaults for unset fields.
     pub fn to_random_config(&self) -> typed_graph::generate::RandomConfig {
@@ -208,7 +175,7 @@ impl Scenario {
                     .map(|strat_list| {
                         strat_list
                             .iter()
-                            .filter_map(|s| strategy_from_name(s))
+                            .filter_map(|s| typed_graph::generate::AdversarialStrategy::from_name(s))
                             .collect()
                     })
                     .unwrap_or_default();

@@ -371,7 +371,7 @@ fn parse_adversarial_flag(
         .split(',')
         .map(|s| {
             let s = s.trim();
-            strategy_from_name(s).ok_or_else(|| {
+            AdversarialStrategy::from_name(s).ok_or_else(|| {
                 crate::error::CliError::ConfigError(format!(
                     "unknown adversarial strategy: '{}'. Valid strategies: one-parent, missing-events, \
                      solo, many-names, disconnected, deep-nesting, max-ref-chains, orphaned, double-gender",
@@ -392,30 +392,6 @@ fn parse_adversarial_flag(
         enabled: true,
         strategies,
     })
-}
-
-/// Convert a strategy name string to an `AdversarialStrategy`.
-fn strategy_from_name(name: &str) -> Option<AdversarialStrategy> {
-    match name {
-        "one_parent" | "one-parent" | "one_parent_families" => {
-            Some(AdversarialStrategy::OneParentFamilies(0.5))
-        }
-        "missing_events" | "missing-events" => Some(AdversarialStrategy::MissingEvents(0.3)),
-        "solo" | "solo_persons" | "solo-persons" => Some(AdversarialStrategy::SoloPersons(0.2)),
-        "many_names" | "many-names" | "many_alternate_names" => {
-            Some(AdversarialStrategy::ManyAlternateNames(0.3))
-        }
-        "disconnected" | "disconnected_subgraphs" | "disconnected-subgraphs" => {
-            Some(AdversarialStrategy::DisconnectedSubgraphs)
-        }
-        "deep_nesting" | "deep-nesting" => Some(AdversarialStrategy::DeepNesting),
-        "max_ref_chains" | "max-ref-chains" => Some(AdversarialStrategy::MaxRefChains),
-        "orphaned" | "orphaned_references" | "orphaned-references" => {
-            Some(AdversarialStrategy::OrphanedReferences)
-        }
-        "double_gender" | "double-gender" => Some(AdversarialStrategy::DoubleGender(0.2)),
-        _ => None,
-    }
 }
 
 #[cfg(test)]
