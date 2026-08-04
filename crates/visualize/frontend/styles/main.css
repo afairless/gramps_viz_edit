@@ -37,6 +37,10 @@ html, body {
   position: relative;
 }
 
+#graph-container.force-frozen {
+  box-shadow: inset 0 0 0 3px #2266aa;
+}
+
 #tooltip {
   position: absolute;
   pointer-events: none;
