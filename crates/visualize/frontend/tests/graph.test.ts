@@ -17,9 +17,11 @@ import {
   createSimulationForces,
   applyForceConfig,
   createSelectionRepelForce,
+  createSelectedAttractForce,
+  createUnselectedAttractForce,
   renderGraph,
 } from '../src/graph';
-import type { SimNode } from '../src/graph';
+import type { SimNode, AttractForce } from '../src/graph';
 import type { GraphData, PersonNode, FamilyLink } from '../src/types';
 import { DEFAULT_FORCE_CONFIG, type ForceConfig } from '../src/types';
 
@@ -437,12 +439,14 @@ describe('force simulation configuration shape', () => {
 });
 
 describe('DEFAULT_FORCE_CONFIG', () => {
-  it('has all four keys', () => {
+  it('has all six keys', () => {
     const cfg = DEFAULT_FORCE_CONFIG;
     expect(cfg).toHaveProperty('generationPull');
     expect(cfg).toHaveProperty('spouseStrength');
     expect(cfg).toHaveProperty('parentChildStrength');
     expect(cfg).toHaveProperty('repelStrength');
+    expect(cfg).toHaveProperty('selectedAttractStrength');
+    expect(cfg).toHaveProperty('unselectedAttractStrength');
   });
 
   it('values are within [0, 2] range', () => {
@@ -455,6 +459,10 @@ describe('DEFAULT_FORCE_CONFIG', () => {
     expect(cfg.parentChildStrength).toBeLessThanOrEqual(2);
     expect(cfg.repelStrength).toBeGreaterThanOrEqual(0);
     expect(cfg.repelStrength).toBeLessThanOrEqual(2);
+    expect(cfg.selectedAttractStrength).toBeGreaterThanOrEqual(0);
+    expect(cfg.selectedAttractStrength).toBeLessThanOrEqual(2);
+    expect(cfg.unselectedAttractStrength).toBeGreaterThanOrEqual(0);
+    expect(cfg.unselectedAttractStrength).toBeLessThanOrEqual(2);
   });
 
   it('provides sensible defaults (not all zero)', () => {
@@ -466,6 +474,11 @@ describe('DEFAULT_FORCE_CONFIG', () => {
 
   it('repelStrength defaults to 0.00', () => {
     expect(DEFAULT_FORCE_CONFIG.repelStrength).toBe(0.00);
+  });
+
+  it('attract strengths default to 0.00', () => {
+    expect(DEFAULT_FORCE_CONFIG.selectedAttractStrength).toBe(0.00);
+    expect(DEFAULT_FORCE_CONFIG.unselectedAttractStrength).toBe(0.00);
   });
 });
 
@@ -597,10 +610,28 @@ describe('applyForceConfig roundtrip', () => {
 
     sim.stop();
   });
+
+  it('mutates attract-force strengths on applyForceConfig', () => {
+    const sim = d3.forceSimulation<SimNode>([]);
+    createSimulationForces(sim, DEFAULT_FORCE_CONFIG, () => 0, [], [], 800, 600, () => new Set<string>());
+
+    const config: ForceConfig = { generationPull: 0.3, spouseStrength: 0.8, parentChildStrength: 0.5, repelStrength: 0, selectedAttractStrength: 0.9, unselectedAttractStrength: 1.2 };
+    applyForceConfig(sim, config, () => 0);
+
+    const selAttract = sim.force('selected-attract') as AttractForce | undefined;
+    expect(selAttract).toBeTruthy();
+    expect(selAttract!.strength()).toBe(0.9);
+
+    const unselAttract = sim.force('unselected-attract') as AttractForce | undefined;
+    expect(unselAttract).toBeTruthy();
+    expect(unselAttract!.strength()).toBe(1.2);
+
+    sim.stop();
+  });
 });
 
 describe('createSimulationForces', () => {
-  it('registers all seven named forces', () => {
+  it('registers all nine named forces', () => {
     const sim = d3.forceSimulation<SimNode>([]);
     createSimulationForces(sim, DEFAULT_FORCE_CONFIG, () => 0, [], [], 800, 600, () => new Set<string>());
 
@@ -611,6 +642,23 @@ describe('createSimulationForces', () => {
     expect(sim.force('collision')).toBeTruthy();
     expect(sim.force('center')).toBeTruthy();
     expect(sim.force('selection-repel')).toBeTruthy();
+    expect(sim.force('selected-attract')).toBeTruthy();
+    expect(sim.force('unselected-attract')).toBeTruthy();
+
+    sim.stop();
+  });
+
+  it('attract forces have strength 0 by default', () => {
+    const sim = d3.forceSimulation<SimNode>([]);
+    createSimulationForces(sim, DEFAULT_FORCE_CONFIG, () => 0, [], [], 800, 600, () => new Set<string>());
+
+    const selAttract = sim.force('selected-attract') as AttractForce | undefined;
+    expect(selAttract).toBeTruthy();
+    expect(selAttract!.strength()).toBe(0);
+
+    const unselAttract = sim.force('unselected-attract') as AttractForce | undefined;
+    expect(unselAttract).toBeTruthy();
+    expect(unselAttract!.strength()).toBe(0);
 
     sim.stop();
   });
@@ -913,6 +961,217 @@ describe('createSelectionRepelForce', () => {
     expect(consoleSpy).not.toHaveBeenCalled();
 
     consoleSpy.mockRestore();
+  });
+});
+
+describe('createSelectedAttractForce', () => {
+  it('initializes with strength 0 and returns it via getter', () => {
+    const force = createSelectedAttractForce(() => new Set<string>());
+    expect(force.strength()).toBe(0);
+  });
+
+  it('strength setter returns the force for chaining', () => {
+    const force = createSelectedAttractForce(() => new Set<string>());
+    const result = force.strength(1.5);
+    expect(result).toBe(force);
+  });
+
+  it('strength getter returns the value set by the setter', () => {
+    const force = createSelectedAttractForce(() => new Set<string>());
+    force.strength(2);
+    expect(force.strength()).toBe(2);
+  });
+
+  it('is a d3.Force with initialize and tick callable', () => {
+    const force = createSelectedAttractForce(() => new Set<string>());
+    expect(typeof force.initialize).toBe('function');
+    expect(typeof force.strength).toBe('function');
+  });
+
+  it('pulls selected nodes toward their centroid', () => {
+    const nodes: SimNode[] = [
+      { handle: 'p1', name: 'A', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0, x: 0, y: 0, vx: 0, vy: 0 },
+      { handle: 'p2', name: 'B', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0, x: 100, y: 0, vx: 0, vy: 0 },
+      { handle: 'p3', name: 'C', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0, x: 0, y: 100, vx: 0, vy: 0 },
+      { handle: 'u1', name: 'U', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'female', family_group: 0, generation: 0, x: 200, y: 200, vx: 0, vy: 0 },
+    ];
+    const force = createSelectedAttractForce(() => new Set<string>(['p1', 'p2', 'p3']));
+    force.initialize(nodes);
+    force.strength(1);
+    force(1); // tick with alpha = 1
+
+    // Centroid of selected ≈ (33.3, 33.3)
+    // p1 at (0,0): should be pulled right and down (positive vx, positive vy)
+    expect(nodes[0].vx!).toBeGreaterThan(0);
+    expect(nodes[0].vy!).toBeGreaterThan(0);
+
+    // p2 at (100,0): should be pulled left (negative vx) and down (positive vy)
+    expect(nodes[1].vx!).toBeLessThan(0);
+    expect(nodes[1].vy!).toBeGreaterThan(0);
+
+    // p3 at (0,100): should be pulled right (positive vx) and up (negative vy)
+    expect(nodes[2].vx!).toBeGreaterThan(0);
+    expect(nodes[2].vy!).toBeLessThan(0);
+
+    // Unselected node (u1) should have no velocity change
+    expect(nodes[3].vx).toBe(0);
+    expect(nodes[3].vy).toBe(0);
+  });
+
+  it('does nothing when selected set is empty', () => {
+    const nodes: SimNode[] = [
+      { handle: 'p1', name: 'A', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0, x: 0, y: 0, vx: 0, vy: 0 },
+      { handle: 'p2', name: 'B', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'female', family_group: 0, generation: 0, x: 100, y: 0, vx: 0, vy: 0 },
+    ];
+    const force = createSelectedAttractForce(() => new Set<string>());
+    force.initialize(nodes);
+    force.strength(1);
+    force(1);
+
+    expect(nodes[0].vx).toBe(0);
+    expect(nodes[1].vx).toBe(0);
+  });
+
+  it('does nothing with a single selected node', () => {
+    const nodes: SimNode[] = [
+      { handle: 'p1', name: 'A', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0, x: 0, y: 0, vx: 0, vy: 0 },
+      { handle: 'p2', name: 'B', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'female', family_group: 0, generation: 0, x: 100, y: 0, vx: 0, vy: 0 },
+    ];
+    const force = createSelectedAttractForce(() => new Set<string>(['p1']));
+    force.initialize(nodes);
+    force.strength(1);
+    force(1);
+
+    expect(nodes[0].vx).toBe(0);
+    expect(nodes[1].vx).toBe(0);
+  });
+
+  it('does nothing when all nodes are selected (no unselected complement)', () => {
+    const nodes: SimNode[] = [
+      { handle: 'p1', name: 'A', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0, x: 0, y: 0, vx: 0, vy: 0 },
+      { handle: 'p2', name: 'B', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'female', family_group: 0, generation: 0, x: 100, y: 0, vx: 0, vy: 0 },
+    ];
+    const force = createSelectedAttractForce(() => new Set<string>(['p1', 'p2']));
+    force.initialize(nodes);
+    force.strength(1);
+    force(1);
+
+    expect(nodes[0].vx).toBe(0);
+    expect(nodes[1].vx).toBe(0);
+  });
+
+  it('does nothing when strength is 0', () => {
+    const nodes: SimNode[] = [
+      { handle: 'p1', name: 'A', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0, x: 0, y: 0, vx: 0, vy: 0 },
+      { handle: 'p2', name: 'B', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'female', family_group: 0, generation: 0, x: 100, y: 0, vx: 0, vy: 0 },
+      { handle: 'u1', name: 'U', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0, x: 200, y: 200, vx: 0, vy: 0 },
+    ];
+    const force = createSelectedAttractForce(() => new Set<string>(['p1', 'p2']));
+    force.initialize(nodes);
+    force.strength(0);
+    force(1);
+
+    expect(nodes[0].vx).toBe(0);
+    expect(nodes[1].vy).toBe(0);
+  });
+});
+
+describe('createUnselectedAttractForce', () => {
+  it('initializes with strength 0 and returns it via getter', () => {
+    const force = createUnselectedAttractForce(() => new Set<string>());
+    expect(force.strength()).toBe(0);
+  });
+
+  it('strength setter returns the force for chaining', () => {
+    const force = createUnselectedAttractForce(() => new Set<string>());
+    const result = force.strength(1.5);
+    expect(result).toBe(force);
+  });
+
+  it('strength getter returns the value set by the setter', () => {
+    const force = createUnselectedAttractForce(() => new Set<string>());
+    force.strength(2);
+    expect(force.strength()).toBe(2);
+  });
+
+  it('is a d3.Force with initialize and tick callable', () => {
+    const force = createUnselectedAttractForce(() => new Set<string>());
+    expect(typeof force.initialize).toBe('function');
+    expect(typeof force.strength).toBe('function');
+  });
+
+  it('pulls unselected nodes toward their centroid while selected nodes stay still', () => {
+    const nodes: SimNode[] = [
+      { handle: 'p1', name: 'A', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0, x: 0, y: 0, vx: 0, vy: 0 },
+      { handle: 'p2', name: 'B', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0, x: 100, y: 0, vx: 0, vy: 0 },
+      { handle: 'p3', name: 'C', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0, x: 0, y: 100, vx: 0, vy: 0 },
+      { handle: 's1', name: 'S', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'female', family_group: 0, generation: 0, x: 200, y: 200, vx: 0, vy: 0 },
+    ];
+    // p1, p2, p3 are unselected; s1 is selected
+    const force = createUnselectedAttractForce(() => new Set<string>(['s1']));
+    force.initialize(nodes);
+    force.strength(1);
+    force(1); // tick with alpha = 1
+
+    // Centroid of unselected ≈ (33.3, 33.3)
+    // p1 at (0,0): pulled right and down
+    expect(nodes[0].vx!).toBeGreaterThan(0);
+    expect(nodes[0].vy!).toBeGreaterThan(0);
+
+    // p2 at (100,0): pulled left and down
+    expect(nodes[1].vx!).toBeLessThan(0);
+    expect(nodes[1].vy!).toBeGreaterThan(0);
+
+    // p3 at (0,100): pulled right and up
+    expect(nodes[2].vx!).toBeGreaterThan(0);
+    expect(nodes[2].vy!).toBeLessThan(0);
+
+    // Selected node (s1) should have no velocity change
+    expect(nodes[3].vx).toBe(0);
+    expect(nodes[3].vy).toBe(0);
+  });
+
+  it('does nothing when no selected nodes exist', () => {
+    const nodes: SimNode[] = [
+      { handle: 'p1', name: 'A', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0, x: 0, y: 0, vx: 0, vy: 0 },
+      { handle: 'p2', name: 'B', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'female', family_group: 0, generation: 0, x: 100, y: 0, vx: 0, vy: 0 },
+    ];
+    const force = createUnselectedAttractForce(() => new Set<string>());
+    force.initialize(nodes);
+    force.strength(1);
+    force(1);
+
+    expect(nodes[0].vx).toBe(0);
+    expect(nodes[1].vx).toBe(0);
+  });
+
+  it('does nothing with a single unselected node (need at least 2)', () => {
+    const nodes: SimNode[] = [
+      { handle: 'p1', name: 'A', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0, x: 0, y: 0, vx: 0, vy: 0 },
+      { handle: 's1', name: 'S', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'female', family_group: 0, generation: 0, x: 100, y: 0, vx: 0, vy: 0 },
+    ];
+    const force = createUnselectedAttractForce(() => new Set<string>(['s1']));
+    force.initialize(nodes);
+    force.strength(1);
+    force(1);
+
+    expect(nodes[0].vx).toBe(0);
+    expect(nodes[1].vx).toBe(0);
+  });
+
+  it('does nothing when strength is 0', () => {
+    const nodes: SimNode[] = [
+      { handle: 'p1', name: 'A', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0, x: 0, y: 0, vx: 0, vy: 0 },
+      { handle: 'p2', name: 'B', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'female', family_group: 0, generation: 0, x: 100, y: 0, vx: 0, vy: 0 },
+      { handle: 's1', name: 'S', birth_date: null, death_date: null, birth_year: null, is_imputed: false, gender: 'male', family_group: 0, generation: 0, x: 200, y: 200, vx: 0, vy: 0 },
+    ];
+    const force = createUnselectedAttractForce(() => new Set<string>(['s1']));
+    force.initialize(nodes);
+    force.strength(0);
+    force(1);
+
+    expect(nodes[0].vx).toBe(0);
+    expect(nodes[1].vy).toBe(0);
   });
 });
 
