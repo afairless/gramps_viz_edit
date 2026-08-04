@@ -440,7 +440,7 @@ export function renderGraph(
   let currentFilter: number | null = null;
   let currentConfig: ForceConfig = { ...DEFAULT_FORCE_CONFIG };
   let highlighted = new Set<string>();
-  const selectedSet = new Set<string>();
+  let selectedSet = new Set<string>();
   let nodeClickCb: ((handle: string) => void) | null = null;
   let nodeHoverCb: ((handle: string | null, event: MouseEvent) => void) | null =
     null;
@@ -701,6 +701,7 @@ export function renderGraph(
 
     setHighlighted(handles: Set<string>) {
       highlighted = handles;
+      selectedSet = handles;
       applyHighlight();
     },
 
