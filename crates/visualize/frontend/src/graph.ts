@@ -66,6 +66,7 @@ interface SimLink {
 // ---------------------------------------------------------------------------
 
 const NODE_RADIUS = 8;
+const SELECTED_NODE_RADIUS = 16;
 const SELECTED_STROKE_WIDTH = 3;
 
 // Force simulation parameters (module-level so tests can import them)
@@ -519,18 +520,18 @@ export function renderGraph(
     nodeGroup.each(function (d: SimNode) {
       const el = d3.select(this);
       const isSelected = highlighted.has(d.handle);
-      el.select('circle').attr(
-        'stroke',
-        isSelected ? '#ff6b6b' : '#fff',
+      el.select('circle')
+        .attr('r', isSelected ? SELECTED_NODE_RADIUS : NODE_RADIUS)
+        .attr('stroke', isSelected ? '#ff6b6b' : '#fff')
+        .attr('stroke-width', isSelected ? SELECTED_STROKE_WIDTH : 1.5)
+        // Ensure fill/stroke-dasharray/opacity stay correct (no overlapped deselection)
+        .attr('fill', getNodeColor(d.birth_year, colorScale))
+        .attr('stroke-dasharray', getNodeStrokeDash(d.is_imputed))
+        .attr('opacity', getNodeOpacity(d.is_imputed));
+      el.select('text').attr(
+        'dy',
+        isSelected ? -SELECTED_NODE_RADIUS - 6 : -NODE_RADIUS - 6,
       );
-      el.select('circle').attr(
-        'stroke-width',
-        isSelected ? SELECTED_STROKE_WIDTH : 1.5,
-      );
-      // Ensure fill/stroke-dasharray/opacity stay correct (no overlapped deselection)
-      el.select('circle').attr('fill', getNodeColor(d.birth_year, colorScale));
-      el.select('circle').attr('stroke-dasharray', getNodeStrokeDash(d.is_imputed));
-      el.select('circle').attr('opacity', getNodeOpacity(d.is_imputed));
     });
   }
 

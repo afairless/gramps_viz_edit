@@ -664,4 +664,117 @@ describe('restartSimulation', () => {
   });
 });
 
+describe('selected node sizing', () => {
+  it('renders selected nodes at 2x radius and unselected at default', () => {
+    const data = makeGraph(
+      [makeNode('p1'), makeNode('p2')],
+      [{ source: 'p1', target: 'p2', link_type: 'Spouse' }],
+    );
+    const container = document.createElement('div');
+    container.style.width = '800px';
+    container.style.height = '600px';
+    document.body.appendChild(container);
+
+    const controller = renderGraph(container, data);
+    controller.setHighlighted(new Set(['p1']));
+
+    // DOM join order follows data.nodes order: p1 then p2
+    const circles = container.querySelectorAll('circle');
+    expect(circles).toHaveLength(2);
+    expect(circles[0].getAttribute('r')).toBe('16'); // selected
+    expect(circles[1].getAttribute('r')).toBe('8');  // unselected
+
+    // Labels move up with the radius
+    const labels = container.querySelectorAll('text');
+    expect(labels[0].getAttribute('dy')).toBe('-22');
+    expect(labels[1].getAttribute('dy')).toBe('-14');
+
+    controller.destroy();
+    document.body.removeChild(container);
+  });
+
+  it('restores default size when selection is cleared', () => {
+    const data = makeGraph(
+      [makeNode('p1'), makeNode('p2')],
+      [{ source: 'p1', target: 'p2', link_type: 'Spouse' }],
+    );
+    const container = document.createElement('div');
+    container.style.width = '800px';
+    container.style.height = '600px';
+    document.body.appendChild(container);
+
+    const controller = renderGraph(container, data);
+    controller.setHighlighted(new Set(['p1']));
+    controller.setHighlighted(new Set());
+
+    const circles = container.querySelectorAll('circle');
+    expect(circles).toHaveLength(2);
+    expect(circles[0].getAttribute('r')).toBe('8');
+    expect(circles[1].getAttribute('r')).toBe('8');
+
+    const labels = container.querySelectorAll('text');
+    expect(labels[0].getAttribute('dy')).toBe('-14');
+    expect(labels[1].getAttribute('dy')).toBe('-14');
+
+    controller.destroy();
+    document.body.removeChild(container);
+  });
+
+  it('grows all selected nodes in a multi-node selection', () => {
+    const data = makeGraph(
+      [makeNode('p1'), makeNode('p2')],
+      [{ source: 'p1', target: 'p2', link_type: 'Spouse' }],
+    );
+    const container = document.createElement('div');
+    container.style.width = '800px';
+    container.style.height = '600px';
+    document.body.appendChild(container);
+
+    const controller = renderGraph(container, data);
+    controller.setHighlighted(new Set(['p1', 'p2']));
+
+    const circles = container.querySelectorAll('circle');
+    expect(circles).toHaveLength(2);
+    expect(circles[0].getAttribute('r')).toBe('16');
+    expect(circles[1].getAttribute('r')).toBe('16');
+
+    controller.destroy();
+    document.body.removeChild(container);
+  });
+
+  it('grows only visible nodes when a family-group filter is active', () => {
+    const data = makeGraph(
+      [
+        makeNode('p1', { family_group: 1, generation: 0 }),
+        makeNode('p2', { family_group: 1, generation: 1 }),
+        makeNode('p3', { family_group: 2, generation: 0 }),
+        makeNode('p4', { family_group: 2, generation: 1 }),
+      ],
+      [
+        { source: 'p1', target: 'p2', link_type: 'ParentChild' },
+        { source: 'p3', target: 'p4', link_type: 'ParentChild' },
+      ],
+    );
+    const container = document.createElement('div');
+    container.style.width = '800px';
+    container.style.height = '600px';
+    document.body.appendChild(container);
+
+    const controller = renderGraph(container, data);
+    // Filter to group 1, then highlight p1 (visible) and p3 (hidden)
+    controller.setFamilyGroupFilter(1);
+    controller.setHighlighted(new Set(['p1', 'p3']));
+
+    // Only group 1 nodes (p1, p2) are in the DOM
+    const circles = container.querySelectorAll('circle');
+    expect(circles).toHaveLength(2);
+    // p1 is selected and visible → r=16
+    expect(circles[0].getAttribute('r')).toBe('16');
+    // p2 is not selected → r=8
+    expect(circles[1].getAttribute('r')).toBe('8');
+
+    controller.destroy();
+    document.body.removeChild(container);
+  });
+});
 
