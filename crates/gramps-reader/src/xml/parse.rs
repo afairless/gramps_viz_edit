@@ -164,6 +164,22 @@ impl Parser {
                                 self.parse_event(&mut reader, e)?;
                                 Section::Events
                             }
+                            Section::Places if name == b"place" => {
+                                self.parse_place(&mut reader, e)?;
+                                Section::Places
+                            }
+                            Section::Sources if name == b"source" => {
+                                self.parse_source(&mut reader, e)?;
+                                Section::Sources
+                            }
+                            Section::Citations if name == b"citation" => {
+                                self.parse_citation(&mut reader, e)?;
+                                Section::Citations
+                            }
+                            Section::Repositories if name == b"repository" => {
+                                self.parse_repository(&mut reader, e)?;
+                                Section::Repositories
+                            }
                             _ => section,
                         },
                     };
@@ -213,6 +229,50 @@ impl Parser {
                                 Node::Event(EventData {
                                     handle,
                                     ..EventData::default()
+                                }),
+                            )
+                            .map_err(graph_error)?;
+                    } else if name == b"place" && matches!(section, Section::Places) {
+                        let handle = read_handle_attr(e).unwrap_or_default();
+                        self.graph
+                            .add_node(
+                                handle.clone(),
+                                Node::Place(PlaceData {
+                                    handle,
+                                    ..PlaceData::default()
+                                }),
+                            )
+                            .map_err(graph_error)?;
+                    } else if name == b"source" && matches!(section, Section::Sources) {
+                        let handle = read_handle_attr(e).unwrap_or_default();
+                        self.graph
+                            .add_node(
+                                handle.clone(),
+                                Node::Source(SourceData {
+                                    handle,
+                                    ..SourceData::default()
+                                }),
+                            )
+                            .map_err(graph_error)?;
+                    } else if name == b"citation" && matches!(section, Section::Citations) {
+                        let handle = read_handle_attr(e).unwrap_or_default();
+                        self.graph
+                            .add_node(
+                                handle.clone(),
+                                Node::Citation(CitationData {
+                                    handle,
+                                    ..CitationData::default()
+                                }),
+                            )
+                            .map_err(graph_error)?;
+                    } else if name == b"repository" && matches!(section, Section::Repositories) {
+                        let handle = read_handle_attr(e).unwrap_or_default();
+                        self.graph
+                            .add_node(
+                                handle.clone(),
+                                Node::Repository(RepositoryData {
+                                    handle,
+                                    ..RepositoryData::default()
                                 }),
                             )
                             .map_err(graph_error)?;
@@ -1169,6 +1229,739 @@ impl Parser {
         }
     }
 
+    /// Parse a `<place>` element and its children.
+    ///
+    /// Reads the place's name (stored in the `name.city` field of the
+    /// `Location` struct), hierarchy parent references via `<placeref>`,
+    /// and all handle references (citations, notes, media, tags,
+    /// attributes). Accumulates referenced handles into pending edge
+    /// lists for the second pass.
+    fn parse_place(
+        &mut self,
+        reader: &mut Reader<&[u8]>,
+        start: &quick_xml::events::BytesStart,
+    ) -> Result<(), Error> {
+        let handle = read_handle_attr(start).unwrap_or_default();
+
+        let mut place = PlaceData {
+            handle: handle.clone(),
+            ..PlaceData::default()
+        };
+        let mut current_attr_type = String::new();
+        let mut current_attr_value = String::new();
+
+        loop {
+            match reader.read_event() {
+                Ok(Event::Start(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"name" => {
+                            // <name value="..." type="..." lang="..."/>
+                            for attr in e.attributes().flatten() {
+                                let key = attr.key.as_ref();
+                                let val = String::from_utf8_lossy(&attr.value).to_string();
+                                if key == b"value" || key.ends_with(b":value") {
+                                    place.name.city = Some(val);
+                                }
+                            }
+                        }
+                        b"attribute" => {
+                            current_attr_type.clear();
+                            current_attr_value.clear();
+                            for attr in e.attributes().flatten() {
+                                let key = attr.key.as_ref();
+                                let val = String::from_utf8_lossy(&attr.value).to_string();
+                                if key == b"type" || key.ends_with(b":type") {
+                                    current_attr_type = val;
+                                } else if key == b"value" || key.ends_with(b":value") {
+                                    current_attr_value = val;
+                                }
+                            }
+                            if !current_attr_type.is_empty() && !current_attr_value.is_empty() {
+                                place.attribute_list.push(Attribute {
+                                    type_field: parse_attribute_type(&current_attr_type),
+                                    value: current_attr_value.clone(),
+                                    citation_list: vec![],
+                                    note_list: vec![],
+                                });
+                                current_attr_type.clear();
+                                current_attr_value.clear();
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(Event::Empty(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"name" => {
+                            // Self-closing <name value="..."/>
+                            for attr in e.attributes().flatten() {
+                                let key = attr.key.as_ref();
+                                let val = String::from_utf8_lossy(&attr.value).to_string();
+                                if key == b"value" || key.ends_with(b":value") {
+                                    place.name.city = Some(val);
+                                }
+                            }
+                        }
+                        b"placeref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                place.place_ref_list.push(PlaceRef {
+                                    ref_field: h.clone(),
+                                });
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::PlacePlaceRef,
+                                });
+                            }
+                        }
+                        b"citationref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                place.citation_list.push(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::PlaceCitation,
+                                });
+                            }
+                        }
+                        b"noteref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                place.note_list.push(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::PlaceNote,
+                                });
+                            }
+                        }
+                        b"tagref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                place.tag_list.push(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::PlaceTag,
+                                });
+                            }
+                        }
+                        b"mediaref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                place.media_list.push(MediaRef { ref_field: h.clone() });
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::PlaceMediaRef,
+                                });
+                            }
+                        }
+                        b"attribute" => {
+                            let mut attr_type = String::new();
+                            let mut attr_value = String::new();
+                            for attr in e.attributes().flatten() {
+                                let key = attr.key.as_ref();
+                                let val = String::from_utf8_lossy(&attr.value).to_string();
+                                if key == b"type" || key.ends_with(b":type") {
+                                    attr_type = val;
+                                } else if key == b"value" || key.ends_with(b":value") {
+                                    attr_value = val;
+                                }
+                            }
+                            if !attr_type.is_empty() || !attr_value.is_empty() {
+                                place.attribute_list.push(Attribute {
+                                    type_field: parse_attribute_type(&attr_type),
+                                    value: attr_value,
+                                    citation_list: vec![],
+                                    note_list: vec![],
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(Event::End(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"place" => {
+                            self.graph
+                                .add_node(handle.clone(), Node::Place(place))
+                                .map_err(graph_error)?;
+                            return Ok(());
+                        }
+                        b"name" => {}
+                        b"attribute" => {
+                            if !current_attr_type.is_empty() || !current_attr_value.is_empty() {
+                                place.attribute_list.push(Attribute {
+                                    type_field: parse_attribute_type(&current_attr_type),
+                                    value: current_attr_value.clone(),
+                                    citation_list: vec![],
+                                    note_list: vec![],
+                                });
+                            }
+                            current_attr_type.clear();
+                            current_attr_value.clear();
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(Event::Eof) => {
+                    return Err(Error::XmlParseError {
+                        message: "unexpected end of file while parsing place".to_string(),
+                    });
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(Error::XmlParseError {
+                        message: format!("{} at byte {}", e, reader.error_position()),
+                    });
+                }
+            }
+        }
+    }
+
+    /// Parse a `<source>` element and its children.
+    ///
+    /// Reads the source's title, author, publication info, repository
+    /// references, and all handle references (notes, media, tags,
+    /// attributes). Accumulates referenced handles into pending edge
+    /// lists for the second pass.
+    fn parse_source(
+        &mut self,
+        reader: &mut Reader<&[u8]>,
+        start: &quick_xml::events::BytesStart,
+    ) -> Result<(), Error> {
+        let handle = read_handle_attr(start).unwrap_or_default();
+
+        let mut source = SourceData {
+            handle: handle.clone(),
+            ..SourceData::default()
+        };
+        let mut in_title = false;
+        let mut in_author = false;
+        let mut in_pubinfo = false;
+        let mut current_attr_type = String::new();
+        let mut current_attr_value = String::new();
+
+        loop {
+            match reader.read_event() {
+                Ok(Event::Start(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"title" => in_title = true,
+                        b"author" => in_author = true,
+                        b"pubinfo" => in_pubinfo = true,
+                        b"attribute" => {
+                            current_attr_type.clear();
+                            current_attr_value.clear();
+                            for attr in e.attributes().flatten() {
+                                let key = attr.key.as_ref();
+                                let val = String::from_utf8_lossy(&attr.value).to_string();
+                                if key == b"type" || key.ends_with(b":type") {
+                                    current_attr_type = val;
+                                } else if key == b"value" || key.ends_with(b":value") {
+                                    current_attr_value = val;
+                                }
+                            }
+                            if !current_attr_type.is_empty() && !current_attr_value.is_empty() {
+                                source.attribute_list.push(Attribute {
+                                    type_field: parse_attribute_type(&current_attr_type),
+                                    value: current_attr_value.clone(),
+                                    citation_list: vec![],
+                                    note_list: vec![],
+                                });
+                                current_attr_type.clear();
+                                current_attr_value.clear();
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(Event::Empty(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"reporef" => {
+                            let hlink = read_hlink_attr(e).unwrap_or_default();
+                            let mut call_number = None;
+                            let mut media_type = None;
+                            for attr in e.attributes().flatten() {
+                                let key = attr.key.as_ref();
+                                let val = String::from_utf8_lossy(&attr.value).to_string();
+                                if key == b"callnumber" || key.ends_with(b":callnumber") {
+                                    call_number = Some(val);
+                                } else if key == b"mediatype" || key.ends_with(b":mediatype") {
+                                    media_type = parse_source_media_type(&val);
+                                }
+                            }
+                            let repo_ref = RepoRef {
+                                call_number,
+                                media_type,
+                                ref_field: hlink.clone(),
+                            };
+                            source.reporef_list.push(repo_ref.clone());
+                            self.pending.push(PendingEdge::SourceRepoRef {
+                                source: handle.clone(),
+                                target: hlink,
+                                metadata: repo_ref,
+                            });
+                        }
+                        b"noteref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                source.note_list.push(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::SourceNote,
+                                });
+                            }
+                        }
+                        b"tagref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                source.tag_list.push(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::SourceTag,
+                                });
+                            }
+                        }
+                        b"mediaref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                source.media_list.push(MediaRef { ref_field: h.clone() });
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::SourceMediaRef,
+                                });
+                            }
+                        }
+                        b"attribute" => {
+                            let mut attr_type = String::new();
+                            let mut attr_value = String::new();
+                            for attr in e.attributes().flatten() {
+                                let key = attr.key.as_ref();
+                                let val = String::from_utf8_lossy(&attr.value).to_string();
+                                if key == b"type" || key.ends_with(b":type") {
+                                    attr_type = val;
+                                } else if key == b"value" || key.ends_with(b":value") {
+                                    attr_value = val;
+                                }
+                            }
+                            if !attr_type.is_empty() || !attr_value.is_empty() {
+                                source.attribute_list.push(Attribute {
+                                    type_field: parse_attribute_type(&attr_type),
+                                    value: attr_value,
+                                    citation_list: vec![],
+                                    note_list: vec![],
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(Event::Text(ref e)) => {
+                    if let Ok(text) = e.unescape() {
+                        let text = text.trim();
+                        if text.is_empty() {
+                            continue;
+                        }
+                        if in_title {
+                            source.title = text.to_string();
+                        } else if in_author {
+                            source.author = Some(text.to_string());
+                        } else if in_pubinfo {
+                            source.pubinfo = Some(text.to_string());
+                        }
+                    }
+                }
+                Ok(Event::End(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"source" => {
+                            self.graph
+                                .add_node(handle.clone(), Node::Source(source))
+                                .map_err(graph_error)?;
+                            return Ok(());
+                        }
+                        b"title" => in_title = false,
+                        b"author" => in_author = false,
+                        b"pubinfo" => in_pubinfo = false,
+                        b"attribute" => {
+                            if !current_attr_type.is_empty() || !current_attr_value.is_empty() {
+                                source.attribute_list.push(Attribute {
+                                    type_field: parse_attribute_type(&current_attr_type),
+                                    value: current_attr_value.clone(),
+                                    citation_list: vec![],
+                                    note_list: vec![],
+                                });
+                            }
+                            current_attr_type.clear();
+                            current_attr_value.clear();
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(Event::Eof) => {
+                    return Err(Error::XmlParseError {
+                        message: "unexpected end of file while parsing source".to_string(),
+                    });
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(Error::XmlParseError {
+                        message: format!("{} at byte {}", e, reader.error_position()),
+                    });
+                }
+            }
+        }
+    }
+
+    /// Parse a `<citation>` element and its children.
+    ///
+    /// Reads the citation's source reference, page, confidence, and all
+    /// handle references (notes, media, tags). Accumulates referenced
+    /// handles into pending edge lists for the second pass.
+    fn parse_citation(
+        &mut self,
+        reader: &mut Reader<&[u8]>,
+        start: &quick_xml::events::BytesStart,
+    ) -> Result<(), Error> {
+        let handle = read_handle_attr(start).unwrap_or_default();
+
+        let mut citation = CitationData {
+            handle: handle.clone(),
+            ..CitationData::default()
+        };
+        let mut in_page = false;
+        let mut in_confidence = false;
+
+        loop {
+            match reader.read_event() {
+                Ok(Event::Start(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"page" => in_page = true,
+                        b"confidence" => in_confidence = true,
+                        _ => {}
+                    }
+                }
+                Ok(Event::Empty(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"sourceref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                citation.source_handle =
+                                    into_source_handle_field(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::CitationSource,
+                                });
+                            }
+                        }
+                        b"noteref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                citation.note_list.push(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::CitationNote,
+                                });
+                            }
+                        }
+                        b"tagref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                citation.tag_list.push(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::CitationTag,
+                                });
+                            }
+                        }
+                        b"mediaref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                citation.media_list.push(MediaRef { ref_field: h.clone() });
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::CitationMediaRef,
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(Event::Text(ref e)) => {
+                    if let Ok(text) = e.unescape() {
+                        let text = text.trim();
+                        if text.is_empty() {
+                            continue;
+                        }
+                        if in_page {
+                            citation.page = Some(text.to_string());
+                        } else if in_confidence {
+                            citation.confidence = text.parse::<i32>().ok();
+                        }
+                    }
+                }
+                Ok(Event::End(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"citation" => {
+                            self.graph
+                                .add_node(handle.clone(), Node::Citation(citation))
+                                .map_err(graph_error)?;
+                            return Ok(());
+                        }
+                        b"page" => in_page = false,
+                        b"confidence" => in_confidence = false,
+                        _ => {}
+                    }
+                }
+                Ok(Event::Eof) => {
+                    return Err(Error::XmlParseError {
+                        message: "unexpected end of file while parsing citation".to_string(),
+                    });
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(Error::XmlParseError {
+                        message: format!("{} at byte {}", e, reader.error_position()),
+                    });
+                }
+            }
+        }
+    }
+
+    /// Parse a `<repository>` element and its children.
+    ///
+    /// Reads the repository's name, type, addresses, URLs, and all
+    /// handle references (notes, media, tags). Accumulates referenced
+    /// handles into pending edge lists for the second pass.
+    fn parse_repository(
+        &mut self,
+        reader: &mut Reader<&[u8]>,
+        start: &quick_xml::events::BytesStart,
+    ) -> Result<(), Error> {
+        let handle = read_handle_attr(start).unwrap_or_default();
+
+        let mut repo = RepositoryData {
+            handle: handle.clone(),
+            ..RepositoryData::default()
+        };
+        let mut in_name = false;
+        let mut in_type = false;
+        let mut in_address = false;
+        let mut in_address_location = false;
+        let mut current_location = Location::default();
+        let mut in_city = false;
+        let mut in_country = false;
+        let mut in_county = false;
+        let mut in_state = false;
+        let mut in_street = false;
+        let mut in_postal = false;
+        let mut in_locality = false;
+        let mut in_phone = false;
+        let mut in_url = false;
+        let mut current_url = Url::default();
+        let mut in_url_desc = false;
+        let mut url_type = None;
+
+        loop {
+            match reader.read_event() {
+                Ok(Event::Start(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"name" => in_name = true,
+                        b"type" => in_type = true,
+                        b"address" => {
+                            in_address = true;
+                            current_location = Location::default();
+                        }
+                        b"location" if in_address => in_address_location = true,
+                        b"city" if in_address_location => in_city = true,
+                        b"country" if in_address_location => in_country = true,
+                        b"county" if in_address_location => in_county = true,
+                        b"state" if in_address_location => in_state = true,
+                        b"street" if in_address_location => in_street = true,
+                        b"postal" if in_address_location => in_postal = true,
+                        b"locality" if in_address_location => in_locality = true,
+                        b"phone" if in_address_location => in_phone = true,
+                        b"url" => {
+                            in_url = true;
+                            current_url = Url::default();
+                            url_type = None;
+                            for attr in e.attributes().flatten() {
+                                let key = attr.key.as_ref();
+                                let val = String::from_utf8_lossy(&attr.value).to_string();
+                                if key == b"href" || key.ends_with(b":href") {
+                                    current_url.href = val;
+                                } else if key == b"type" || key.ends_with(b":type") {
+                                    url_type = Some(val);
+                                }
+                            }
+                        }
+                        b"desc" if in_url => in_url_desc = true,
+                        _ => {}
+                    }
+                }
+                Ok(Event::Empty(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"noteref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                repo.note_list.push(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::RepositoryNote,
+                                });
+                            }
+                        }
+                        b"tagref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                repo.tag_list.push(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::RepositoryTag,
+                                });
+                            }
+                        }
+                        b"mediaref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                repo.media_list.push(MediaRef { ref_field: h.clone() });
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::RepositoryMediaRef,
+                                });
+                            }
+                        }
+                        b"url" => {
+                            let mut href = String::new();
+                            let mut url_type_val = None;
+                            for attr in e.attributes().flatten() {
+                                let key = attr.key.as_ref();
+                                let val = String::from_utf8_lossy(&attr.value).to_string();
+                                if key == b"href" || key.ends_with(b":href") {
+                                    href = val;
+                                } else if key == b"type" || key.ends_with(b":type") {
+                                    url_type_val = parse_url_type(&val);
+                                }
+                            }
+                            if !href.is_empty() {
+                                repo.url_list.push(Url {
+                                    href,
+                                    type_field: url_type_val,
+                                    desc: None,
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(Event::Text(ref e)) => {
+                    if let Ok(text) = e.unescape() {
+                        let text = text.trim();
+                        if text.is_empty() {
+                            continue;
+                        }
+                        if in_name {
+                            repo.name = Some(text.to_string());
+                        } else if in_type {
+                            repo.type_field = parse_repository_type(text);
+                        } else if in_city {
+                            current_location.city = Some(text.to_string());
+                        } else if in_country {
+                            current_location.country = Some(text.to_string());
+                        } else if in_county {
+                            current_location.county = Some(text.to_string());
+                        } else if in_state {
+                            current_location.state = Some(text.to_string());
+                        } else if in_street {
+                            current_location.street = Some(text.to_string());
+                        } else if in_postal {
+                            current_location.postal = Some(text.to_string());
+                        } else if in_locality {
+                            current_location.locality = Some(text.to_string());
+                        } else if in_phone {
+                            current_location.phone = Some(text.to_string());
+                        } else if in_url_desc {
+                            current_url.desc = Some(text.to_string());
+                        }
+                    }
+                }
+                Ok(Event::End(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"repository" => {
+                            self.graph
+                                .add_node(handle.clone(), Node::Repository(repo))
+                                .map_err(graph_error)?;
+                            return Ok(());
+                        }
+                        b"name" => in_name = false,
+                        b"type" => in_type = false,
+                        b"address" => {
+                            repo.address_list.push(Address {
+                                location: Some(current_location.clone()),
+                                date: None,
+                                citation_list: vec![],
+                                note_list: vec![],
+                            });
+                            in_address = false;
+                            in_address_location = false;
+                        }
+                        b"location" => in_address_location = false,
+                        b"city" => in_city = false,
+                        b"country" => in_country = false,
+                        b"county" => in_county = false,
+                        b"state" => in_state = false,
+                        b"street" => in_street = false,
+                        b"postal" => in_postal = false,
+                        b"locality" => in_locality = false,
+                        b"phone" => in_phone = false,
+                        b"url" => {
+                            if let Some(t) = url_type.take() {
+                                current_url.type_field = parse_url_type(&t);
+                            }
+                            repo.url_list.push(current_url.clone());
+                            in_url = false;
+                            in_url_desc = false;
+                        }
+                        b"desc" => in_url_desc = false,
+                        _ => {}
+                    }
+                }
+                Ok(Event::Eof) => {
+                    return Err(Error::XmlParseError {
+                        message: "unexpected end of file while parsing repository".to_string(),
+                    });
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(Error::XmlParseError {
+                        message: format!("{} at byte {}", e, reader.error_position()),
+                    });
+                }
+            }
+        }
+    }
+
     /// Build all pending edges into the graph.
     ///
     /// Must be called after all nodes have been parsed.  Dangling
@@ -1493,6 +2286,43 @@ fn parse_event_type(s: &str) -> Option<EventType> {
         "retirement" => Some(EventType::Retirement),
         "title" => Some(EventType::Title),
         "will" => Some(EventType::Will),
+        _ => None,
+    }
+}
+
+/// Parse a RepositoryType from a string value.
+fn parse_repository_type(s: &str) -> Option<RepositoryType> {
+    match s.trim().to_lowercase().as_str() {
+        "archive" => Some(RepositoryType::Archive),
+        "cemetery" => Some(RepositoryType::Cemetery),
+        "church" => Some(RepositoryType::Church),
+        "court house" | "court_house" => Some(RepositoryType::CourtHouse),
+        "historical society" | "historical_society" => Some(RepositoryType::HistoricalSociety),
+        "library" => Some(RepositoryType::Library),
+        "museum" => Some(RepositoryType::Museum),
+        "other" => Some(RepositoryType::Other),
+        _ => None,
+    }
+}
+
+/// Parse a SourceMediaType from a string value.
+fn parse_source_media_type(s: &str) -> Option<SourceMediaType> {
+    match s.trim().to_lowercase().as_str() {
+        "audio" => Some(SourceMediaType::Audio),
+        "book" => Some(SourceMediaType::Book),
+        "cd" => Some(SourceMediaType::CD),
+        "card" => Some(SourceMediaType::Card),
+        "electronic" => Some(SourceMediaType::Electronic),
+        "fiche" => Some(SourceMediaType::Fiche),
+        "film" => Some(SourceMediaType::Film),
+        "magazine" => Some(SourceMediaType::Magazine),
+        "manuscript" => Some(SourceMediaType::Manuscript),
+        "map" => Some(SourceMediaType::Map),
+        "newspaper" => Some(SourceMediaType::Newspaper),
+        "other" => Some(SourceMediaType::Other),
+        "photo" => Some(SourceMediaType::Photo),
+        "tombstone" => Some(SourceMediaType::Tombstone),
+        "video" => Some(SourceMediaType::Video),
         _ => None,
     }
 }
@@ -2232,6 +3062,365 @@ mod tests {
     <event handle="e0004">
       <eventtype>
   </events>"#,
+        );
+        let result = parse_graph(&xml);
+        assert!(matches!(result, Err(Error::XmlParseError { .. })));
+    }
+
+    // -----------------------------------------------------------------------
+    // Place helpers
+    // -----------------------------------------------------------------------
+
+    /// Parse places from XML using the Parser directly (no edge validation).
+    fn places_from_parser(xml: &str) -> Vec<PlaceData> {
+        let version = detect_schema_version(xml).unwrap();
+        let schema = Schema::for_version(&version).unwrap();
+        let mut parser = Parser::new(schema);
+        parser.parse_all(xml).unwrap();
+        parser
+            .graph
+            .nodes_by_kind(NodeKind::Place)
+            .iter()
+            .map(|h| match parser.graph.get_node(h) {
+                Some(Node::Place(p)) => p.clone(),
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+
+    fn single_place_from_parser(xml: &str) -> PlaceData {
+        let mut ps = places_from_parser(xml);
+        assert_eq!(ps.len(), 1, "expected exactly one place");
+        ps.remove(0)
+    }
+
+    // -----------------------------------------------------------------------
+    // Place parsing
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_place_full() {
+        let xml = with_db(
+            r#"  <places>
+    <place handle="pl0001">
+      <name value="Springfield"/>
+      <placeref hlink="pl0000"/>
+      <citationref hlink="c0001"/>
+      <noteref hlink="n0001"/>
+      <tagref hlink="t0001"/>
+      <mediaref hlink="m0001"/>
+      <attribute type="Description" value="county seat"/>
+    </place>
+  </places>"#,
+        );
+        let p = single_place_from_parser(&xml);
+        assert_eq!(p.handle, "pl0001");
+        assert_eq!(p.name.city.as_deref(), Some("Springfield"));
+        assert_eq!(p.place_ref_list.len(), 1);
+        assert_eq!(p.place_ref_list[0].ref_field, "pl0000");
+        assert_eq!(p.citation_list, vec!["c0001"]);
+        assert_eq!(p.note_list, vec!["n0001"]);
+        assert_eq!(p.tag_list, vec!["t0001"]);
+        assert_eq!(p.media_list.len(), 1);
+        assert_eq!(p.media_list[0].ref_field, "m0001");
+        assert_eq!(p.attribute_list.len(), 1);
+        assert_eq!(p.attribute_list[0].value, "county seat");
+        assert_eq!(p.attribute_list[0].type_field, AttributeType::Description);
+    }
+
+    #[test]
+    fn parse_place_minimal() {
+        let xml = with_db(r#"  <places>
+    <place handle="pl0002"/>
+  </places>"#);
+        let p = single_place_from_parser(&xml);
+        assert_eq!(p.handle, "pl0002");
+        assert!(p.name.city.is_none());
+        assert!(p.place_ref_list.is_empty());
+    }
+
+    #[test]
+    fn parse_place_malformed_xml() {
+        let xml = with_db(
+            r#"  <places>
+    <place handle="pl0003">
+      <name value="Broken">
+  </places>"#,
+        );
+        let result = parse_graph(&xml);
+        assert!(matches!(result, Err(Error::XmlParseError { .. })));
+    }
+
+    // -----------------------------------------------------------------------
+    // Source helpers
+    // -----------------------------------------------------------------------
+
+    /// Parse sources from XML using the Parser directly (no edge validation).
+    fn sources_from_parser(xml: &str) -> Vec<SourceData> {
+        let version = detect_schema_version(xml).unwrap();
+        let schema = Schema::for_version(&version).unwrap();
+        let mut parser = Parser::new(schema);
+        parser.parse_all(xml).unwrap();
+        parser
+            .graph
+            .nodes_by_kind(NodeKind::Source)
+            .iter()
+            .map(|h| match parser.graph.get_node(h) {
+                Some(Node::Source(s)) => s.clone(),
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+
+    fn single_source_from_parser(xml: &str) -> SourceData {
+        let mut ss = sources_from_parser(xml);
+        assert_eq!(ss.len(), 1, "expected exactly one source");
+        ss.remove(0)
+    }
+
+    // -----------------------------------------------------------------------
+    // Source parsing
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_source_full() {
+        let xml = with_db(
+            r#"  <sources>
+    <source handle="s0001">
+      <title>Marriage Records of Springfield</title>
+      <author>Jane Clerk</author>
+      <pubinfo>City Hall, 1850</pubinfo>
+      <reporef hlink="r0001" callnumber="AB-123" mediatype="Book"/>
+      <noteref hlink="n0001"/>
+      <tagref hlink="t0001"/>
+      <mediaref hlink="m0001"/>
+      <attribute type="Description" value="microfilm copy"/>
+    </source>
+  </sources>"#,
+        );
+        let s = single_source_from_parser(&xml);
+        assert_eq!(s.handle, "s0001");
+        assert_eq!(s.title, "Marriage Records of Springfield");
+        assert_eq!(s.author.as_deref(), Some("Jane Clerk"));
+        assert_eq!(s.pubinfo.as_deref(), Some("City Hall, 1850"));
+        assert_eq!(s.reporef_list.len(), 1);
+        assert_eq!(s.reporef_list[0].ref_field, "r0001");
+        assert_eq!(s.reporef_list[0].call_number.as_deref(), Some("AB-123"));
+        assert_eq!(
+            s.reporef_list[0].media_type,
+            Some(SourceMediaType::Book)
+        );
+        assert_eq!(s.note_list, vec!["n0001"]);
+        assert_eq!(s.tag_list, vec!["t0001"]);
+        assert_eq!(s.media_list.len(), 1);
+        assert_eq!(s.media_list[0].ref_field, "m0001");
+        assert_eq!(s.attribute_list.len(), 1);
+        assert_eq!(s.attribute_list[0].value, "microfilm copy");
+    }
+
+    #[test]
+    fn parse_source_minimal() {
+        let xml = with_db(r#"  <sources>
+    <source handle="s0002"/>
+  </sources>"#);
+        let s = single_source_from_parser(&xml);
+        assert_eq!(s.handle, "s0002");
+        assert!(s.title.is_empty());
+        assert!(s.author.is_none());
+        assert!(s.reporef_list.is_empty());
+    }
+
+    #[test]
+    fn parse_source_malformed_xml() {
+        let xml = with_db(
+            r#"  <sources>
+    <source handle="s0003">
+      <title>Broken
+  </sources>"#,
+        );
+        let result = parse_graph(&xml);
+        assert!(matches!(result, Err(Error::XmlParseError { .. })));
+    }
+
+    // -----------------------------------------------------------------------
+    // Citation helpers
+    // -----------------------------------------------------------------------
+
+    /// Parse citations from XML using the Parser directly (no edge validation).
+    fn citations_from_parser(xml: &str) -> Vec<CitationData> {
+        let version = detect_schema_version(xml).unwrap();
+        let schema = Schema::for_version(&version).unwrap();
+        let mut parser = Parser::new(schema);
+        parser.parse_all(xml).unwrap();
+        parser
+            .graph
+            .nodes_by_kind(NodeKind::Citation)
+            .iter()
+            .map(|h| match parser.graph.get_node(h) {
+                Some(Node::Citation(c)) => c.clone(),
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+
+    fn single_citation_from_parser(xml: &str) -> CitationData {
+        let mut cs = citations_from_parser(xml);
+        assert_eq!(cs.len(), 1, "expected exactly one citation");
+        cs.remove(0)
+    }
+
+    // -----------------------------------------------------------------------
+    // Citation parsing
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_citation_full() {
+        let xml = with_db(
+            r#"  <citations>
+    <citation handle="c0001">
+      <sourceref hlink="s0001"/>
+      <page>p. 42</page>
+      <confidence>2</confidence>
+      <noteref hlink="n0001"/>
+      <tagref hlink="t0001"/>
+      <mediaref hlink="m0001"/>
+    </citation>
+  </citations>"#,
+        );
+        let c = single_citation_from_parser(&xml);
+        assert_eq!(c.handle, "c0001");
+        assert_eq!(c.source_handle, "s0001");
+        assert_eq!(c.page.as_deref(), Some("p. 42"));
+        assert_eq!(c.confidence, Some(2));
+        assert_eq!(c.note_list, vec!["n0001"]);
+        assert_eq!(c.tag_list, vec!["t0001"]);
+        assert_eq!(c.media_list.len(), 1);
+        assert_eq!(c.media_list[0].ref_field, "m0001");
+    }
+
+    #[test]
+    fn parse_citation_minimal() {
+        let xml = with_db(r#"  <citations>
+    <citation handle="c0002"/>
+  </citations>"#);
+        let c = single_citation_from_parser(&xml);
+        assert_eq!(c.handle, "c0002");
+        assert!(c.source_handle.is_empty());
+        assert!(c.page.is_none());
+        assert!(c.confidence.is_none());
+    }
+
+    #[test]
+    fn parse_citation_malformed_xml() {
+        let xml = with_db(
+            r#"  <citations>
+    <citation handle="c0003">
+      <page>Broken
+  </citations>"#,
+        );
+        let result = parse_graph(&xml);
+        assert!(matches!(result, Err(Error::XmlParseError { .. })));
+    }
+
+    // -----------------------------------------------------------------------
+    // Repository helpers
+    // -----------------------------------------------------------------------
+
+    /// Parse repositories from XML using the Parser directly (no edge validation).
+    fn repositories_from_parser(xml: &str) -> Vec<RepositoryData> {
+        let version = detect_schema_version(xml).unwrap();
+        let schema = Schema::for_version(&version).unwrap();
+        let mut parser = Parser::new(schema);
+        parser.parse_all(xml).unwrap();
+        parser
+            .graph
+            .nodes_by_kind(NodeKind::Repository)
+            .iter()
+            .map(|h| match parser.graph.get_node(h) {
+                Some(Node::Repository(r)) => r.clone(),
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+
+    fn single_repository_from_parser(xml: &str) -> RepositoryData {
+        let mut rs = repositories_from_parser(xml);
+        assert_eq!(rs.len(), 1, "expected exactly one repository");
+        rs.remove(0)
+    }
+
+    // -----------------------------------------------------------------------
+    // Repository parsing
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_repository_full() {
+        let xml = with_db(
+            r#"  <repositories>
+    <repository handle="r0001">
+      <name>Springfield Public Library</name>
+      <type>Library</type>
+      <address>
+        <location>
+          <city>Springfield</city>
+          <country>USA</country>
+        </location>
+      </address>
+      <url href="https://library.example.com" type="Web Home"/>
+      <noteref hlink="n0001"/>
+      <tagref hlink="t0001"/>
+      <mediaref hlink="m0001"/>
+    </repository>
+  </repositories>"#,
+        );
+        let r = single_repository_from_parser(&xml);
+        assert_eq!(r.handle, "r0001");
+        assert_eq!(r.name.as_deref(), Some("Springfield Public Library"));
+        assert_eq!(r.type_field, Some(RepositoryType::Library));
+        assert_eq!(r.address_list.len(), 1);
+        assert_eq!(
+            r.address_list[0]
+                .location
+                .as_ref()
+                .and_then(|l| l.city.as_deref()),
+            Some("Springfield")
+        );
+        assert_eq!(
+            r.address_list[0]
+                .location
+                .as_ref()
+                .and_then(|l| l.country.as_deref()),
+            Some("USA")
+        );
+        assert_eq!(r.url_list.len(), 1);
+        assert_eq!(r.url_list[0].href, "https://library.example.com");
+        assert_eq!(r.url_list[0].type_field, Some(UrlType::WebHome));
+        assert_eq!(r.note_list, vec!["n0001"]);
+        assert_eq!(r.tag_list, vec!["t0001"]);
+        assert_eq!(r.media_list.len(), 1);
+        assert_eq!(r.media_list[0].ref_field, "m0001");
+    }
+
+    #[test]
+    fn parse_repository_minimal() {
+        let xml = with_db(r#"  <repositories>
+    <repository handle="r0002"/>
+  </repositories>"#);
+        let r = single_repository_from_parser(&xml);
+        assert_eq!(r.handle, "r0002");
+        assert!(r.name.is_none());
+        assert!(r.type_field.is_none());
+        assert!(r.address_list.is_empty());
+        assert!(r.url_list.is_empty());
+    }
+
+    #[test]
+    fn parse_repository_malformed_xml() {
+        let xml = with_db(
+            r#"  <repositories>
+    <repository handle="r0003">
+      <name>Broken
+  </repositories>"#,
         );
         let result = parse_graph(&xml);
         assert!(matches!(result, Err(Error::XmlParseError { .. })));
