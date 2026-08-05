@@ -12,8 +12,8 @@ use std::collections::BTreeSet;
 
 use typed_graph::{
     Address, Attribute, ChildRef, CitationData, DateValue, EventData, EventRef, FamilyData,
-    Handle, LdsOrd, Location, MediaRef, Name, PersonData, PersonRef, PlaceData, PlaceRef,
-    RepoRef, RepositoryData, SourceData, Surname, Url,
+    Handle, LdsOrd, Location, MediaData, MediaRef, Name, NoteData, PersonData, PersonRef,
+    PlaceData, PlaceRef, RepoRef, RepositoryData, SourceData, Surname, TagData, Url,
 };
 
 use crate::report::{FieldChange, FieldKind};
@@ -1225,6 +1225,142 @@ pub fn compare_repository(a: &RepositoryData, b: &RepositoryData) -> Vec<FieldCh
     changes
 }
 
+/// Compare two [`MediaData`] structs field by field.
+pub fn compare_media(a: &MediaData, b: &MediaData) -> Vec<FieldChange> {
+    let mut changes = Vec::new();
+
+    changes.extend(compare_field_optional_text(
+        "gramps_id",
+        a.gramps_id.as_deref(),
+        b.gramps_id.as_deref(),
+    ));
+    changes.extend(compare_field_optional_text(
+        "desc",
+        a.desc.as_deref(),
+        b.desc.as_deref(),
+    ));
+    changes.extend(compare_field_optional_text(
+        "path",
+        a.path.as_deref(),
+        b.path.as_deref(),
+    ));
+    changes.extend(compare_field_optional_text(
+        "mime_type",
+        a.mime_type.as_deref(),
+        b.mime_type.as_deref(),
+    ));
+    changes.extend(compare_field_optional_text(
+        "checksum",
+        a.checksum.as_deref(),
+        b.checksum.as_deref(),
+    ));
+    changes.extend(compare_handle_array(
+        "citation_list",
+        &a.citation_list,
+        &b.citation_list,
+    ));
+    changes.extend(compare_handle_array("note_list", &a.note_list, &b.note_list));
+    changes.extend(compare_handle_array("tag_list", &a.tag_list, &b.tag_list));
+
+    let max_attrs = a.attribute_list.len().max(b.attribute_list.len());
+    for i in 0..max_attrs {
+        let prefix = format!("attribute_list[{i}]");
+        match (a.attribute_list.get(i), b.attribute_list.get(i)) {
+            (Some(aa), Some(ab)) => {
+                changes.extend(compare_attribute(&prefix, aa, ab));
+            }
+            (Some(aa), None) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: Some(format!("{aa:?}")),
+                    new_value: None,
+                    similarity: 0.0,
+                });
+            }
+            (None, Some(ab)) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: None,
+                    new_value: Some(format!("{ab:?}")),
+                    similarity: 0.0,
+                });
+            }
+            (None, None) => {}
+        }
+    }
+
+    changes
+}
+
+/// Compare two [`NoteData`] structs field by field.
+pub fn compare_note(a: &NoteData, b: &NoteData) -> Vec<FieldChange> {
+    let mut changes = Vec::new();
+
+    changes.extend(compare_field_optional_text(
+        "gramps_id",
+        a.gramps_id.as_deref(),
+        b.gramps_id.as_deref(),
+    ));
+    changes.extend(compare_field_text("text", &a.text, &b.text));
+    if a.format != b.format {
+        changes.push(FieldChange {
+            field_kind: FieldKind::Numeric,
+            field_name: "format".into(),
+            old_value: a.format.map(|v| v.to_string()),
+            new_value: b.format.map(|v| v.to_string()),
+            similarity: 0.0,
+        });
+    }
+    if a.type_field != b.type_field {
+        changes.push(FieldChange {
+            field_kind: FieldKind::Enum,
+            field_name: "type_field".into(),
+            old_value: a.type_field.map(|v| format!("{v:?}")),
+            new_value: b.type_field.map(|v| format!("{v:?}")),
+            similarity: 0.0,
+        });
+    }
+    changes.extend(compare_handle_array(
+        "citation_list",
+        &a.citation_list,
+        &b.citation_list,
+    ));
+    changes.extend(compare_handle_array("tag_list", &a.tag_list, &b.tag_list));
+
+    changes
+}
+
+/// Compare two [`TagData`] structs field by field.
+pub fn compare_tag(a: &TagData, b: &TagData) -> Vec<FieldChange> {
+    let mut changes = Vec::new();
+
+    changes.extend(compare_field_optional_text(
+        "gramps_id",
+        a.gramps_id.as_deref(),
+        b.gramps_id.as_deref(),
+    ));
+    changes.extend(compare_field_text("name", &a.name, &b.name));
+    changes.extend(compare_field_optional_text(
+        "color",
+        a.color.as_deref(),
+        b.color.as_deref(),
+    ));
+    if a.priority != b.priority {
+        changes.push(FieldChange {
+            field_kind: FieldKind::Numeric,
+            field_name: "priority".into(),
+            old_value: a.priority.map(|v| v.to_string()),
+            new_value: b.priority.map(|v| v.to_string()),
+            similarity: 0.0,
+        });
+    }
+    changes.extend(compare_handle_array("tag_list", &a.tag_list, &b.tag_list));
+
+    changes
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -2043,5 +2179,214 @@ mod tests {
         let a = RepositoryData::default();
         let b = RepositoryData::default();
         assert!(compare_repository(&a, &b).is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // compare_media
+    // -----------------------------------------------------------------------
+
+    fn make_media() -> MediaData {
+        MediaData {
+            handle: "M001".into(),
+            gramps_id: Some("O0001".into()),
+            desc: Some("Family photo".into()),
+            path: Some("photos/family.jpg".into()),
+            mime_type: Some("image/jpeg".into()),
+            checksum: Some("abc123".into()),
+            attribute_list: vec![],
+            citation_list: vec![],
+            note_list: vec![],
+            tag_list: vec![],
+        }
+    }
+
+    #[test]
+    fn media_identical() {
+        let a = make_media();
+        let b = make_media();
+        assert!(compare_media(&a, &b).is_empty());
+    }
+
+    #[test]
+    fn media_change_desc() {
+        let a = make_media();
+        let mut b = make_media();
+        b.desc = Some("Wedding photo".into());
+        let changes = compare_media(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "desc");
+        assert_eq!(changes[0].field_kind, FieldKind::Text);
+        assert!(changes[0].similarity > 0.0 && changes[0].similarity < 1.0);
+    }
+
+    #[test]
+    fn media_change_checksum() {
+        let a = make_media();
+        let mut b = make_media();
+        b.checksum = Some("def456".into());
+        let changes = compare_media(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "checksum");
+        assert_eq!(changes[0].field_kind, FieldKind::Text);
+    }
+
+    #[test]
+    fn media_reorder_tag_list() {
+        let mut a = make_media();
+        let mut b = make_media();
+        a.tag_list = vec!["T001".into(), "T002".into()];
+        b.tag_list = vec!["T002".into(), "T001".into()];
+        assert!(compare_media(&a, &b).is_empty());
+    }
+
+    #[test]
+    fn media_empty_vs_empty() {
+        let a = MediaData::default();
+        let b = MediaData::default();
+        assert!(compare_media(&a, &b).is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // compare_note
+    // -----------------------------------------------------------------------
+
+    fn make_note() -> NoteData {
+        NoteData {
+            handle: "N001".into(),
+            gramps_id: Some("N0001".into()),
+            text: "Married on June 15, 1870".into(),
+            format: Some(0),
+            type_field: Some(typed_graph::NoteType::General),
+            citation_list: vec![],
+            tag_list: vec![],
+        }
+    }
+
+    #[test]
+    fn note_identical() {
+        let a = make_note();
+        let b = make_note();
+        assert!(compare_note(&a, &b).is_empty());
+    }
+
+    #[test]
+    fn note_change_text() {
+        let a = make_note();
+        let mut b = make_note();
+        b.text = "Married on June 20, 1870".into();
+        let changes = compare_note(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "text");
+        assert_eq!(changes[0].field_kind, FieldKind::Text);
+        assert!(changes[0].similarity > 0.0 && changes[0].similarity < 1.0);
+    }
+
+    #[test]
+    fn note_change_format() {
+        let a = make_note();
+        let mut b = make_note();
+        b.format = Some(1);
+        let changes = compare_note(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "format");
+        assert_eq!(changes[0].field_kind, FieldKind::Numeric);
+    }
+
+    #[test]
+    fn note_change_type() {
+        let a = make_note();
+        let mut b = make_note();
+        b.type_field = Some(typed_graph::NoteType::Research);
+        let changes = compare_note(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "type_field");
+        assert_eq!(changes[0].field_kind, FieldKind::Enum);
+    }
+
+    #[test]
+    fn note_reorder_tag_list() {
+        let mut a = make_note();
+        let mut b = make_note();
+        a.tag_list = vec!["T001".into(), "T002".into()];
+        b.tag_list = vec!["T002".into(), "T001".into()];
+        assert!(compare_note(&a, &b).is_empty());
+    }
+
+    #[test]
+    fn note_empty_vs_empty() {
+        let a = NoteData::default();
+        let b = NoteData::default();
+        assert!(compare_note(&a, &b).is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // compare_tag
+    // -----------------------------------------------------------------------
+
+    fn make_tag() -> TagData {
+        TagData {
+            handle: "T001".into(),
+            gramps_id: Some("T0001".into()),
+            name: "Important".into(),
+            color: Some("#ff0000".into()),
+            priority: Some(1),
+            tag_list: vec![],
+        }
+    }
+
+    #[test]
+    fn tag_identical() {
+        let a = make_tag();
+        let b = make_tag();
+        assert!(compare_tag(&a, &b).is_empty());
+    }
+
+    #[test]
+    fn tag_change_color() {
+        let a = make_tag();
+        let mut b = make_tag();
+        b.color = Some("#00ff00".into());
+        let changes = compare_tag(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "color");
+        assert_eq!(changes[0].field_kind, FieldKind::Text);
+    }
+
+    #[test]
+    fn tag_change_name() {
+        let a = make_tag();
+        let mut b = make_tag();
+        b.name = "Urgent".into();
+        let changes = compare_tag(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "name");
+        assert_eq!(changes[0].field_kind, FieldKind::Text);
+    }
+
+    #[test]
+    fn tag_change_priority() {
+        let a = make_tag();
+        let mut b = make_tag();
+        b.priority = Some(2);
+        let changes = compare_tag(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "priority");
+        assert_eq!(changes[0].field_kind, FieldKind::Numeric);
+    }
+
+    #[test]
+    fn tag_reorder_tag_list() {
+        let mut a = make_tag();
+        let mut b = make_tag();
+        a.tag_list = vec!["T001".into(), "T002".into()];
+        b.tag_list = vec!["T002".into(), "T001".into()];
+        assert!(compare_tag(&a, &b).is_empty());
+    }
+
+    #[test]
+    fn tag_empty_vs_empty() {
+        let a = TagData::default();
+        let b = TagData::default();
+        assert!(compare_tag(&a, &b).is_empty());
     }
 }
