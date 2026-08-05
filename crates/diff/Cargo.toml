@@ -8,3 +8,4 @@ typed-graph = { path = "../typed-graph" }
 gramps-reader = { path = "../gramps-reader" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+strsim = { workspace = true }

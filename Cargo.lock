@@ -691,6 +691,7 @@ dependencies = [
  "gramps-reader",
  "serde",
  "serde_json",
+ "strsim",
  "typed-graph",
 ]
 

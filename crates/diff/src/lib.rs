@@ -7,6 +7,8 @@
 //! - `normalize`: Text normalization utilities
 //! - `report`: Diff report data types
 
+pub mod similarity;
+
 use std::error::Error;
 use std::fmt;
 
