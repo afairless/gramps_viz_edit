@@ -124,7 +124,7 @@ mod tests {
         ] {
             let score = levenshtein(a, b);
             assert!(
-                score >= 0.0 && score <= 1.0,
+                (0.0..=1.0).contains(&score),
                 "levenshtein({a:?}, {b:?}) = {score} not in [0, 1]"
             );
         }
@@ -171,7 +171,7 @@ mod tests {
         ] {
             let score = token_jaccard(a, b);
             assert!(
-                score >= 0.0 && score <= 1.0,
+                (0.0..=1.0).contains(&score),
                 "token_jaccard({a:?}, {b:?}) = {score} not in [0, 1]"
             );
         }
@@ -181,9 +181,7 @@ mod tests {
 
     #[test]
     fn tokenized_levenshtein_identical() {
-        assert!(
-            (tokenized_levenshtein("hello world", "hello world") - 1.0).abs() < 1e-9
-        );
+        assert!((tokenized_levenshtein("hello world", "hello world") - 1.0).abs() < 1e-9);
     }
 
     #[test]
@@ -228,7 +226,7 @@ mod tests {
         ] {
             let score = tokenized_levenshtein(a, b);
             assert!(
-                score >= 0.0 && score <= 1.0,
+                (0.0..=1.0).contains(&score),
                 "tokenized_levenshtein({a:?}, {b:?}) = {score} not in [0, 1]"
             );
         }
@@ -279,7 +277,7 @@ mod tests {
             ] {
                 let score = func(a, b);
                 assert!(
-                    score >= 0.0 && score <= 1.0,
+                    (0.0..=1.0).contains(&score),
                     "{name}({a:?}, {b:?}) = {score} not in [0, 1]"
                 );
             }

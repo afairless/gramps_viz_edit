@@ -7,6 +7,7 @@
 //! - `normalize`: Text normalization utilities
 //! - `report`: Diff report data types
 
+pub mod compare;
 pub mod normalize;
 pub mod report;
 pub mod similarity;
@@ -64,10 +65,7 @@ mod tests {
 
     #[test]
     fn diff_error_display() {
-        assert_eq!(
-            DiffError::Unimplemented.to_string(),
-            "not yet implemented"
-        );
+        assert_eq!(DiffError::Unimplemented.to_string(), "not yet implemented");
         assert_eq!(
             DiffError::ParseError("bad file".into()).to_string(),
             "parse error: bad file"
