@@ -918,6 +918,168 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // Flat-format event type parsing (Gramps XML 1.7.1 / Gramps 5.1)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn extract_event_birth_flat() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <events>
+    <event handle="e0001">
+      <type>Birth</type>
+      <dateval val="2000-03-03"/>
+    </event>
+  </events>
+</database>"#;
+        let e = single_event(xml);
+        assert_eq!(e.handle, "e0001");
+        assert_eq!(e.event_type.as_deref(), Some("Birth"));
+        assert_eq!(e.date_val.as_deref(), Some("2000-03-03"));
+        assert_eq!(e.date_year, Some(2000));
+    }
+
+    #[test]
+    fn extract_event_death_flat() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <events>
+    <event handle="e0002">
+      <type>Death</type>
+      <dateval val="1920-07-01"/>
+    </event>
+  </events>
+</database>"#;
+        let e = single_event(xml);
+        assert_eq!(e.handle, "e0002");
+        assert_eq!(e.event_type.as_deref(), Some("Death"));
+        assert_eq!(e.date_val.as_deref(), Some("1920-07-01"));
+        assert_eq!(e.date_year, Some(1920));
+    }
+
+    #[test]
+    fn extract_event_marriage_flat() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <events>
+    <event handle="e0003">
+      <type>Marriage</type>
+      <dateval val="1875-06-15"/>
+    </event>
+  </events>
+</database>"#;
+        let e = single_event(xml);
+        assert_eq!(e.handle, "e0003");
+        assert_eq!(e.event_type.as_deref(), Some("Marriage"));
+        assert_eq!(e.date_val.as_deref(), Some("1875-06-15"));
+        assert_eq!(e.date_year, Some(1875));
+    }
+
+    #[test]
+    fn extract_event_no_dateval_flat() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <events>
+    <event handle="e0004">
+      <type>Birth</type>
+    </event>
+  </events>
+</database>"#;
+        let e = single_event(xml);
+        assert_eq!(e.handle, "e0004");
+        assert_eq!(e.event_type.as_deref(), Some("Birth"));
+        assert!(e.date_val.is_none());
+        assert!(e.date_year.is_none());
+    }
+
+    #[test]
+    fn extract_events_mixed_formats() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <events>
+    <event handle="e0001">
+      <eventtype><type>Birth</type></eventtype>
+      <dateval val="1850-07-13"/>
+    </event>
+    <event handle="e0002">
+      <type>Death</type>
+      <dateval val="1920-07-01"/>
+    </event>
+  </events>
+</database>"#;
+        let es = events_from(xml);
+        assert_eq!(es.len(), 2);
+        assert_eq!(es[0].handle, "e0001");
+        assert_eq!(es[0].event_type.as_deref(), Some("Birth"));
+        assert_eq!(es[0].date_year, Some(1850));
+        assert_eq!(es[1].handle, "e0002");
+        assert_eq!(es[1].event_type.as_deref(), Some("Death"));
+        assert_eq!(es[1].date_year, Some(1920));
+    }
+
+    #[test]
+    fn extract_event_type_self_closing_flat() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <events>
+    <event handle="e0005">
+      <type/>
+      <dateval val="2000-03-03"/>
+    </event>
+  </events>
+</database>"#;
+        let e = single_event(xml);
+        assert_eq!(e.handle, "e0005");
+        assert!(
+            e.event_type.is_none(),
+            "self-closing <type/> should not set event_type"
+        );
+        assert_eq!(e.date_val.as_deref(), Some("2000-03-03"));
+    }
+
+    #[test]
+    fn extract_event_type_empty_flat() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <events>
+    <event handle="e0006">
+      <type></type>
+      <dateval val="2000-03-03"/>
+    </event>
+  </events>
+</database>"#;
+        let e = single_event(xml);
+        assert_eq!(e.handle, "e0006");
+        assert!(
+            e.event_type.is_none(),
+            "empty <type></type> should not set event_type"
+        );
+        assert_eq!(e.date_val.as_deref(), Some("2000-03-03"));
+    }
+
+    #[test]
+    fn extract_event_custom_type_flat() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <events>
+    <event handle="e0007">
+      <type>Birth of Christ</type>
+      <dateval val="0001-12-25"/>
+    </event>
+  </events>
+</database>"#;
+        let e = single_event(xml);
+        assert_eq!(e.handle, "e0007");
+        assert_eq!(
+            e.event_type.as_deref(),
+            Some("Birth of Christ"),
+            "multi-word event type should be captured"
+        );
+        assert_eq!(e.date_val.as_deref(), Some("0001-12-25"));
+        assert_eq!(e.date_year, Some(1));
+    }
+
+    // -----------------------------------------------------------------------
     // Event reference resolution
     // -----------------------------------------------------------------------
 
