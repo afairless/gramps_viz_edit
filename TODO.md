@@ -1,54 +1,98 @@
-# Implementation Plan: Step 1 — Full Gramps XML → Graph Parser
+# Implementation Plan: Gzip-Compressed .gramps File Support
 
-Source: `docs/research/gramps-diff-plan.md` (Step 1 only)
+Source: `docs/research/gzip-compressed-gramps-files.md`
 
-> **Scope:** This plan implements **Step 1 (full graph parser)** of the Gramps Diff
-> Analyzer plan. All other steps (2–14) are **out of scope** and deliberately not
-> included. This step is the prerequisite for all diff logic: it builds a
-> `typed-graph::Graph` from a complete `.gramps` XML document, covering all 10
-> primary types and their edges.
+## Overview
 
-## Design notes grounding the sub-steps
-
-- **Two-phase parse.** `typed-graph::Graph::add_edge` errors with
-  `GraphError::MissingNode` unless both source and target nodes already exist.
-  Gramps XML defines nodes in `<people>`/`<families>`/`<events>`/… sections, and a
-  person's `<eventref>` may reference an event defined **later** in the file.
-  Sub-steps 3–6 therefore build **nodes only** (stashing handle references in
-  pending lists on the parser); sub-step 7 builds **edges** from those pending
-  refs, then sub-step 8 covers validation + round-trip integration.
-- **Coexists with lightweight extractors.** The existing `xml::extract` /
-  `xml::count` streaming extractors and `ParsedPerson`/`ParsedFamily`/`ParsedEvent`
-  types are untouched. The new `xml::parse` module is additive.
-- **Schema version from header.** `parse_graph` detects the version from the
-  `<header><created version="..."/>` element and selects the compiled-in `Schema`
-  (via `Schema::for_version`); unknown versions return `Error::UnsupportedSchema`.
-- **Schema-variant helpers.** Because the generated structs differ by schema
-  feature (e.g. `gender` is `i32` in 5.2, `Option<i32>` in merged), the parser
-  must go through the `into_*_field` / `make_*_ref` / `edge_*` helpers re-exported
-  from `typed-graph::graph` rather than direct field writes. See AGENTS.md §1.
+Add transparent gzip decompression support for `.gramps` files across all
+consumers (`stats`, `validate`, `visualize`). Detection is content-based
+(magic bytes `0x1f 0x8b`), centralized in a new `gramps_reader::read_gramps_file`
+function, and uses the `flate2` crate for decompression.
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `chore: add typed-graph dependency and UnsupportedSchema error to gramps-reader` | Parser foundation | `crates/gramps-reader/Cargo.toml` — add `typed-graph` to `[dependencies]` (move from `[dev-dependencies]`). `crates/gramps-reader/src/error.rs` — add `Error::UnsupportedSchema { version: String }` variant with `Display`. | Unit (UnsupportedSchema `Display`/`source`), Smoke (crate compiles with new dep) |
-| 2 | `feat: detect schema version from gramps XML header` | Schema version detection | `crates/gramps-reader/src/xml/header.rs` — `detect_schema_version(content: &str) -> Result<String, Error>` streaming-scanning the `<header><created version="..."/>` element; returns `Error::UnsupportedSchema` when the version is not in `Schema::available_versions()`. Wire into `xml/mod` (or `xml.rs`). | Unit (5.2 header → "5.2", 5.1 header, missing `<header>` → error, malformed XML → `XmlParseError`, unknown version → `UnsupportedSchema`) |
-| 3 | `feat: add streaming graph parser framework and Person node parsing` | Parser framework + Person | `crates/gramps-reader/src/xml/parse.rs` — `Parser` struct holding `Graph` + pending-ref lists; `parse_node` dispatch over the 10 primary element names; `parse_graph(xml, schema) -> Result<Graph, Error>` entry (reads header, selects schema, streams top-level sections). Implement **Person** node: primary + alternate `Name`s, `gender` via `into_gender_field`, attributes/addresses/urls, and accumulation of `event_ref`/`family`/`parent_family`/`person_ref`/`citation`/`note`/`media`/`tag` handles into pending lists. | Unit (person with primary+alternate name, gender mapping, empty person, malformed person → `XmlParseError`) |
-| 4 | `feat: parse Family and Event nodes into the graph` | Family + Event nodes | `crates/gramps-reader/src/xml/parse.rs` — **Family** node (`father_handle`, `mother_handle`, `child_ref_list` w/ `ChildRef` metadata, `event_ref_list`, citations/notes/media/tags) and **Event** node (`event_type` via `into_event_type_field`, `DateValue` from `<dateval>`, `place_handle`, `description`, attributes, citations/notes/media/tags). Accumulate referenced handles into pending lists. | Unit (family with father/mother/childrefs, event with date+type+place, malformed per type → `XmlParseError`) |
-| 5 | `feat: parse Place, Source, Citation, Repository nodes into the graph` | Location/reference nodes | `crates/gramps-reader/src/xml/parse.rs` — **Place** (place hierarchy parents, lat/long, names), **Source** (title, author, pubinfo, `reporef_list`), **Citation** (`source_handle` via `into_source_handle_field`, page/date/volume), **Repository** (name, type, address). Accumulate referenced handles into pending lists. | Unit (one parse per type, empty variants, malformed per type → `XmlParseError`) |
-| 6 | `feat: parse Media, Note, Tag nodes into the graph` | Media/Note/Tag nodes | `crates/gramps-reader/src/xml/parse.rs` — **Media** (description, `srcfile`, attributes, refs), **Note** (text, format), **Tag** (name, color via `normalize_tag_color` equivalent map if present in parser). Accumulate referenced handles into pending lists. | Unit (one parse per type, empty variants, malformed per type → `XmlParseError`) |
-| 7 | `feat: build edges from pending handle references and validate the graph` | Edge wiring + validation | `crates/gramps-reader/src/xml/parse.rs` — after the node pass, build all `Edge` variants from the pending refs using `make_event_ref`/`make_child_ref`/`edge_place_place_ref`, looking up target handles against known nodes (skip or error on dangling refs). Run `graph.validate(&schema)` and surface `ValidationState::Invalid` as an error. | Unit (person→event eventref edge, family→child childref edge, citation→source edge, person→family/parent-family edges, note/media/tag refs, dangling ref → error, empty graph validates) |
-| 8 | `test: add round-trip and mixed-type integration tests for the full parser` | Integration tests | `crates/gramps-reader/tests/parse_roundtrip.rs` — generate graphs via `generate_random()` with fixed seeds, serialize with `output::GraphXmlWriter`, re-parse with `parse_graph`, and compare node/edge sets; plus one hand-written mixed-type fixture (Person with attached Events, Citations, Notes, Media). | Integration (round-trip graphs identical for several seeds, mixed-type fixture parses to expected node/edge counts, malformed XML → `XmlParseError`) |
+| 1 | `chore: add flate2 dependency to gramps-reader` | Dependency | `crates/gramps-reader/Cargo.toml` | — |
+| 2 | `feat: add IoError and GzipError to gramps_reader::Error` | Error types | `crates/gramps-reader/src/error.rs`, `crates/cli/src/error.rs` | Unit |
+| 3 | `feat: add read_gramps_file with gzip auto-detection and decompression` | File reader | `crates/gramps-reader/src/io.rs`, `crates/gramps-reader/src/lib.rs` | Unit |
+| 4 | `refactor: route file reads through gramps_reader::read_gramps_file` | Consumer updates | `crates/visualize/src/lib.rs`, `crates/cli/src/commands/stats/mod.rs`, `crates/cli/src/commands/validate.rs` | Unit |
+| 5 | `test: add integration tests for gzip-compressed .gramps files` | Integration tests | `crates/gramps-reader/tests/` | Integration |
 
-## Test scope summary
+## Step Details
 
-- **Unit** — sub-steps 1–7 (pure functions and per-type parse paths).
-- **Smoke** — sub-step 1 (crate compiles with new dependency).
-- **Integration** — sub-step 8 (round-trip + mixed-type; uses `output` and
-  `generate_random` fixtures already in the workspace).
+### Step 1 — chore: add flate2 dependency to gramps-reader
 
-## Out of scope (deferred to the original plan)
+**Files:**
 
-Steps 2–14 of `docs/research/gramps-diff-plan.md` (diff crate skeleton, similarity,
-normalization, report types, compare, matcher, cascading, output, visualizer index,
-orchestrator, CLI, interactive resolution, integration tests). Nothing in those
-steps is built here.
+- `crates/gramps-reader/Cargo.toml` — add `flate2 = "1"` to `[dependencies]`
+
+**Tests:** Build verification only (`cargo build -p gramps-reader`).
+
+### Step 2 — feat: add IoError and GzipError to gramps_reader::Error
+
+**Files:**
+
+- `crates/gramps-reader/src/error.rs` — add `IoError` and `GzipError` variants to `Error` enum, each with `path: String` and `source: std::io::Error` fields. Update `Display` and implement `source()` for proper error chaining.
+- `crates/cli/src/error.rs` — add `CliError::GzipError { path, source }` variant, update `From<gramps_reader::Error>` to handle all three variants (`IoError`, `GzipError`, `XmlParseError`), update `Display` and `source()`.
+
+**Tests (unit):**
+
+- `gramps_reader::Error::IoError` source returns `Some(source)` via `source()`
+- `gramps_reader::Error::GzipError` source returns `Some(source)` via `source()`
+- `CliError::GzipError` Display includes path and source message
+- `From<gramps_reader::Error>` conversion: `IoError` → `CliError::Io`, `GzipError` → `CliError::GzipError`, `XmlParseError` → `CliError::XmlParseError`
+- `CliError::GzipError` source returns `Some(source)` via `source()`
+
+### Step 3 — feat: add read_gramps_file with gzip auto-detection and decompression
+
+**Files:**
+
+- `crates/gramps-reader/src/io.rs` — new module with `read_gramps_file(path: &str) -> Result<String, Error>`
+  - Open file, read first 2 bytes for gzip magic (`0x1f 0x8b`)
+  - If magic matches: seek back to start, decompress via `flate2::read::GzDecoder`
+  - If plain/mismatch: seek back to start, read as plain text
+  - Empty file (n < 2): return `Ok(String::new())`
+  - I/O errors → `Error::IoError`, decompression errors → `Error::GzipError`
+- `crates/gramps-reader/src/lib.rs` — declare `mod io;` and re-export `pub use io::read_gramps_file;`
+
+**Tests (unit — all use `tempfile` for isolation):**
+
+- Empty file (0 bytes) → `Ok("")`
+- 1-byte file → `Ok("")` (n < 2 code path)
+- Nonexistent file → `Err(Error::IoError { .. })`
+- Corrupted gzip (magic bytes + bad data) → `Err(Error::GzipError { .. })`
+- Plain XML file → returns content identical to `std::fs::read_to_string`
+
+### Step 4 — refactor: route file reads through gramps_reader::read_gramps_file
+
+**Files:**
+
+- `crates/visualize/src/lib.rs` — replace `std::fs::read_to_string(path)` with `gramps_reader::read_gramps_file(path)` in both `load_graph_data_with_stats()` and `get_stats()`. Error conversion: `.map_err(|e| format!("Cannot read file '{}': {}", path, e))`.
+- `crates/cli/src/commands/stats/mod.rs` — replace `std::fs::read_to_string(file_path)` with `gramps_reader::read_gramps_file(file_path)?`. The `From<gramps_reader::Error>` conversion (Step 2) handles error type automatically.
+- `crates/cli/src/commands/validate.rs` — same replacement as stats.
+
+**Tests (unit):**
+
+- Existing `load_graph_data_nonexistent_file` still passes (error message wording unchanged)
+- Existing `load_graph_data_malformed_file` still passes (XML parse errors still flow through)
+- Existing `get_stats_nonexistent_file` still passes
+- Existing `stats_file_not_found_returns_io_error` still passes
+- Existing `validate_command_file_not_found` still passes
+- (New) `stats` + `validate` run against a gzip-compressed temp file return success
+
+### Step 5 — test: add integration tests for gzip-compressed .gramps files
+
+**Files:**
+
+- `crates/gramps-reader/tests/` — new integration test directory
+
+**Tests (integration):**
+
+- Copy the real compressed fixture (`gramps-ui-gen01.gramps`) into the repo as `crates/gramps-reader/tests/fixtures/gramps-ui-gen01.gramps`
+- **Round-trip:** Read the compressed file → decompressed content matches the twin XML file (`gramps-ui-gen01.xml`)
+- **Stats pipeline:** `count_gramps_xml` on decompressed content produces expected counts
+- **Visualize pipeline:** `load_graph_data_with_stats` on compressed file returns populated `GraphData` with correct nodes/links
+- **Full CLI:** `gramps-gen stats` on the compressed file exits successfully
+
+## Notes
+
+- **Fixture files:** The test files at `/home/tr/Documents/gramps01/gramps-ui-gen01.gramps` (729 bytes, gzip) and `/home/tr/Documents/gramps01/gramps-ui-gen01.xml` (2223 bytes, plain) are currently outside the repo. Step 5 proposes copying the compressed fixture into the repo under `crates/gramps-reader/tests/fixtures/`. This is a 729-byte binary file — negligible size impact — and makes the tests self-contained and portable.
