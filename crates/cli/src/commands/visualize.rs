@@ -79,9 +79,10 @@ fn canonicalize_gramps_path(file: &str) -> Result<PathBuf, CliError> {
         path: file.to_string(),
         source: e,
     })?;
-    if canonical.extension().and_then(|e| e.to_str()) != Some("gramps") {
+    let ext = canonical.extension().and_then(|e| e.to_str());
+    if ext != Some("gramps") && ext != Some("xml") {
         return Err(CliError::ConfigError(format!(
-            "not a .gramps file: {}",
+            "not a .gramps or .xml file: {}",
             canonical.display()
         )));
     }
@@ -143,10 +144,24 @@ mod tests {
         let result = canonicalize_gramps_path(&path);
         match result {
             Err(CliError::ConfigError(msg)) => {
-                assert!(msg.contains(".gramps"), "got: {}", msg);
+                assert!(msg.contains(".gramps or .xml"), "got: {}", msg);
             }
             other => panic!("Expected ConfigError, got: {:?}", other),
         }
+    }
+
+    #[test]
+    fn canonicalize_xml_file_accepted() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "<database/>").unwrap();
+        let xml_path = tmp.path().with_extension("xml");
+        std::fs::rename(tmp.path(), &xml_path).unwrap();
+        let canonical = canonicalize_gramps_path(xml_path.to_str().unwrap()).unwrap();
+        assert_eq!(canonical.extension().unwrap(), "xml");
+        assert!(canonical.is_file());
     }
 
     #[test]
