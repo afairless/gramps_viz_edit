@@ -31,6 +31,13 @@ pub enum CliError {
     /// Python 3 not available.
     PythonNotFound,
 
+    /// Gzip decompression error (corrupted or truncated gzip data).
+    GzipError {
+        /// Path of the file that could not be decompressed.
+        path: String,
+        /// Underlying decompression error.
+        source: std::io::Error,
+    },
     /// XML parse error with descriptive message.
     XmlParseError {
         /// Human-readable error message with byte position.
@@ -77,6 +84,9 @@ impl fmt::Display for CliError {
                     "Python 3 not found. Install Python 3 or manually place a schema file."
                 )
             }
+            CliError::GzipError { path, source } => {
+                write!(f, "gzip decompression error for '{}': {}", path, source)
+            }
             CliError::XmlParseError { message } => {
                 write!(f, "XML parse error: {}", message)
             }
@@ -91,6 +101,7 @@ impl std::error::Error for CliError {
             CliError::GenerationFailed(e) => Some(e),
             CliError::SerializationFailed(e) => Some(e),
             CliError::ScenarioError(e) => Some(e),
+            CliError::GzipError { source, .. } => Some(source),
             CliError::XmlParseError { .. } => None,
             _ => None,
         }
@@ -127,6 +138,10 @@ impl From<crate::scenario::ScenarioError> for CliError {
 impl From<gramps_reader::Error> for CliError {
     fn from(err: gramps_reader::Error) -> Self {
         match err {
+            gramps_reader::Error::IoError { path, source } => CliError::Io { path, source },
+            gramps_reader::Error::GzipError { path, source } => {
+                CliError::GzipError { path, source }
+            }
             gramps_reader::Error::XmlParseError { message } => CliError::XmlParseError { message },
         }
     }
@@ -225,5 +240,68 @@ mod tests {
             typed_graph::generate::GenerationError::InvalidConfig("bad".to_string()),
         );
         assert!(err.source().is_some());
+    }
+
+    #[test]
+    fn cli_error_gzip_error_display() {
+        let err = CliError::GzipError {
+            path: "corrupt.gramps".to_string(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "corrupt gzip data",
+            ),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("gzip decompression error"));
+        assert!(display.contains("corrupt.gramps"));
+        assert!(display.contains("corrupt gzip data"));
+    }
+
+    #[test]
+    fn cli_error_gzip_error_source_returns_some() {
+        use std::error::Error;
+        let err = CliError::GzipError {
+            path: "corrupt.gramps".to_string(),
+            source: std::io::Error::new(std::io::ErrorKind::InvalidData, "bad"),
+        };
+        assert!(err.source().is_some());
+    }
+
+    #[test]
+    fn cli_error_from_gramps_reader_io() {
+        let reader_err = gramps_reader::Error::IoError {
+            path: "missing.gramps".to_string(),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "not found"),
+        };
+        let cli_err: CliError = reader_err.into();
+        match cli_err {
+            CliError::Io { path, .. } => assert_eq!(path, "missing.gramps"),
+            other => panic!("Expected Io variant, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cli_error_from_gramps_reader_gzip() {
+        let reader_err = gramps_reader::Error::GzipError {
+            path: "corrupt.gramps".to_string(),
+            source: std::io::Error::new(std::io::ErrorKind::InvalidData, "bad gzip"),
+        };
+        let cli_err: CliError = reader_err.into();
+        match cli_err {
+            CliError::GzipError { path, .. } => assert_eq!(path, "corrupt.gramps"),
+            other => panic!("Expected GzipError variant, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cli_error_from_gramps_reader_xml_parse() {
+        let reader_err = gramps_reader::Error::XmlParseError {
+            message: "parse error".to_string(),
+        };
+        let cli_err: CliError = reader_err.into();
+        match cli_err {
+            CliError::XmlParseError { message } => assert_eq!(message, "parse error"),
+            other => panic!("Expected XmlParseError variant, got: {:?}", other),
+        }
     }
 }
