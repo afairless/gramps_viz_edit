@@ -1,30 +1,37 @@
-# Implementation Plan: Steps 2–5 — Diff Crate (Skeleton, Similarity, Normalization, Report Types)
+# Implementation Plan: Step 6 — Field-Level Compare Module
 
-Source: `docs/research/gramps-diff-plan.md` (Steps 2, 3, 4, 5)
+Source: `docs/research/gramps-diff-plan.md` (Step 6 only)
 
-> **Scope:** This plan implements **Steps 2, 3, 4, and 5** of the Gramps Diff
-> Analyzer plan. Step 1 (full graph parser) is already complete. These four steps
-> create the `diff` crate skeleton, text similarity functions, text normalization
-> utilities, and diff report data types. Steps 3–5 have no interdependencies
-> and can be implemented in any order after Step 2 (scaffold).
+## Prerequisites
+
+Steps 1–5 are complete:
+
+- ✅ Step 1: Full XML-to-Graph parser
+- ✅ Step 2: Diff crate skeleton (`DiffError`, `run_diff` stub, `Cargo.toml`)
+- ✅ Step 3: Similarity module (`levenshtein`, `token_jaccard`, `tokenized_levenshtein`)
+- ✅ Step 4: Normalization module (`case_fold`, `collapse_whitespace`, `strip_html_tags`, etc.)
+- ✅ Step 5: Report types (`DiffReport`, `FieldChange`, `FieldKind`, `Classification`, etc.)
+
+## Design
+
+Each sub-step adds one or more `compare_xxx(a, b) -> Vec<FieldChange>` functions to
+`crates/diff/src/compare.rs`. All functions delegate text fields to the `similarity`
+module with normalization via the `normalize` module, use set comparison (unordered)
+for `Vec<Handle>` arrays, and construct `FieldChange` values from the `report` module.
+
+The shared field-comparison helpers (scaffold step) handle:
+
+- **Text fields**: normalize both values, score via `tokenized_levenshtein`, produce `FieldChange { kind: Text, similarity }`.
+- **Option fields**: `None` on both → skip; `Some`/`None` → `FieldChange` with similarity 0.0; `Some`/`Some` → delegate to type-specific comparator.
+- **Handle-ref arrays**: unordered set comparison — reorder alone produces no change.
+- **Date fields**: compare `DateValue` structs textually via `Display` → `FieldChange { kind: Date }`.
+- **Enum fields**: compare discriminant; produce `FieldChange { kind: Enum }`.
+- **Ref-struct arrays** (e.g. `EventRef`, `MediaRef`, `ChildRef`): compare by `ref_field` handle identity (unordered set); metadata changes produce separate `FieldChange` entries.
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 2 | `feat: scaffold diff crate with dependencies` | Diff crate skeleton | `crates/diff/Cargo.toml` — new workspace member depending on `typed-graph`, `gramps-reader`, `serde`, `serde_json`. `crates/diff/src/lib.rs` — re-exports, `run_diff()` stub returning `Err(DiffError::Unimplemented)`, `DiffError` enum (`ParseError`, `SchemaMismatch`, `EmptyGraph`, `InternalError`, `Unimplemented`). Update root `Cargo.toml` `members` list and add `strsim = "0.11"` to `[workspace.dependencies]`. | Smoke (crate compiles, `run_diff` returns `Err(DiffError::Unimplemented)`, `DiffError` derives `Debug + Display + Error`) |
-| 3 | `feat: add text similarity functions` | Similarity module | `crates/diff/src/similarity.rs` — `levenshtein(a, b) -> f64`, `token_jaccard(a, b) -> f64`, `tokenized_levenshtein(a, b) -> f64`. All return normalized 0.0–1.0 scores. `jaro_winkler` from `strsim` is excluded from the initial module. | Unit (identical strings → 1.0, completely different → 0.0, partial overlap, empty strings, Unicode). Property-based (∀ scores ∈ [0.0, 1.0]; identical inputs → 1.0). |
-| 4 | `feat: add text normalization utilities` | Normalization module | `crates/diff/src/normalize.rs` — `case_fold`, `trim_whitespace`, `collapse_whitespace`, `strip_html_tags`, `expand_street_abbreviations`, `strip_page_prefix`, `normalize_tag_color`, `diacritic_insensitive_eq`. Each function is a pure `&str -> String` transform. | Unit (one test per function, edge cases for empty/HTML/abbrev). Property-based (idempotency: `normalize(normalize(x)) == normalize(x)` for all functions except `strip_html_tags` which is one-pass). |
-| 5 | `feat: add diff report data types` | Report types | `crates/diff/src/report.rs` — `DiffReport`, `DiffSummary`, `ItemDiff`, `Classification` enum, `FieldChange`, `FieldKind` enum, `AmbiguousCase`, `Candidate`, `AmbiguousContext`, `RelatedItem`. All types derive `Serialize, Deserialize, Debug, Clone`. | Unit (type shape existence, serde round-trip) |
-
-## Notes
-
-- **Step 2** must come first — it creates the crate that Steps 3–5 live in.
-- **Steps 3–5** are independent of each other; the table order (3 → 4 → 5) is
-  arbitrary (logical: utilities first, then types that use them).
-- `strsim` crate provides `levenshtein`; the similarity module wraps it with
-  normalization to 0.0–1.0 scores. `jaro_winkler` is excluded from the initial
-  similarity module (see Step 3 notes in the plan).
-- **Step 5 (report types)** uses `serde` for serialization; all types derive
-  `Serialize, Deserialize, Debug, Clone`.
-- The `DiffError` enum in Step 2 includes `Unimplemented` (not in the original
-  plan) so the `run_diff()` stub can return a concrete error that satisfies
-  `std::error::Error` without depending on other modules.
+| 1 | `feat: add compare module scaffold with shared field helpers` | Compare scaffold + helpers | `crates/diff/src/compare.rs` — module scaffold, `compare_field_text`, `compare_field_optional_text`, `compare_handle_array`, `compare_date_value`, `compare_enum_discriminant`, `compare_ref_array` helpers. `crates/diff/src/lib.rs` — add `pub mod compare;`. | Unit (text field: identical → empty, different → `FieldChange` with scores; optional: both `None` → skip, one `None` → 0.0; handle array: identical order → empty, reordered → empty, different → `FieldChange`; date: identical → empty, different → `FieldChange`; enum: same → empty, different → `FieldChange`; ref array: same refs → empty, reordered → empty) |
+| 2 | `feat: add compare_person function` | Person compare | `crates/diff/src/compare.rs` — `compare_person(a: &PersonData, b: &PersonData) -> Vec<FieldChange>`. Compares all 17 fields including `primary_name` (nested `Name` with `Surname` list), `alternate_names`, `gender`, `event_ref_list`, `family_list`, `parent_family_list`, `person_ref_list`, `citation_list`, `note_list`, `media_list`, `tag_list`, `address_list`, `attribute_list`, `lds_ord_list`, `url_list`, `gramps_id`. | Unit (identical → empty; change surname → one `FieldChange`; change gender → `Enum` change; add alternate name → `FieldChange`; reorder `family_list` → empty; change `gramps_id` → `FieldChange`; empty PersonData vs empty → empty) |
+| 3 | `feat: add compare_family and compare_event functions` | Family + Event compare | `crates/diff/src/compare.rs` — `compare_family(a: &FamilyData, b: &FamilyData) -> Vec<FieldChange>` and `compare_event(a: &EventData, b: &EventData) -> Vec<FieldChange>`. Family: `father_handle`, `mother_handle`, `child_ref_list`, `event_ref_list`, `attribute_list`, `citation_list`, `media_list`, `note_list`, `tag_list`, `gramps_id`. Event: `event_type`, `date`, `description`, `place_handle`, `attribute_list`, `citation_list`, `media_list`, `note_list`, `tag_list`, `gramps_id`. | Unit (identical → empty; change father handle → `HandleRef` change; reorder child_ref_list → empty; change event_type → `Enum` change; change date → `Date` change; change description → `Text` change with similarity score) |
+| 4 | `feat: add compare_place, compare_source, compare_citation, compare_repository functions` | Place + Source + Citation + Repository compare | `crates/diff/src/compare.rs` — `compare_place(...)`, `compare_source(...)`, `compare_citation(...)`, `compare_repository(...)`. Place: `name` (Location), `place_ref_list`, `citation_list`, `media_list`, `note_list`, `tag_list`, `gramps_id`. Source: `title`, `author`, `pubinfo`, `reporef_list`, `attribute_list`, `media_list`, `note_list`, `tag_list`, `gramps_id`. Citation: `source_handle`, `page`, `confidence`, `media_list`, `note_list`, `tag_list`, `gramps_id`. Repository: `name`, `type_field`, `address_list`, `url_list`, `media_list`, `note_list`, `tag_list`, `gramps_id`. | Unit (identical → empty; change source title → `Text` change; change citation page → `Text` change; change repository type → `Enum` change; change place location street → nested `FieldChange`; reorder `reporef_list` → empty) |
+| 5 | `feat: add compare_media, compare_note, and compare_tag functions` | Media + Note + Tag compare | `crates/diff/src/compare.rs` — `compare_media(...)`, `compare_note(...)`, `compare_tag(...)`. Media: `desc`, `path`, `mime_type`, `checksum`, `attribute_list`, `citation_list`, `note_list`, `tag_list`, `gramps_id`. Note: `text`, `format`, `type_field`, `citation_list`, `tag_list`, `gramps_id`. Tag: `name`, `color`, `priority`, `tag_list`, `gramps_id`. | Unit (identical → empty; change note text → `Text` change with similarity; change tag color → `Text` change (normalized); change tag name → `Text` change; change media desc → `Text` change; reorder tag_list → empty) |
