@@ -7,6 +7,7 @@
 //! - `normalize`: Text normalization utilities
 //! - `report`: Diff report data types
 
+pub mod normalize;
 pub mod similarity;
 
 use std::error::Error;
