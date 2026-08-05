@@ -19,6 +19,7 @@
 
 pub mod error;
 pub mod graph;
+pub mod io;
 pub mod types;
 pub mod xml;
 
@@ -26,6 +27,7 @@ pub use error::Error;
 pub use graph::{
     compute_generation_table, compute_generations, Dsu, FamilyGroupGenerationTable, MAX_GENERATION,
 };
+pub use io::read_gramps_file;
 pub use types::{FamilyRecord, ParsedEvent, ParsedFamily, ParsedPerson};
 pub use xml::count::{count_gramps_xml, PrimaryTypeCounts, StatsReport};
 pub use xml::extract::{extract_events, extract_families, extract_persons, resolve_event_refs};

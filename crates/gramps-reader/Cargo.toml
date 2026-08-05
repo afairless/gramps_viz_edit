@@ -9,6 +9,7 @@ quick-xml = { workspace = true }
 serde = { workspace = true }
 
 [dev-dependencies]
+tempfile = "3"
 typed-graph = { path = "../typed-graph" }
 output = { path = "../output" }
 serde_json = { workspace = true }
