@@ -20,10 +20,8 @@ use crate::xml::{read_handle_attr, read_hlink_attr, strip_prefix};
 /// event handles are silently skipped.
 pub fn resolve_event_refs(persons: &mut [ParsedPerson], events: &[ParsedEvent]) {
     // Index events by handle for O(1) lookup.
-    let event_map: HashMap<&str, &ParsedEvent> = events
-        .iter()
-        .map(|e| (e.handle.as_str(), e))
-        .collect();
+    let event_map: HashMap<&str, &ParsedEvent> =
+        events.iter().map(|e| (e.handle.as_str(), e)).collect();
 
     for person in persons {
         for hlink in &person.event_refs {
@@ -84,6 +82,20 @@ pub fn extract_events(content: &str) -> Result<Vec<ParsedEvent>, Error> {
                                 }
                             }
                         }
+                    }
+                    b"type" if current.is_some() && !in_eventtype => {
+                        // Flat format: <type>Birth</type> directly inside <event>
+                        // (Gramps XML 1.7.1 / Gramps 5.1)
+                        let name = e.name().to_owned();
+                        if let Ok(text) = reader.read_text(name) {
+                            let t = text.trim().to_string();
+                            if !t.is_empty() {
+                                if let Some(ref mut ev) = current {
+                                    ev.event_type = Some(t);
+                                }
+                            }
+                        }
+                        log::debug!("Flat-format event type detected");
                     }
                     _ => {}
                 }
