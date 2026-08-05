@@ -167,6 +167,56 @@ mod tests {
     }
 
     #[test]
+    fn load_graph_data_xml_extension_accepted() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <people>
+    <person handle="p1">
+      <gender>M</gender>
+      <name>
+        <first>John</first>
+        <surname>Smith</surname>
+      </name>
+      <birth><dateval val="1850-03-15"/></birth>
+    </person>
+  </people>
+</database>"#;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "{}", xml).unwrap();
+        let path = tmp.path().with_extension("xml");
+        std::fs::rename(tmp.path(), &path).unwrap();
+
+        let gd = load_graph_data(path.to_str().unwrap(), false, 25).unwrap();
+        assert_eq!(gd.nodes.len(), 1);
+        assert_eq!(gd.nodes[0].handle, "p1");
+    }
+
+    #[test]
+    fn get_stats_xml_extension_accepted() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <people>
+    <person handle="p1"/>
+  </people>
+</database>"#;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "{}", xml).unwrap();
+        let path = tmp.path().with_extension("xml");
+        std::fs::rename(tmp.path(), &path).unwrap();
+
+        let report = get_stats(path.to_str().unwrap()).unwrap();
+        assert_eq!(report.counts.people, 1);
+    }
+
+    #[test]
     fn load_graph_data_valid_file() {
         use std::io::Write;
         use tempfile::NamedTempFile;

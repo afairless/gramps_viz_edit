@@ -2,7 +2,7 @@
 // Tests for the main.ts module — toolbar rendering and UI wiring.
 
 import { describe, it, expect, vi } from 'vitest';
-import { renderToolbar, renderForcePanel, renderModeSelector, renderSelectAllButtons } from '../src/main';
+import { GRAMPS_FILE_FILTER, renderToolbar, renderForcePanel, renderModeSelector, renderSelectAllButtons, showWelcomeScreen } from '../src/main';
 import type { GraphController } from '../src/graph';
 import type { GraphData, PersonNode, FamilyLink } from '../src/types';
 import { DEFAULT_FORCE_CONFIG, type ForceConfig } from '../src/types';
@@ -25,6 +25,25 @@ function makeNode(handle: string, overrides: Partial<PersonNode> = {}): PersonNo
 function makeGraph(nodes: PersonNode[], links: FamilyLink[]): GraphData {
   return { nodes, links, family_groups: [] };
 }
+
+describe('GRAMPS_FILE_FILTER', () => {
+  it('accepts both gramps and xml extensions with a Gramps XML label', () => {
+    expect(GRAMPS_FILE_FILTER.name).toBe('Gramps XML');
+    expect(GRAMPS_FILE_FILTER.extensions).toContain('gramps');
+    expect(GRAMPS_FILE_FILTER.extensions).toContain('xml');
+  });
+});
+
+describe('showWelcomeScreen', () => {
+  it('subtitle mentions both .gramps and .xml extensions', () => {
+    const container = document.createElement('div');
+    showWelcomeScreen(container);
+    const subtitle = container.querySelector('p');
+    expect(subtitle).toBeTruthy();
+    expect(subtitle!.textContent).toContain('.gramps');
+    expect(subtitle!.textContent).toContain('.xml');
+  });
+});
 
 describe('renderToolbar', () => {
   it('returns a toolbar element with a reset button containing ↺', () => {
