@@ -12,6 +12,9 @@ import { renderLegend, buildColorScale } from './colors';
 import { StatsPanel } from './stats-panel';
 import type { StatsReport } from './types';
 
+/** File dialog filter for Gramps family tree files (.gramps or .xml). */
+export const GRAMPS_FILE_FILTER = { name: 'Gramps XML', extensions: ['gramps', 'xml'] };
+
 /** Default generation gap in years when not specified via CLI. */
 const DEFAULT_GENERATION_GAP = 25;
 
@@ -126,7 +129,7 @@ async function openAndRenderFile(
   const { open } = await import('@tauri-apps/plugin-dialog');
   const selected = await open({
     multiple: false,
-    filters: [{ name: 'Gramps XML', extensions: ['gramps'] }],
+    filters: [GRAMPS_FILE_FILTER],
   });
   if (!selected) return false; // user cancelled
 
@@ -693,7 +696,7 @@ function renderGraphFromData(
 /**
  * Show a welcome screen with a large "Open Gramps File" button.
  */
-function showWelcomeScreen(container: HTMLElement): void {
+export function showWelcomeScreen(container: HTMLElement): void {
   container.textContent = '';
 
   const wrapper = document.createElement('div');
@@ -713,7 +716,7 @@ function showWelcomeScreen(container: HTMLElement): void {
   wrapper.appendChild(title);
 
   const subtitle = document.createElement('p');
-  subtitle.textContent = 'Open a Gramps XML (.gramps) file to get started.';
+  subtitle.textContent = 'Open a Gramps XML (.gramps or .xml) file to get started.';
   subtitle.style.color = '#888';
   subtitle.style.fontSize = '14px';
   subtitle.style.margin = '0';
