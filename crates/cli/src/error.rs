@@ -143,6 +143,9 @@ impl From<gramps_reader::Error> for CliError {
                 CliError::GzipError { path, source }
             }
             gramps_reader::Error::XmlParseError { message } => CliError::XmlParseError { message },
+            gramps_reader::Error::UnsupportedSchema { version } => {
+                CliError::ConfigError(format!("unsupported schema version: {}", version))
+            }
         }
     }
 }
