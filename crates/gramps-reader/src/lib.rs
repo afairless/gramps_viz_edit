@@ -1,4 +1,4 @@
-//! gramps-reader — shared `.gramps` XML parsing for gramps-gen.
+//! gramps-reader — shared Gramps XML parsing for gramps-gen.
 //!
 //! Extracts streaming statistics and person/family detail records from
 //! Gramps XML documents. Shared by the `cli` and `visualize` crates so

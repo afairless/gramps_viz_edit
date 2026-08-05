@@ -17,7 +17,7 @@ pub use graph_data::{
     FamilyGroupMeta, FamilyLink, GraphData, LinkType, PersonNode, SelectedPerson, SelectionExport,
 };
 
-/// Combined result of loading a .gramps file: graph data for
+/// Combined result of loading a Gramps XML file: graph data for
 /// rendering plus summary statistics for the stats panel.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct LoadedGraph {
@@ -25,7 +25,7 @@ pub struct LoadedGraph {
     pub stats: gramps_reader::StatsReport,
 }
 
-/// Load a `.gramps` file and produce the full `GraphData` for visualization.
+/// Load a Gramps XML file and produce the full `GraphData` for visualization.
 ///
 /// This is a pure function (no Tauri dependency) that orchestrates the
 /// full pipeline:
@@ -49,7 +49,7 @@ pub fn load_graph_data(
         .map(|loaded| loaded.graph_data)
 }
 
-/// Load a `.gramps` file and return both graph data and summary statistics.
+/// Load a Gramps XML file and return both graph data and summary statistics.
 ///
 /// This is a pure function (no Tauri dependency) that reads the file **once**
 /// and runs both the extraction pipeline and the streaming count pass on the
@@ -104,7 +104,7 @@ pub fn load_graph_data_with_stats(
     })
 }
 
-/// Read a `.gramps` file and return summary statistics.
+/// Read a Gramps XML file and return summary statistics.
 ///
 /// This is a pure function (no Tauri dependency) that re-reads the file
 /// from disk and runs the streaming `count_gramps_xml` pass. The file

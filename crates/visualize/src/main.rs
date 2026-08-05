@@ -44,7 +44,7 @@ fn main() {
     }
 }
 
-/// Tauri IPC command: load a `.gramps` file and return the graph data
+/// Tauri IPC command: load a Gramps XML file and return the graph data
 /// and summary statistics as a `LoadedGraph`.
 #[cfg(feature = "visualize")]
 #[tauri::command]
@@ -70,7 +70,7 @@ fn export_selections(
     Ok(path)
 }
 
-/// Tauri IPC command: return summary statistics for a `.gramps` file.
+/// Tauri IPC command: return summary statistics for a Gramps XML file.
 #[cfg(feature = "visualize")]
 #[tauri::command]
 fn get_stats(path: &str) -> Result<gramps_reader::StatsReport, String> {

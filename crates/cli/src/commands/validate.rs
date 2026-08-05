@@ -1,12 +1,12 @@
-//! Validate command — validate a .gramps file's structure.
+//! Validate command — validate a Gramps XML file's structure.
 //!
 //! This module implements the `validate` subcommand, which checks
-//! that a .gramps file is well-formed XML and has the expected
+//! that a Gramps XML file is well-formed XML and has the expected
 //! document structure.
 //!
 //! # Minimal validation
 //!
-//! Full `.gramps` file parsing (reconstructing a `Graph` from Gramps XML)
+//! Full Gramps XML parsing (reconstructing a `Graph` from Gramps XML)
 //! is a significant effort beyond Phase 7's scope. The initial `validate`
 //! command implements a minimal XML structure check:
 //!
@@ -20,7 +20,7 @@ use clap::Args;
 /// Arguments for the `validate` subcommand.
 #[derive(Args, Clone, Debug)]
 pub struct ValidateArgs {
-    /// Path to a .gramps file to validate
+    /// Path to a .gramps or .xml file to validate
     pub file: String,
 
     /// Promote plausibility warnings to errors
@@ -70,7 +70,7 @@ struct ValidationFinding {
     message: String,
 }
 
-/// Minimal XML structure validation for .gramps files.
+/// Minimal XML structure validation for Gramps XML files.
 ///
 /// Checks well-formedness and expected elements without full
 /// graph reconstruction.
@@ -134,7 +134,7 @@ fn validate_gramps_xml_structure(content: &str) -> Result<(), Vec<ValidationFind
     if !has_header {
         errors.push(ValidationFinding {
             severity: "warning",
-            message: "Missing <header> section in .gramps file".to_string(),
+            message: "Missing <header> section in Gramps XML file".to_string(),
         });
     }
 

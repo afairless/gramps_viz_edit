@@ -24,11 +24,11 @@ struct Cli {
 enum Command {
     /// Generate a random family tree dataset
     Generate(GenerateArgs),
-    /// Summarize the contents of a .gramps file
+    /// Summarize the contents of a Gramps XML file
     Stats(StatsArgs),
-    /// Validate a .gramps file
+    /// Validate a Gramps XML file
     Validate(ValidateArgs),
-    /// Open a .gramps file in the family-group visualization app
+    /// Open a Gramps XML file in the family-group visualization app
     Visualize(VisualizeArgs),
     /// List and download Gramps schemas
     #[command(subcommand)]

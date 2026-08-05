@@ -1,4 +1,4 @@
-//! `visualize` subcommand — open a `.gramps` file in the Tauri
+//! `visualize` subcommand — open a Gramps XML file in the Tauri
 //! visualization app.
 //!
 //! Tauri apps must own `main()`, so this command locates the sibling
@@ -15,7 +15,7 @@ use crate::error::CliError;
 /// Arguments for the `visualize` subcommand.
 #[derive(Args, Clone, Debug)]
 pub struct VisualizeArgs {
-    /// Path to a .gramps file to visualize
+    /// Path to a .gramps or .xml file to visualize
     pub file: String,
 
     /// Skip date imputation; undated nodes get neutral color
@@ -72,7 +72,7 @@ pub fn run(args: VisualizeArgs) -> Result<(), CliError> {
 }
 
 /// Canonicalize `file` and verify it exists, is readable, and has a
-/// `.gramps` extension.
+/// `.gramps` or `.xml` extension.
 fn canonicalize_gramps_path(file: &str) -> Result<PathBuf, CliError> {
     let path = Path::new(file);
     let canonical = path.canonicalize().map_err(|e| CliError::Io {

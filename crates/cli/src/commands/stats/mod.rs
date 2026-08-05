@@ -1,7 +1,7 @@
-//! `stats` subcommand — summarize the contents of a `.gramps` file.
+//! `stats` subcommand — summarize the contents of a Gramps XML file.
 //!
 //! This module implements the `gramps-gen stats <file>` command, which
-//! performs a single streaming pass over a `.gramps` file to count
+//! performs a single streaming pass over a Gramps XML file to count
 //! primary object types, compute family-size distribution, report
 //! people not in any family, and tabulate the family-size ×
 //! generation-span contingency table.
@@ -15,7 +15,7 @@ use gramps_reader::{count_gramps_xml, FamilyGroupGenerationTable, StatsReport};
 /// Arguments for the `stats` subcommand.
 #[derive(Args, Clone, Debug)]
 pub struct StatsArgs {
-    /// Path to a .gramps file to analyze
+    /// Path to a .gramps or .xml file to analyze
     pub file: String,
 
     /// Emit machine-readable JSON instead of a formatted table

@@ -1,6 +1,6 @@
 //! Streaming counting logic for the `stats` command.
 //!
-//! `count_gramps_xml` scans a `.gramps` XML document in a single
+//! `count_gramps_xml` scans a Gramps XML document in a single
 //! streaming pass and produces a [`StatsReport`] without
 //! reconstructing the full typed graph. It is a pure function over
 //! `&str` so it can be unit-tested without filesystem access.

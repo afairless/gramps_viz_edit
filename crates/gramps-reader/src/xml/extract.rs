@@ -1,6 +1,6 @@
-//! Streaming detail extraction from `.gramps` XML documents.
+//! Streaming detail extraction from Gramps XML documents.
 //!
-//! These extractors read a `.gramps` file in a single streaming pass and
+//! These extractors read a Gramps XML file in a single streaming pass and
 //! produce structured records (`ParsedPerson`, `ParsedFamily`) for
 //! downstream processing. They are pure functions over `&str` so they
 //! can be unit-tested without filesystem access.
@@ -43,7 +43,7 @@ pub fn resolve_event_refs(persons: &mut [ParsedPerson], events: &[ParsedEvent]) 
     }
 }
 
-/// Extract all events from a `.gramps` XML document.
+/// Extract all events from a Gramps XML document.
 ///
 /// Returns a `Vec<ParsedEvent>` with handle, event type, and date
 /// information for every `<event>` element. Unknown or malformed fields
@@ -135,7 +135,7 @@ pub fn extract_events(content: &str) -> Result<Vec<ParsedEvent>, Error> {
     Ok(events)
 }
 
-/// Extract all persons from a `.gramps` XML document.
+/// Extract all persons from a Gramps XML document.
 ///
 /// Returns a `Vec<ParsedPerson>` with details (name, birth/death dates,
 /// gender) for every `<person>` element. Unknown or malformed fields are
@@ -299,7 +299,7 @@ pub fn extract_persons(content: &str) -> Result<Vec<ParsedPerson>, Error> {
     Ok(persons)
 }
 
-/// Extract all families from a `.gramps` XML document.
+/// Extract all families from a Gramps XML document.
 ///
 /// Returns a `Vec<ParsedFamily>` with father/mother/child handles for
 /// every `<family>` element. Dangling `hlink` references (handles without

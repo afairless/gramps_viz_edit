@@ -7,7 +7,7 @@
 /// Parsed CLI arguments for the visualize binary.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CliArgs {
-    /// Path to the `.gramps` file, if provided as a positional argument.
+    /// Path to the Gramps XML file, if provided as a positional argument.
     pub path: Option<String>,
     /// Whether `--no-impute` was passed (default: `false`).
     pub no_impute: bool,

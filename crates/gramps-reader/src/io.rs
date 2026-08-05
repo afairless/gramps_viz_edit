@@ -1,4 +1,4 @@
-//! File I/O with transparent gzip decompression for `.gramps` files.
+//! File I/O with transparent gzip decompression for Gramps XML files.
 //!
 //! The [`read_gramps_file`] function reads a file from disk, detects
 //! gzip compression by magic bytes (`0x1f 0x8b`), and decompresses
@@ -11,7 +11,7 @@ use std::io::SeekFrom;
 
 use crate::Error;
 
-/// Read a `.gramps` file, decompressing if gzip-compressed.
+/// Read a Gramps XML file, decompressing if gzip-compressed.
 ///
 /// Detects compression by reading the first two bytes (gzip magic:
 /// `0x1f 0x8b`). If the file is gzip-compressed, it is decompressed
