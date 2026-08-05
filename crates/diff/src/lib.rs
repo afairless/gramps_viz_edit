@@ -8,6 +8,7 @@
 //! - `report`: Diff report data types
 
 pub mod normalize;
+pub mod report;
 pub mod similarity;
 
 use std::error::Error;
