@@ -24,6 +24,11 @@ pub enum Error {
         /// Underlying decompression error.
         source: std::io::Error,
     },
+    /// The schema version declared in the XML header is not compiled in.
+    UnsupportedSchema {
+        /// The version string found in the XML header.
+        version: String,
+    },
 }
 
 impl fmt::Display for Error {
@@ -38,6 +43,9 @@ impl fmt::Display for Error {
             Error::GzipError { path, source } => {
                 write!(f, "gzip decompression error for '{}': {}", path, source)
             }
+            Error::UnsupportedSchema { version } => {
+                write!(f, "unsupported schema version '{}' (not compiled in)", version)
+            }
         }
     }
 }
@@ -46,7 +54,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::IoError { source, .. } | Error::GzipError { source, .. } => Some(source),
-            Error::XmlParseError { .. } => None,
+            Error::XmlParseError { .. } | Error::UnsupportedSchema { .. } => None,
         }
     }
 }
@@ -118,5 +126,28 @@ mod tests {
         assert!(display.contains("gzip decompression error"));
         assert!(display.contains("corrupt.gramps"));
         assert!(display.contains("corrupt gzip"));
+    }
+
+    // -----------------------------------------------------------------------
+    // UnsupportedSchema
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn unsupported_schema_display() {
+        let err = Error::UnsupportedSchema {
+            version: "9.9".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("unsupported schema version"));
+        assert!(display.contains("9.9"));
+    }
+
+    #[test]
+    fn unsupported_schema_source_is_none() {
+        use std::error::Error as _;
+        let err = Error::UnsupportedSchema {
+            version: "9.9".to_string(),
+        };
+        assert!(err.source().is_none());
     }
 }

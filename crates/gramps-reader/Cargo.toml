@@ -8,9 +8,9 @@ flate2 = "1"
 log = "0.4"
 quick-xml = { workspace = true }
 serde = { workspace = true }
+typed-graph = { path = "../typed-graph" }
 
 [dev-dependencies]
 tempfile = "3"
-typed-graph = { path = "../typed-graph" }
 output = { path = "../output" }
 serde_json = { workspace = true }
