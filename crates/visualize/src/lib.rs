@@ -454,6 +454,94 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
+    // Full pipeline with Gramps-UI-style flat format (Gramps XML 1.7.1)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn load_graph_data_gramps_ui_flat_format() {
+        // Full pipeline with Gramps-UI-style flat format: <type>Birth</type>
+        // directly inside <event> (no <eventtype> wrapper).
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <events>
+    <event handle="e-birth-1">
+      <type>Birth</type>
+      <dateval val="1850-07-13"/>
+    </event>
+    <event handle="e-birth-2">
+      <type>Birth</type>
+      <dateval val="1855-06-01"/>
+    </event>
+    <event handle="e-death-1">
+      <type>Death</type>
+      <dateval val="1920-03-01"/>
+    </event>
+  </events>
+  <people>
+    <person handle="p1">
+      <gender>M</gender>
+      <name><first>John</first><surname>Smith</surname></name>
+      <eventref hlink="e-birth-1"><role>Primary</role></eventref>
+      <eventref hlink="e-death-1"><role>Primary</role></eventref>
+    </person>
+    <person handle="p2">
+      <gender>F</gender>
+      <name><first>Jane</first><surname>Smith</surname></name>
+      <eventref hlink="e-birth-2"><role>Primary</role></eventref>
+    </person>
+    <person handle="p3">
+      <name><first>Jim</first><surname>Smith</surname></name>
+    </person>
+  </people>
+  <families>
+    <family handle="f1">
+      <father hlink="p1"/><mother hlink="p2"/>
+      <childref hlink="p3"/>
+    </family>
+  </families>
+</database>"#;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        write!(tmp, "{}", xml).unwrap();
+        let path = tmp.path().with_extension("gramps");
+        std::fs::rename(tmp.path(), &path).unwrap();
+
+        let gd = load_graph_data(path.to_str().unwrap(), false, 25).unwrap();
+        assert_eq!(gd.nodes.len(), 3);
+        assert_eq!(gd.links.len(), 3); // 1 spouse + 2 parent-child
+        assert_eq!(gd.family_groups.len(), 1);
+
+        // John and Jane get birth_year from event reference resolution.
+        let p1 = gd.nodes.iter().find(|n| n.handle == "p1").unwrap();
+        let p2 = gd.nodes.iter().find(|n| n.handle == "p2").unwrap();
+        assert_eq!(
+            p1.birth_year,
+            Some(1850),
+            "John birth_year from Gramps-UI flat-format event"
+        );
+        assert_eq!(
+            p1.death_date.as_deref(),
+            Some("1920-03-01"),
+            "John death_date from Gramps-UI flat-format event"
+        );
+        assert_eq!(
+            p2.birth_year,
+            Some(1855),
+            "Jane birth_year from Gramps-UI flat-format event"
+        );
+        assert!(!p1.is_imputed);
+        assert!(!p2.is_imputed);
+
+        // Jim's birth year is imputed from his parents.
+        let p3 = gd.nodes.iter().find(|n| n.handle == "p3").unwrap();
+        assert!(p3.is_imputed);
+        assert_eq!(p3.birth_year, Some(1877));
+    }
+
+    // ------------------------------------------------------------------
     // get_stats tests
     // ------------------------------------------------------------------
 
