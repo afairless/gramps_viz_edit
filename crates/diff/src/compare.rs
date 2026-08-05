@@ -11,8 +11,8 @@
 use std::collections::BTreeSet;
 
 use typed_graph::{
-    Address, Attribute, ChildRef, DateValue, EventRef, Handle,
-    LdsOrd, Location, MediaRef, Name, PersonData, PersonRef, PlaceRef, RepoRef, Surname, Url,
+    Address, Attribute, ChildRef, DateValue, EventData, EventRef, FamilyData, Handle, LdsOrd,
+    Location, MediaRef, Name, PersonData, PersonRef, PlaceRef, RepoRef, Surname, Url,
 };
 
 use crate::report::{FieldChange, FieldKind};
@@ -783,6 +783,164 @@ pub fn compare_person(a: &PersonData, b: &PersonData) -> Vec<FieldChange> {
     changes
 }
 
+/// Compare two [`FamilyData`] structs field by field.
+///
+/// Compares all fields except `handle` (the join key).
+pub fn compare_family(a: &FamilyData, b: &FamilyData) -> Vec<FieldChange> {
+    let mut changes = Vec::new();
+
+    changes.extend(compare_field_optional_text(
+        "gramps_id",
+        a.gramps_id.as_deref(),
+        b.gramps_id.as_deref(),
+    ));
+    changes.extend(compare_handle_ref(
+        "father_handle",
+        a.father_handle.as_ref(),
+        b.father_handle.as_ref(),
+    ));
+    changes.extend(compare_handle_ref(
+        "mother_handle",
+        a.mother_handle.as_ref(),
+        b.mother_handle.as_ref(),
+    ));
+
+    // Ref arrays with metadata
+    changes.extend(compare_ref_array(
+        "child_ref_list",
+        &a.child_ref_list,
+        &b.child_ref_list,
+        |x, y| compare_enum_discriminant("child_ref_list.relation", x.relation, y.relation),
+    ));
+    changes.extend(compare_ref_array(
+        "event_ref_list",
+        &a.event_ref_list,
+        &b.event_ref_list,
+        |x, y| compare_enum_discriminant("event_ref_list.role", x.role, y.role),
+    ));
+    changes.extend(compare_ref_array(
+        "media_list",
+        &a.media_list,
+        &b.media_list,
+        |_, _| vec![],
+    ));
+
+    // Handle arrays
+    changes.extend(compare_handle_array(
+        "citation_list",
+        &a.citation_list,
+        &b.citation_list,
+    ));
+    changes.extend(compare_handle_array("note_list", &a.note_list, &b.note_list));
+    changes.extend(compare_handle_array("tag_list", &a.tag_list, &b.tag_list));
+
+    // Attribute list
+    let max_attrs = a.attribute_list.len().max(b.attribute_list.len());
+    for i in 0..max_attrs {
+        let prefix = format!("attribute_list[{i}]");
+        match (a.attribute_list.get(i), b.attribute_list.get(i)) {
+            (Some(aa), Some(ab)) => {
+                changes.extend(compare_attribute(&prefix, aa, ab));
+            }
+            (Some(aa), None) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: Some(format!("{aa:?}")),
+                    new_value: None,
+                    similarity: 0.0,
+                });
+            }
+            (None, Some(ab)) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: None,
+                    new_value: Some(format!("{ab:?}")),
+                    similarity: 0.0,
+                });
+            }
+            (None, None) => {}
+        }
+    }
+
+    changes
+}
+
+/// Compare two [`EventData`] structs field by field.
+///
+/// Compares all fields except `handle` (the join key).
+pub fn compare_event(a: &EventData, b: &EventData) -> Vec<FieldChange> {
+    let mut changes = Vec::new();
+
+    changes.extend(compare_field_optional_text(
+        "gramps_id",
+        a.gramps_id.as_deref(),
+        b.gramps_id.as_deref(),
+    ));
+    changes.extend(compare_enum_discriminant("event_type", a.event_type, b.event_type));
+    changes.extend(compare_date_value("date", a.date.as_ref(), b.date.as_ref()));
+    changes.extend(compare_field_optional_text(
+        "description",
+        a.description.as_deref(),
+        b.description.as_deref(),
+    ));
+    changes.extend(compare_handle_ref(
+        "place_handle",
+        a.place_handle.as_ref(),
+        b.place_handle.as_ref(),
+    ));
+
+    // Handle arrays
+    changes.extend(compare_handle_array(
+        "citation_list",
+        &a.citation_list,
+        &b.citation_list,
+    ));
+    changes.extend(compare_handle_array("note_list", &a.note_list, &b.note_list));
+    changes.extend(compare_handle_array("tag_list", &a.tag_list, &b.tag_list));
+
+    // Ref arrays
+    changes.extend(compare_ref_array(
+        "media_list",
+        &a.media_list,
+        &b.media_list,
+        |_, _| vec![],
+    ));
+
+    // Attribute list
+    let max_attrs = a.attribute_list.len().max(b.attribute_list.len());
+    for i in 0..max_attrs {
+        let prefix = format!("attribute_list[{i}]");
+        match (a.attribute_list.get(i), b.attribute_list.get(i)) {
+            (Some(aa), Some(ab)) => {
+                changes.extend(compare_attribute(&prefix, aa, ab));
+            }
+            (Some(aa), None) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: Some(format!("{aa:?}")),
+                    new_value: None,
+                    similarity: 0.0,
+                });
+            }
+            (None, Some(ab)) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: None,
+                    new_value: Some(format!("{ab:?}")),
+                    similarity: 0.0,
+                });
+            }
+            (None, None) => {}
+        }
+    }
+
+    changes
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -1231,5 +1389,168 @@ mod tests {
         assert!(changes.iter().any(|c| c.field_name == "gramps_id"));
         assert!(changes.iter().any(|c| c.field_name == "gender"));
         assert!(changes.iter().any(|c| c.field_name == "note_list"));
+    }
+
+    // -----------------------------------------------------------------------
+    // compare_family
+    // -----------------------------------------------------------------------
+
+    fn make_family() -> FamilyData {
+        FamilyData {
+            handle: "F001".into(),
+            gramps_id: Some("F0001".into()),
+            father_handle: Some("P001".into()),
+            mother_handle: Some("P002".into()),
+            child_ref_list: vec![],
+            event_ref_list: vec![],
+            attribute_list: vec![],
+            citation_list: vec![],
+            media_list: vec![],
+            note_list: vec![],
+            tag_list: vec![],
+        }
+    }
+
+    #[test]
+    fn family_identical() {
+        let a = make_family();
+        let b = make_family();
+        assert!(compare_family(&a, &b).is_empty());
+    }
+
+    #[test]
+    fn family_change_father_handle() {
+        let a = make_family();
+        let mut b = make_family();
+        b.father_handle = Some("P003".into());
+        let changes = compare_family(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "father_handle");
+        assert_eq!(changes[0].field_kind, FieldKind::HandleRef);
+    }
+
+    #[test]
+    fn family_reorder_child_ref_list() {
+        let mut a = make_family();
+        let mut b = make_family();
+        a.child_ref_list = vec![
+            ChildRef {
+                ref_field: "P003".into(),
+                relation: None,
+            },
+            ChildRef {
+                ref_field: "P004".into(),
+                relation: None,
+            },
+        ];
+        b.child_ref_list = vec![
+            ChildRef {
+                ref_field: "P004".into(),
+                relation: None,
+            },
+            ChildRef {
+                ref_field: "P003".into(),
+                relation: None,
+            },
+        ];
+        assert!(compare_family(&a, &b).is_empty());
+    }
+
+    #[test]
+    fn family_change_gramps_id() {
+        let a = make_family();
+        let mut b = make_family();
+        b.gramps_id = Some("F0002".into());
+        let changes = compare_family(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "gramps_id");
+    }
+
+    #[test]
+    fn family_empty_vs_empty() {
+        let a = FamilyData::default();
+        let b = FamilyData::default();
+        assert!(compare_family(&a, &b).is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // compare_event
+    // -----------------------------------------------------------------------
+
+    fn make_event() -> EventData {
+        EventData {
+            handle: "E001".into(),
+            gramps_id: Some("E0001".into()),
+            event_type: typed_graph::EventType::Birth,
+            date: Some(DateValue::new_ymd(1870, 6, 15)),
+            description: Some("Birth of John Smith".into()),
+            place_handle: Some("PL001".into()),
+            attribute_list: vec![],
+            citation_list: vec![],
+            media_list: vec![],
+            note_list: vec![],
+            tag_list: vec![],
+        }
+    }
+
+    #[test]
+    fn event_identical() {
+        let a = make_event();
+        let b = make_event();
+        assert!(compare_event(&a, &b).is_empty());
+    }
+
+    #[test]
+    fn event_change_event_type() {
+        let a = make_event();
+        let mut b = make_event();
+        b.event_type = typed_graph::EventType::Death;
+        let changes = compare_event(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "event_type");
+        assert_eq!(changes[0].field_kind, FieldKind::Enum);
+        assert_eq!(changes[0].old_value.as_deref(), Some("Birth"));
+        assert_eq!(changes[0].new_value.as_deref(), Some("Death"));
+    }
+
+    #[test]
+    fn event_change_date() {
+        let a = make_event();
+        let mut b = make_event();
+        b.date = Some(DateValue::new_ymd(1900, 1, 1));
+        let changes = compare_event(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "date");
+        assert_eq!(changes[0].field_kind, FieldKind::Date);
+    }
+
+    #[test]
+    fn event_change_description() {
+        let a = make_event();
+        let mut b = make_event();
+        b.description = Some("Death of John Smith".into());
+        let changes = compare_event(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "description");
+        assert_eq!(changes[0].field_kind, FieldKind::Text);
+        assert!(changes[0].similarity > 0.0 && changes[0].similarity < 1.0);
+    }
+
+    #[test]
+    fn event_change_place_handle() {
+        let a = make_event();
+        let mut b = make_event();
+        b.place_handle = Some("PL002".into());
+        let changes = compare_event(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "place_handle");
+        assert_eq!(changes[0].field_kind, FieldKind::HandleRef);
+    }
+
+    #[test]
+    fn event_empty_vs_empty() {
+        let a = EventData::default();
+        let b = EventData::default();
+        assert!(compare_event(&a, &b).is_empty());
     }
 }
