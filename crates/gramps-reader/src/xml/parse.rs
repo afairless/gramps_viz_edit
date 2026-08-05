@@ -180,6 +180,18 @@ impl Parser {
                                 self.parse_repository(&mut reader, e)?;
                                 Section::Repositories
                             }
+                            Section::Objects if name == b"object" => {
+                                self.parse_media(&mut reader, e)?;
+                                Section::Objects
+                            }
+                            Section::Notes if name == b"note" => {
+                                self.parse_note(&mut reader, e)?;
+                                Section::Notes
+                            }
+                            Section::Tags if name == b"tag" => {
+                                self.parse_tag(&mut reader, e)?;
+                                Section::Tags
+                            }
                             _ => section,
                         },
                     };
@@ -273,6 +285,39 @@ impl Parser {
                                 Node::Repository(RepositoryData {
                                     handle,
                                     ..RepositoryData::default()
+                                }),
+                            )
+                            .map_err(graph_error)?;
+                    } else if name == b"object" && matches!(section, Section::Objects) {
+                        let handle = read_handle_attr(e).unwrap_or_default();
+                        self.graph
+                            .add_node(
+                                handle.clone(),
+                                Node::Media(MediaData {
+                                    handle,
+                                    ..MediaData::default()
+                                }),
+                            )
+                            .map_err(graph_error)?;
+                    } else if name == b"note" && matches!(section, Section::Notes) {
+                        let handle = read_handle_attr(e).unwrap_or_default();
+                        self.graph
+                            .add_node(
+                                handle.clone(),
+                                Node::Note(NoteData {
+                                    handle,
+                                    ..NoteData::default()
+                                }),
+                            )
+                            .map_err(graph_error)?;
+                    } else if name == b"tag" && matches!(section, Section::Tags) {
+                        let handle = read_handle_attr(e).unwrap_or_default();
+                        self.graph
+                            .add_node(
+                                handle.clone(),
+                                Node::Tag(TagData {
+                                    handle,
+                                    ..TagData::default()
                                 }),
                             )
                             .map_err(graph_error)?;
@@ -1962,6 +2007,383 @@ impl Parser {
         }
     }
 
+    /// Parse a `<object>` element (Gramps media object) and its children.
+    ///
+    /// Reads the object's handle, file metadata (src, mime), description,
+    /// checksum, attributes, and all handle references (noterefs, citationrefs,
+    /// tagrefs).
+    fn parse_media(
+        &mut self,
+        reader: &mut Reader<&[u8]>,
+        start: &quick_xml::events::BytesStart,
+    ) -> Result<(), Error> {
+        let handle = read_handle_attr(start).unwrap_or_default();
+
+        let mut media = MediaData {
+            handle: handle.clone(),
+            ..MediaData::default()
+        };
+        let mut in_desc = false;
+        let mut in_checksum = false;
+        let mut in_attribute = false;
+        let mut current_attr_type = AttributeType::Custom;
+        let mut current_attr_value = String::new();
+
+        loop {
+            match reader.read_event() {
+                Ok(Event::Start(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"description" => in_desc = true,
+                        b"checksum" => in_checksum = true,
+                        b"attribute" => {
+                            in_attribute = true;
+                            current_attr_type = AttributeType::Custom;
+                            current_attr_value = String::new();
+                            for attr in e.attributes().flatten() {
+                                let key = attr.key.as_ref();
+                                let val = String::from_utf8_lossy(&attr.value).to_string();
+                                if key == b"type" || key.ends_with(b":type") {
+                                    current_attr_type = parse_attribute_type(&val);
+                                } else if key == b"value" || key.ends_with(b":value") {
+                                    current_attr_value = val;
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(Event::Empty(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"file" => {
+                            for attr in e.attributes().flatten() {
+                                let key = attr.key.as_ref();
+                                let val = String::from_utf8_lossy(&attr.value).to_string();
+                                if key == b"src" || key.ends_with(b":src") {
+                                    media.path = Some(val);
+                                } else if key == b"mime" || key.ends_with(b":mime") {
+                                    media.mime_type = Some(val);
+                                }
+                            }
+                        }
+                        b"noteref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                media.note_list.push(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::MediaNote,
+                                });
+                            }
+                        }
+                        b"citationref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                media.citation_list.push(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::MediaCitation,
+                                });
+                            }
+                        }
+                        b"tagref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                media.tag_list.push(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::MediaTag,
+                                });
+                            }
+                        }
+                        b"attribute" => {
+                            let mut attr_type = AttributeType::Custom;
+                            let mut attr_value = String::new();
+                            for attr in e.attributes().flatten() {
+                                let key = attr.key.as_ref();
+                                let val = String::from_utf8_lossy(&attr.value).to_string();
+                                if key == b"type" || key.ends_with(b":type") {
+                                    attr_type = parse_attribute_type(&val);
+                                } else if key == b"value" || key.ends_with(b":value") {
+                                    attr_value = val;
+                                }
+                            }
+                            media.attribute_list.push(Attribute {
+                                type_field: attr_type,
+                                value: attr_value,
+                                citation_list: vec![],
+                                note_list: vec![],
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(Event::Text(ref e)) => {
+                    if let Ok(text) = e.unescape() {
+                        let text = text.trim();
+                        if text.is_empty() {
+                            continue;
+                        }
+                        if in_desc {
+                            media.desc = Some(text.to_string());
+                        } else if in_checksum {
+                            media.checksum = Some(text.to_string());
+                        }
+                    }
+                }
+                Ok(Event::End(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"object" => {
+                            self.graph
+                                .add_node(handle.clone(), Node::Media(media))
+                                .map_err(graph_error)?;
+                            return Ok(());
+                        }
+                        b"description" => in_desc = false,
+                        b"checksum" => in_checksum = false,
+                        b"attribute" => {
+                            if in_attribute {
+                                media.attribute_list.push(Attribute {
+                                    type_field: current_attr_type,
+                                    value: current_attr_value.clone(),
+                                    citation_list: vec![],
+                                    note_list: vec![],
+                                });
+                                in_attribute = false;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(Event::Eof) => {
+                    return Err(Error::XmlParseError {
+                        message: "unexpected end of file while parsing media object".to_string(),
+                    });
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(Error::XmlParseError {
+                        message: format!("{} at byte {}", e, reader.error_position()),
+                    });
+                }
+            }
+        }
+    }
+
+    /// Parse a `<note>` element and its children.
+    ///
+    /// Reads the note's handle, text content, format, type, and all handle
+    /// references (noterefs, citationrefs, tagrefs).
+    fn parse_note(
+        &mut self,
+        reader: &mut Reader<&[u8]>,
+        start: &quick_xml::events::BytesStart,
+    ) -> Result<(), Error> {
+        let handle = read_handle_attr(start).unwrap_or_default();
+
+        let mut note = NoteData {
+            handle: handle.clone(),
+            ..NoteData::default()
+        };
+        let mut in_text = false;
+        let mut in_format = false;
+        let mut in_type = false;
+
+        loop {
+            match reader.read_event() {
+                Ok(Event::Start(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"text" => in_text = true,
+                        b"format" => in_format = true,
+                        b"type" => in_type = true,
+                        _ => {}
+                    }
+                }
+                Ok(Event::Empty(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"noteref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                note.citation_list.push(h.clone());
+                                // Note->Note references use the NoteRef (deduplicated) edge
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::NoteRef,
+                                });
+                            }
+                        }
+                        b"citationref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                note.citation_list.push(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::NoteCitation,
+                                });
+                            }
+                        }
+                        b"tagref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                note.tag_list.push(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::NoteTag,
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(Event::Text(ref e)) => {
+                    if let Ok(text) = e.unescape() {
+                        let text = text.trim();
+                        if text.is_empty() {
+                            continue;
+                        }
+                        if in_text {
+                            note.text = text.to_string();
+                        } else if in_format {
+                            if let Ok(f) = text.parse::<i32>() {
+                                note.format = Some(f);
+                            }
+                        } else if in_type {
+                            note.type_field = parse_note_type(text);
+                        }
+                    }
+                }
+                Ok(Event::End(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"note" => {
+                            self.graph
+                                .add_node(handle.clone(), Node::Note(note))
+                                .map_err(graph_error)?;
+                            return Ok(());
+                        }
+                        b"text" => in_text = false,
+                        b"format" => in_format = false,
+                        b"type" => in_type = false,
+                        _ => {}
+                    }
+                }
+                Ok(Event::Eof) => {
+                    return Err(Error::XmlParseError {
+                        message: "unexpected end of file while parsing note".to_string(),
+                    });
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(Error::XmlParseError {
+                        message: format!("{} at byte {}", e, reader.error_position()),
+                    });
+                }
+            }
+        }
+    }
+
+    /// Parse a `<tag>` element and its children.
+    ///
+    /// Reads the tag's handle, name, color, and priority.
+    fn parse_tag(
+        &mut self,
+        reader: &mut Reader<&[u8]>,
+        start: &quick_xml::events::BytesStart,
+    ) -> Result<(), Error> {
+        let handle = read_handle_attr(start).unwrap_or_default();
+
+        let mut tag = TagData {
+            handle: handle.clone(),
+            ..TagData::default()
+        };
+        let mut in_name = false;
+        let mut in_color = false;
+        let mut in_priority = false;
+
+        loop {
+            match reader.read_event() {
+                Ok(Event::Start(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"name" => in_name = true,
+                        b"color" => in_color = true,
+                        b"priority" => in_priority = true,
+                        _ => {}
+                    }
+                }
+                Ok(Event::Empty(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    if name == b"tagref" {
+                        if let Some(h) = read_hlink_attr(e) {
+                            tag.tag_list.push(h.clone());
+                            self.pending.push(PendingEdge::Simple {
+                                source: handle.clone(),
+                                target: h,
+                                kind: SimpleEdgeKind::TagTag,
+                            });
+                        }
+                    }
+                }
+                Ok(Event::Text(ref e)) => {
+                    if let Ok(text) = e.unescape() {
+                        let text = text.trim();
+                        if text.is_empty() {
+                            continue;
+                        }
+                        if in_name {
+                            tag.name = text.to_string();
+                        } else if in_color {
+                            tag.color = Some(text.to_string());
+                        } else if in_priority {
+                            if let Ok(p) = text.parse::<i32>() {
+                                tag.priority = Some(p);
+                            }
+                        }
+                    }
+                }
+                Ok(Event::End(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"tag" => {
+                            self.graph
+                                .add_node(handle.clone(), Node::Tag(tag))
+                                .map_err(graph_error)?;
+                            return Ok(());
+                        }
+                        b"name" => in_name = false,
+                        b"color" => in_color = false,
+                        b"priority" => in_priority = false,
+                        _ => {}
+                    }
+                }
+                Ok(Event::Eof) => {
+                    return Err(Error::XmlParseError {
+                        message: "unexpected end of file while parsing tag".to_string(),
+                    });
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(Error::XmlParseError {
+                        message: format!("{} at byte {}", e, reader.error_position()),
+                    });
+                }
+            }
+        }
+    }
+
     /// Build all pending edges into the graph.
     ///
     /// Must be called after all nodes have been parsed.  Dangling
@@ -2306,6 +2728,19 @@ fn parse_repository_type(s: &str) -> Option<RepositoryType> {
 }
 
 /// Parse a SourceMediaType from a string value.
+fn parse_note_type(s: &str) -> Option<NoteType> {
+    match s.trim().to_lowercase().as_str() {
+        "general" => Some(NoteType::General),
+        "research" => Some(NoteType::Research),
+        "transcript" => Some(NoteType::Transcript),
+        "citation" => Some(NoteType::Citation),
+        "report" => Some(NoteType::Report),
+        "html" => Some(NoteType::HTML),
+        "other" => Some(NoteType::Other),
+        _ => None,
+    }
+}
+
 fn parse_source_media_type(s: &str) -> Option<SourceMediaType> {
     match s.trim().to_lowercase().as_str() {
         "audio" => Some(SourceMediaType::Audio),
@@ -3424,5 +3859,262 @@ mod tests {
         );
         let result = parse_graph(&xml);
         assert!(matches!(result, Err(Error::XmlParseError { .. })));
+    }
+
+    // -----------------------------------------------------------------------
+    // Media (object) parsing helpers
+    // -----------------------------------------------------------------------
+
+    fn media_from_parser(xml: &str) -> Vec<MediaData> {
+        let version = detect_schema_version(xml).unwrap();
+        let schema = Schema::for_version(&version).unwrap();
+        let mut parser = Parser::new(schema);
+        parser.parse_all(xml).unwrap();
+        parser
+            .graph
+            .nodes_by_kind(NodeKind::Media)
+            .iter()
+            .map(|h| match parser.graph.get_node(h) {
+                Some(Node::Media(m)) => m.clone(),
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+
+    fn single_media_from_parser(xml: &str) -> MediaData {
+        let mut ms = media_from_parser(xml);
+        assert_eq!(ms.len(), 1, "expected exactly one media object");
+        ms.remove(0)
+    }
+
+    // -----------------------------------------------------------------------
+    // Media (object) tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_media_full() {
+        let xml = with_db(
+            r#"  <objects>
+    <object handle="m0001">
+      <file src="/path/to/photo.jpg" mime="image/jpeg"/>
+      <description>A family photo</description>
+      <checksum>abc123</checksum>
+      <attribute type="Description" value="Old photo"/>
+      <noteref hlink="n0001"/>
+      <citationref hlink="c0001"/>
+      <tagref hlink="t0001"/>
+    </object>
+  </objects>"#,
+        );
+        let m = single_media_from_parser(&xml);
+        assert_eq!(m.handle, "m0001");
+        assert_eq!(m.path.as_deref(), Some("/path/to/photo.jpg"));
+        assert_eq!(m.mime_type.as_deref(), Some("image/jpeg"));
+        assert_eq!(m.desc.as_deref(), Some("A family photo"));
+        assert_eq!(m.checksum.as_deref(), Some("abc123"));
+        assert_eq!(m.attribute_list.len(), 1);
+        assert_eq!(m.attribute_list[0].type_field, AttributeType::Description);
+        assert_eq!(m.attribute_list[0].value, "Old photo");
+        assert_eq!(m.note_list, vec!["n0001"]);
+        assert_eq!(m.citation_list, vec!["c0001"]);
+        assert_eq!(m.tag_list, vec!["t0001"]);
+    }
+
+    #[test]
+    fn parse_media_minimal() {
+        let xml = with_db(r#"  <objects>
+    <object handle="m0002"/>
+  </objects>"#);
+        let m = single_media_from_parser(&xml);
+        assert_eq!(m.handle, "m0002");
+        assert!(m.path.is_none());
+        assert!(m.mime_type.is_none());
+        assert!(m.desc.is_none());
+    }
+
+    #[test]
+    fn parse_media_malformed_xml() {
+        let xml = with_db(
+            r#"  <objects>
+    <object handle="m0003">
+      <description>Broken
+  </objects>"#,
+        );
+        let result = parse_graph(&xml);
+        assert!(matches!(result, Err(Error::XmlParseError { .. })));
+    }
+
+    // -----------------------------------------------------------------------
+    // Note parsing helpers
+    // -----------------------------------------------------------------------
+
+    fn notes_from_parser(xml: &str) -> Vec<NoteData> {
+        let version = detect_schema_version(xml).unwrap();
+        let schema = Schema::for_version(&version).unwrap();
+        let mut parser = Parser::new(schema);
+        parser.parse_all(xml).unwrap();
+        parser
+            .graph
+            .nodes_by_kind(NodeKind::Note)
+            .iter()
+            .map(|h| match parser.graph.get_node(h) {
+                Some(Node::Note(n)) => n.clone(),
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+
+    fn single_note_from_parser(xml: &str) -> NoteData {
+        let mut ns = notes_from_parser(xml);
+        assert_eq!(ns.len(), 1, "expected exactly one note");
+        ns.remove(0)
+    }
+
+    // -----------------------------------------------------------------------
+    // Note tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_note_full() {
+        let xml = with_db(
+            r#"  <notes>
+    <note handle="n0001">
+      <text>This is a note about the family.</text>
+      <format>0</format>
+      <type>General</type>
+      <noteref hlink="n0002"/>
+      <citationref hlink="c0001"/>
+      <tagref hlink="t0001"/>
+    </note>
+  </notes>"#,
+        );
+        let n = single_note_from_parser(&xml);
+        assert_eq!(n.handle, "n0001");
+        assert_eq!(n.text, "This is a note about the family.");
+        assert_eq!(n.format, Some(0));
+        assert_eq!(n.type_field, Some(NoteType::General));
+        // note_list is stored in citation_list for noteref
+        assert_eq!(n.citation_list, vec!["n0002", "c0001"]);
+        assert_eq!(n.tag_list, vec!["t0001"]);
+    }
+
+    #[test]
+    fn parse_note_with_text_only() {
+        let xml = with_db(
+            r#"  <notes>
+    <note handle="n0002">
+      <text>A simple note</text>
+    </note>
+  </notes>"#,
+        );
+        let n = single_note_from_parser(&xml);
+        assert_eq!(n.handle, "n0002");
+        assert_eq!(n.text, "A simple note");
+        assert!(n.format.is_none());
+        assert!(n.type_field.is_none());
+    }
+
+    #[test]
+    fn parse_note_malformed_xml() {
+        let xml = with_db(
+            r#"  <notes>
+    <note handle="n0003">
+      <text>Broken
+  </notes>"#,
+        );
+        let result = parse_graph(&xml);
+        assert!(matches!(result, Err(Error::XmlParseError { .. })));
+    }
+
+    // -----------------------------------------------------------------------
+    // Tag parsing helpers
+    // -----------------------------------------------------------------------
+
+    fn tags_from_parser(xml: &str) -> Vec<TagData> {
+        let version = detect_schema_version(xml).unwrap();
+        let schema = Schema::for_version(&version).unwrap();
+        let mut parser = Parser::new(schema);
+        parser.parse_all(xml).unwrap();
+        parser
+            .graph
+            .nodes_by_kind(NodeKind::Tag)
+            .iter()
+            .map(|h| match parser.graph.get_node(h) {
+                Some(Node::Tag(t)) => t.clone(),
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+
+    fn single_tag_from_parser(xml: &str) -> TagData {
+        let mut ts = tags_from_parser(xml);
+        assert_eq!(ts.len(), 1, "expected exactly one tag");
+        ts.remove(0)
+    }
+
+    // -----------------------------------------------------------------------
+    // Tag tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_tag_full() {
+        let xml = with_db(
+            r#"  <tags>
+    <tag handle="t0001">
+      <name>Favorite</name>
+      <color>#ff0000</color>
+      <priority>1</priority>
+    </tag>
+  </tags>"#,
+        );
+        let t = single_tag_from_parser(&xml);
+        assert_eq!(t.handle, "t0001");
+        assert_eq!(t.name, "Favorite");
+        assert_eq!(t.color.as_deref(), Some("#ff0000"));
+        assert_eq!(t.priority, Some(1));
+    }
+
+    #[test]
+    fn parse_tag_minimal() {
+        let xml = with_db(
+            r#"  <tags>
+    <tag handle="t0002">
+      <name>Unfiled</name>
+    </tag>
+  </tags>"#,
+        );
+        let t = single_tag_from_parser(&xml);
+        assert_eq!(t.handle, "t0002");
+        assert_eq!(t.name, "Unfiled");
+        assert!(t.color.is_none());
+        assert!(t.priority.is_none());
+    }
+
+    #[test]
+    fn parse_tag_malformed_xml() {
+        let xml = with_db(
+            r#"  <tags>
+    <tag handle="t0003">
+      <name>Broken
+  </tags>"#,
+        );
+        let result = parse_graph(&xml);
+        assert!(matches!(result, Err(Error::XmlParseError { .. })));
+    }
+
+    #[test]
+    fn parse_tag_with_tagref() {
+        let xml = with_db(
+            r#"  <tags>
+    <tag handle="t0004">
+      <name>Parent</name>
+      <tagref hlink="t0005"/>
+    </tag>
+  </tags>"#,
+        );
+        let t = single_tag_from_parser(&xml);
+        assert_eq!(t.handle, "t0004");
+        assert_eq!(t.name, "Parent");
+        assert_eq!(t.tag_list, vec!["t0005"]);
     }
 }
