@@ -6,6 +6,7 @@
 
 pub mod count;
 pub mod extract;
+pub mod header;
 
 /// Strip an optional namespace prefix from an element name.
 ///
