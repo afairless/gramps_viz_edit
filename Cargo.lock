@@ -1299,6 +1299,7 @@ dependencies = [
 name = "gramps-reader"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "output",
  "quick-xml 0.36.2",
  "serde",
