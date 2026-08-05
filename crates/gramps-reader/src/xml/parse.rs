@@ -156,6 +156,14 @@ impl Parser {
                                 self.parse_person(&mut reader, e)?;
                                 Section::People
                             }
+                            Section::Families if name == b"family" => {
+                                self.parse_family(&mut reader, e)?;
+                                Section::Families
+                            }
+                            Section::Events if name == b"event" => {
+                                self.parse_event(&mut reader, e)?;
+                                Section::Events
+                            }
                             _ => section,
                         },
                     };
@@ -183,6 +191,28 @@ impl Parser {
                                 Node::Person(PersonData {
                                     handle,
                                     ..PersonData::default()
+                                }),
+                            )
+                            .map_err(graph_error)?;
+                    } else if name == b"family" && matches!(section, Section::Families) {
+                        let handle = read_handle_attr(e).unwrap_or_default();
+                        self.graph
+                            .add_node(
+                                handle.clone(),
+                                Node::Family(FamilyData {
+                                    handle,
+                                    ..FamilyData::default()
+                                }),
+                            )
+                            .map_err(graph_error)?;
+                    } else if name == b"event" && matches!(section, Section::Events) {
+                        let handle = read_handle_attr(e).unwrap_or_default();
+                        self.graph
+                            .add_node(
+                                handle.clone(),
+                                Node::Event(EventData {
+                                    handle,
+                                    ..EventData::default()
                                 }),
                             )
                             .map_err(graph_error)?;
@@ -651,6 +681,494 @@ impl Parser {
         }
     }
 
+    /// Parse a `<family>` element and its children.
+    ///
+    /// Reads the family's father/mother handles, child refs, event refs,
+    /// attributes, LDS ordinances, and all handle references (citations,
+    /// notes, media, tags). Accumulates referenced handles into pending
+    /// edge lists for the second pass.
+    fn parse_family(
+        &mut self,
+        reader: &mut Reader<&[u8]>,
+        start: &quick_xml::events::BytesStart,
+    ) -> Result<(), Error> {
+        let handle = read_handle_attr(start).unwrap_or_default();
+
+        let mut family = FamilyData {
+            handle: handle.clone(),
+            ..FamilyData::default()
+        };
+        let mut in_attribute = false;
+        let mut current_attr_type = String::new();
+        let mut current_attr_value = String::new();
+        let mut in_attr_type = false;
+        let mut in_attr_value = false;
+
+        loop {
+            match reader.read_event() {
+                Ok(Event::Start(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"father" | b"mother" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                if name == b"father" {
+                                    family.father_handle = Some(h.clone());
+                                    self.pending.push(PendingEdge::Simple {
+                                        source: handle.clone(),
+                                        target: h,
+                                        kind: SimpleEdgeKind::FamilyFather,
+                                    });
+                                } else {
+                                    family.mother_handle = Some(h.clone());
+                                    self.pending.push(PendingEdge::Simple {
+                                        source: handle.clone(),
+                                        target: h,
+                                        kind: SimpleEdgeKind::FamilyMother,
+                                    });
+                                }
+                            }
+                        }
+                        b"attribute" => {
+                            in_attribute = true;
+                            current_attr_type.clear();
+                            current_attr_value.clear();
+                            for attr in e.attributes().flatten() {
+                                let key = attr.key.as_ref();
+                                let val = String::from_utf8_lossy(&attr.value).to_string();
+                                if key == b"type" || key.ends_with(b":type") {
+                                    current_attr_type = val;
+                                } else if key == b"value" || key.ends_with(b":value") {
+                                    current_attr_value = val;
+                                }
+                            }
+                            // If both type and value are in attributes, close immediately.
+                            if !current_attr_type.is_empty() && !current_attr_value.is_empty() {
+                                family.attribute_list.push(Attribute {
+                                    type_field: parse_attribute_type(&current_attr_type),
+                                    value: current_attr_value.clone(),
+                                    citation_list: vec![],
+                                    note_list: vec![],
+                                });
+                                in_attribute = false;
+                            }
+                        }
+                        b"type" if in_attribute => in_attr_type = true,
+                        b"value" if in_attribute => in_attr_value = true,
+                        _ => {}
+                    }
+                }
+                Ok(Event::Empty(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"father" | b"mother" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                if name == b"father" {
+                                    family.father_handle = Some(h.clone());
+                                    self.pending.push(PendingEdge::Simple {
+                                        source: handle.clone(),
+                                        target: h,
+                                        kind: SimpleEdgeKind::FamilyFather,
+                                    });
+                                } else {
+                                    family.mother_handle = Some(h.clone());
+                                    self.pending.push(PendingEdge::Simple {
+                                        source: handle.clone(),
+                                        target: h,
+                                        kind: SimpleEdgeKind::FamilyMother,
+                                    });
+                                }
+                            }
+                        }
+                        b"childref" => {
+                            let hlink = read_hlink_attr(e).unwrap_or_default();
+                            let mut relation = None;
+                            for attr in e.attributes().flatten() {
+                                let key = attr.key.as_ref();
+                                let val = String::from_utf8_lossy(&attr.value).to_string();
+                                if key == b"relation" || key.ends_with(b":relation") {
+                                    relation = parse_child_ref_type(&val);
+                                }
+                            }
+                            let child_ref = make_child_ref(hlink.clone(), relation);
+                            family.child_ref_list.push(child_ref.clone());
+                            self.pending.push(PendingEdge::FamilyChildRef {
+                                source: handle.clone(),
+                                target: child_ref.ref_field.clone(),
+                                metadata: child_ref,
+                            });
+                        }
+                        b"eventref" => {
+                            let hlink = read_hlink_attr(e).unwrap_or_default();
+                            let mut role = None;
+                            for attr in e.attributes().flatten() {
+                                let key = attr.key.as_ref();
+                                let val = String::from_utf8_lossy(&attr.value).to_string();
+                                if key == b"role" || key.ends_with(b":role") {
+                                    role = parse_event_role_type(&val);
+                                }
+                            }
+                            let event_ref = make_event_ref(hlink.clone(), role);
+                            family.event_ref_list.push(event_ref.clone());
+                            self.pending.push(PendingEdge::FamilyEventRef {
+                                source: handle.clone(),
+                                target: event_ref.ref_field.clone(),
+                                metadata: event_ref,
+                            });
+                        }
+                        b"citationref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                family.citation_list.push(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::FamilyCitation,
+                                });
+                            }
+                        }
+                        b"noteref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                family.note_list.push(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::FamilyNote,
+                                });
+                            }
+                        }
+                        b"tagref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                family.tag_list.push(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::FamilyTag,
+                                });
+                            }
+                        }
+                        b"mediaref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                family.media_list.push(MediaRef { ref_field: h.clone() });
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::FamilyMediaRef,
+                                });
+                            }
+                        }
+                        b"attribute" => {
+                            let mut attr_type = String::new();
+                            let mut attr_value = String::new();
+                            for attr in e.attributes().flatten() {
+                                let key = attr.key.as_ref();
+                                let val = String::from_utf8_lossy(&attr.value).to_string();
+                                if key == b"type" || key.ends_with(b":type") {
+                                    attr_type = val;
+                                } else if key == b"value" || key.ends_with(b":value") {
+                                    attr_value = val;
+                                }
+                            }
+                            if !attr_type.is_empty() || !attr_value.is_empty() {
+                                family.attribute_list.push(Attribute {
+                                    type_field: parse_attribute_type(&attr_type),
+                                    value: attr_value,
+                                    citation_list: vec![],
+                                    note_list: vec![],
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(Event::Text(ref e)) => {
+                    if let Ok(text) = e.unescape() {
+                        let text = text.trim();
+                        if text.is_empty() {
+                            continue;
+                        }
+                        if in_attr_type {
+                            current_attr_type = text.to_string();
+                        } else if in_attr_value {
+                            current_attr_value = text.to_string();
+                        }
+                    }
+                }
+                Ok(Event::End(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"family" => {
+                            self.graph
+                                .add_node(handle.clone(), Node::Family(family))
+                                .map_err(graph_error)?;
+                            return Ok(());
+                        }
+                        b"attribute" => {
+                            if !current_attr_type.is_empty() || !current_attr_value.is_empty() {
+                                family.attribute_list.push(Attribute {
+                                    type_field: parse_attribute_type(&current_attr_type),
+                                    value: current_attr_value.clone(),
+                                    citation_list: vec![],
+                                    note_list: vec![],
+                                });
+                            }
+                            in_attribute = false;
+                            in_attr_type = false;
+                            in_attr_value = false;
+                        }
+                        b"type" if in_attr_type => in_attr_type = false,
+                        b"value" if in_attr_value => in_attr_value = false,
+                        _ => {}
+                    }
+                }
+                Ok(Event::Eof) => {
+                    return Err(Error::XmlParseError {
+                        message: "unexpected end of file while parsing family".to_string(),
+                    });
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(Error::XmlParseError {
+                        message: format!("{} at byte {}", e, reader.error_position()),
+                    });
+                }
+            }
+        }
+    }
+
+    /// Parse a `<event>` element and its children.
+    ///
+    /// Reads the event's type, date, place, description, attributes, and
+    /// all handle references (citations, notes, media, tags). Accumulates
+    /// referenced handles into pending edge lists for the second pass.
+    fn parse_event(
+        &mut self,
+        reader: &mut Reader<&[u8]>,
+        start: &quick_xml::events::BytesStart,
+    ) -> Result<(), Error> {
+        let handle = read_handle_attr(start).unwrap_or_default();
+
+        let mut event = EventData {
+            handle: handle.clone(),
+            ..EventData::default()
+        };
+        let mut in_eventtype = false;
+        let mut in_type = false;
+        let mut event_type_str = String::new();
+        let mut in_description = false;
+        let mut in_attribute = false;
+        let mut current_attr_type = String::new();
+        let mut current_attr_value = String::new();
+        let mut in_attr_type = false;
+        let mut in_attr_value = false;
+
+        loop {
+            match reader.read_event() {
+                Ok(Event::Start(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"eventtype" => in_eventtype = true,
+                        b"type" if in_attribute => in_attr_type = true,
+                        b"type" if in_eventtype => {
+                            in_type = true;
+                            event_type_str.clear();
+                        }
+                        b"type" => {
+                            // Flat format: <type>Birth</type> directly inside <event>.
+                            in_type = true;
+                            event_type_str.clear();
+                        }
+                        b"description" => in_description = true,
+                        b"place" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                event.place_handle = Some(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::EventPlace,
+                                });
+                            }
+                        }
+                        b"attribute" => {
+                            in_attribute = true;
+                            current_attr_type.clear();
+                            current_attr_value.clear();
+                            for attr in e.attributes().flatten() {
+                                let key = attr.key.as_ref();
+                                let val = String::from_utf8_lossy(&attr.value).to_string();
+                                if key == b"type" || key.ends_with(b":type") {
+                                    current_attr_type = val;
+                                } else if key == b"value" || key.ends_with(b":value") {
+                                    current_attr_value = val;
+                                }
+                            }
+                            if !current_attr_type.is_empty() && !current_attr_value.is_empty() {
+                                event.attribute_list.push(Attribute {
+                                    type_field: parse_attribute_type(&current_attr_type),
+                                    value: current_attr_value.clone(),
+                                    citation_list: vec![],
+                                    note_list: vec![],
+                                });
+                                in_attribute = false;
+                            }
+                        }
+                        b"value" if in_attribute => in_attr_value = true,
+                        _ => {}
+                    }
+                }
+                Ok(Event::Empty(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"dateval" => {
+                            if let Some(d) = parse_dateval(e) {
+                                event.date = Some(d);
+                            }
+                        }
+                        b"place" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                event.place_handle = Some(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::EventPlace,
+                                });
+                            }
+                        }
+                        b"citationref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                event.citation_list.push(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::EventCitation,
+                                });
+                            }
+                        }
+                        b"noteref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                event.note_list.push(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::EventNote,
+                                });
+                            }
+                        }
+                        b"tagref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                event.tag_list.push(h.clone());
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::EventTag,
+                                });
+                            }
+                        }
+                        b"mediaref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                event.media_list.push(MediaRef { ref_field: h.clone() });
+                                self.pending.push(PendingEdge::Simple {
+                                    source: handle.clone(),
+                                    target: h,
+                                    kind: SimpleEdgeKind::EventMediaRef,
+                                });
+                            }
+                        }
+                        b"attribute" => {
+                            let mut attr_type = String::new();
+                            let mut attr_value = String::new();
+                            for attr in e.attributes().flatten() {
+                                let key = attr.key.as_ref();
+                                let val = String::from_utf8_lossy(&attr.value).to_string();
+                                if key == b"type" || key.ends_with(b":type") {
+                                    attr_type = val;
+                                } else if key == b"value" || key.ends_with(b":value") {
+                                    attr_value = val;
+                                }
+                            }
+                            if !attr_type.is_empty() || !attr_value.is_empty() {
+                                event.attribute_list.push(Attribute {
+                                    type_field: parse_attribute_type(&attr_type),
+                                    value: attr_value,
+                                    citation_list: vec![],
+                                    note_list: vec![],
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(Event::Text(ref e)) => {
+                    if let Ok(text) = e.unescape() {
+                        let text = text.trim();
+                        if text.is_empty() {
+                            continue;
+                        }
+                        if in_type {
+                            event_type_str = text.to_string();
+                        } else if in_description {
+                            *event.description.get_or_insert_with(String::new) = text.to_string();
+                        } else if in_attr_type {
+                            current_attr_type = text.to_string();
+                        } else if in_attr_value {
+                            current_attr_value = text.to_string();
+                        }
+                    }
+                }
+                Ok(Event::End(ref e)) => {
+                    let raw = e.name().as_ref().to_vec();
+                    let name = strip_prefix(&raw);
+                    match name {
+                        b"event" => {
+                            self.graph
+                                .add_node(handle.clone(), Node::Event(event))
+                                .map_err(graph_error)?;
+                            return Ok(());
+                        }
+                        b"eventtype" => in_eventtype = false,
+                        b"type" if in_type => {
+                            if let Some(t) = parse_event_type(&event_type_str) {
+                                event.event_type = into_event_type_field(t);
+                            }
+                            in_type = false;
+                        }
+                        b"type" if in_attr_type => in_attr_type = false,
+                        b"value" if in_attr_value => in_attr_value = false,
+                        b"description" => in_description = false,
+                        b"attribute" => {
+                            if !current_attr_type.is_empty() || !current_attr_value.is_empty() {
+                                event.attribute_list.push(Attribute {
+                                    type_field: parse_attribute_type(&current_attr_type),
+                                    value: current_attr_value.clone(),
+                                    citation_list: vec![],
+                                    note_list: vec![],
+                                });
+                            }
+                            in_attribute = false;
+                            in_attr_type = false;
+                            in_attr_value = false;
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(Event::Eof) => {
+                    return Err(Error::XmlParseError {
+                        message: "unexpected end of file while parsing event".to_string(),
+                    });
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(Error::XmlParseError {
+                        message: format!("{} at byte {}", e, reader.error_position()),
+                    });
+                }
+            }
+        }
+    }
+
     /// Build all pending edges into the graph.
     ///
     /// Must be called after all nodes have been parsed.  Dangling
@@ -929,6 +1447,114 @@ fn parse_url_type(s: &str) -> Option<UrlType> {
 }
 
 /// Parse an LdsOrdType from a string value.
+/// Parse a ChildRefType from a string value.
+fn parse_child_ref_type(s: &str) -> Option<ChildRefType> {
+    match s.trim().to_lowercase().as_str() {
+        "adopted" => Some(ChildRefType::Adopted),
+        "birth" => Some(ChildRefType::Birth),
+        "created" => Some(ChildRefType::Created),
+        "foster" => Some(ChildRefType::Foster),
+        "godchild" => Some(ChildRefType::Godchild),
+        "other" => Some(ChildRefType::Other),
+        "sponsor" => Some(ChildRefType::Sponsor),
+        "stepchild" => Some(ChildRefType::Stepchild),
+        _ => None,
+    }
+}
+
+/// Parse an EventType from a string value.
+fn parse_event_type(s: &str) -> Option<EventType> {
+    match s.trim().to_lowercase().as_str() {
+        "adoption" => Some(EventType::Adoption),
+        "baptism" => Some(EventType::Baptism),
+        "bar mitzvah" => Some(EventType::BarMitzvah),
+        "bat mitzvah" => Some(EventType::BatMitzvah),
+        "birth" => Some(EventType::Birth),
+        "burial" => Some(EventType::Burial),
+        "census" => Some(EventType::Census),
+        "confirmation" => Some(EventType::Confirmation),
+        "correspondence" => Some(EventType::Correspondence),
+        "creates" => Some(EventType::Creates),
+        "death" => Some(EventType::Death),
+        "divorce" => Some(EventType::Divorce),
+        "education" => Some(EventType::Education),
+        "emigration" => Some(EventType::Emigration),
+        "funeral" => Some(EventType::Funeral),
+        "graduation" => Some(EventType::Graduation),
+        "immigration" => Some(EventType::Immigration),
+        "marriage" => Some(EventType::Marriage),
+        "military service" => Some(EventType::MilitaryService),
+        "naturalization" => Some(EventType::Naturalization),
+        "occupation" => Some(EventType::Occupation),
+        "other" => Some(EventType::Other),
+        "probate" => Some(EventType::Probate),
+        "religion" => Some(EventType::Religion),
+        "residence" => Some(EventType::Residence),
+        "retirement" => Some(EventType::Retirement),
+        "title" => Some(EventType::Title),
+        "will" => Some(EventType::Will),
+        _ => None,
+    }
+}
+
+/// Parse a DateQuality from a string value.
+fn parse_date_quality(s: &str) -> Option<DateQuality> {
+    match s.trim().to_lowercase().as_str() {
+        "exact" => Some(DateQuality::Exact),
+        "estimated" => Some(DateQuality::Estimated),
+        "calculated" => Some(DateQuality::Calculated),
+        _ => None,
+    }
+}
+
+/// Parse a DateModifier from a string value.
+fn parse_date_modifier(s: &str) -> Option<DateModifier> {
+    match s.trim().to_lowercase().as_str() {
+        "about" => Some(DateModifier::About),
+        "after" => Some(DateModifier::After),
+        "before" => Some(DateModifier::Before),
+        "range" => Some(DateModifier::Range),
+        "span" => Some(DateModifier::Span),
+        "none" => Some(DateModifier::None),
+        _ => None,
+    }
+}
+
+/// Parse a DateValue from a `<dateval>` element's attributes.
+fn parse_dateval(e: &quick_xml::events::BytesStart) -> Option<DateValue> {
+    let mut val = None;
+    let mut quality = None;
+    let mut modifier = None;
+    for attr in e.attributes().flatten() {
+        let key = attr.key.as_ref();
+        let attr_val = String::from_utf8_lossy(&attr.value).to_string();
+        if key == b"val" || key.ends_with(b":val") {
+            val = Some(attr_val);
+        } else if key == b"quality" || key.ends_with(b":quality") {
+            quality = parse_date_quality(&attr_val);
+        } else if key == b"type" || key.ends_with(b":type") {
+            modifier = parse_date_modifier(&attr_val);
+        }
+    }
+
+    let raw = val?;
+    // Strip any time component (e.g. "1850-03-15 00:00:00") and split into Y/M/D.
+    let date_part = raw.split_whitespace().next().unwrap_or(&raw);
+    let mut parts = date_part.split('-');
+    let year = parts.next().and_then(|p| p.trim().parse::<i32>().ok())?;
+    let month = parts.next().and_then(|p| p.trim().parse::<i32>().ok());
+    let day = parts.next().and_then(|p| p.trim().parse::<i32>().ok());
+
+    Some(DateValue {
+        year,
+        month,
+        day,
+        quality: quality.or(Some(DateQuality::Exact)),
+        modifier: modifier.or(Some(DateModifier::None)),
+        text: None,
+    })
+}
+
 fn parse_lds_ord_type(s: &str) -> LdsOrdType {
     match s.trim().to_lowercase().as_str() {
         "baptism" => LdsOrdType::Baptism,
@@ -1402,5 +2028,212 @@ mod tests {
         // Event e0001 doesn't exist — build_edges will error
         let result = parse_graph(&xml);
         assert!(result.is_err(), "expected error for dangling eventref");
+    }
+
+    // -----------------------------------------------------------------------
+    // Family helpers
+    // -----------------------------------------------------------------------
+
+    /// Parse families from XML using the Parser directly (no edge validation).
+    fn families_from_parser(xml: &str) -> Vec<FamilyData> {
+        let version = detect_schema_version(xml).unwrap();
+        let schema = Schema::for_version(&version).unwrap();
+        let mut parser = Parser::new(schema);
+        parser.parse_all(xml).unwrap();
+        parser
+            .graph
+            .nodes_by_kind(NodeKind::Family)
+            .iter()
+            .map(|h| match parser.graph.get_node(h) {
+                Some(Node::Family(f)) => f.clone(),
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+
+    fn single_family_from_parser(xml: &str) -> FamilyData {
+        let mut fs = families_from_parser(xml);
+        assert_eq!(fs.len(), 1, "expected exactly one family");
+        fs.remove(0)
+    }
+
+    /// Parse events from XML using the Parser directly (no edge validation).
+    fn events_from_parser(xml: &str) -> Vec<EventData> {
+        let version = detect_schema_version(xml).unwrap();
+        let schema = Schema::for_version(&version).unwrap();
+        let mut parser = Parser::new(schema);
+        parser.parse_all(xml).unwrap();
+        parser
+            .graph
+            .nodes_by_kind(NodeKind::Event)
+            .iter()
+            .map(|h| match parser.graph.get_node(h) {
+                Some(Node::Event(e)) => e.clone(),
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+
+    fn single_event_from_parser(xml: &str) -> EventData {
+        let mut es = events_from_parser(xml);
+        assert_eq!(es.len(), 1, "expected exactly one event");
+        es.remove(0)
+    }
+
+    // -----------------------------------------------------------------------
+    // Family parsing
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_family_full() {
+        let xml = with_db(
+            r#"  <families>
+    <family handle="f0001">
+      <father hlink="p0001"/>
+      <mother hlink="p0002"/>
+      <childref hlink="p0003" relation="Birth"/>
+      <childref hlink="p0004"/>
+      <eventref hlink="e0001" role="Primary"/>
+      <attribute type="Property" value="123 Main St"/>
+    </family>
+  </families>"#,
+        );
+        let f = single_family_from_parser(&xml);
+        assert_eq!(f.handle, "f0001");
+        assert_eq!(f.father_handle.as_deref(), Some("p0001"));
+        assert_eq!(f.mother_handle.as_deref(), Some("p0002"));
+        assert_eq!(f.child_ref_list.len(), 2);
+        assert_eq!(f.child_ref_list[0].ref_field, "p0003");
+        assert_eq!(f.child_ref_list[0].relation, Some(ChildRefType::Birth));
+        assert_eq!(f.child_ref_list[1].ref_field, "p0004");
+        assert_eq!(f.child_ref_list[1].relation, None);
+        assert_eq!(f.event_ref_list.len(), 1);
+        assert_eq!(f.event_ref_list[0].ref_field, "e0001");
+        assert_eq!(f.event_ref_list[0].role, Some(EventRoleType::Primary));
+        assert_eq!(f.attribute_list.len(), 1);
+        assert_eq!(f.attribute_list[0].value, "123 Main St");
+        assert_eq!(f.attribute_list[0].type_field, AttributeType::Property);
+    }
+
+    #[test]
+    fn parse_family_soft_refs() {
+        let xml = with_db(
+            r#"  <families>
+    <family handle="f0002">
+      <citationref hlink="c0001"/>
+      <noteref hlink="n0001"/>
+      <tagref hlink="t0001"/>
+      <mediaref hlink="m0001"/>
+    </family>
+  </families>"#,
+        );
+        let f = single_family_from_parser(&xml);
+        assert_eq!(f.citation_list, vec!["c0001"]);
+        assert_eq!(f.note_list, vec!["n0001"]);
+        assert_eq!(f.tag_list, vec!["t0001"]);
+        assert_eq!(f.media_list.len(), 1);
+        assert_eq!(f.media_list[0].ref_field, "m0001");
+    }
+
+    #[test]
+    fn parse_family_minimal() {
+        let xml = with_db(r#"  <families>
+    <family handle="f0003"/>
+  </families>"#);
+        let f = single_family_from_parser(&xml);
+        assert_eq!(f.handle, "f0003");
+        assert!(f.father_handle.is_none());
+        assert!(f.mother_handle.is_none());
+        assert!(f.child_ref_list.is_empty());
+    }
+
+    #[test]
+    fn parse_family_malformed_xml() {
+        let xml = with_db(
+            r#"  <families>
+    <family handle="f0004">
+      <father hlink="p0001">
+  </families>"#,
+        );
+        let result = parse_graph(&xml);
+        assert!(matches!(result, Err(Error::XmlParseError { .. })));
+    }
+
+    // -----------------------------------------------------------------------
+    // Event parsing
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_event_full() {
+        let xml = with_db(
+            r#"  <events>
+    <event handle="e0001">
+      <eventtype>
+        <type>Marriage</type>
+      </eventtype>
+      <dateval val="1850-03-15" quality="exact" type="about"/>
+      <place hlink="pl0001"/>
+      <description>Church ceremony</description>
+      <attribute type="Cause" value="heart attack"/>
+    </event>
+  </events>"#,
+        );
+        let e = single_event_from_parser(&xml);
+        assert_eq!(e.handle, "e0001");
+        assert_eq!(e.event_type, EventType::Marriage);
+        let date = e.date.as_ref().expect("date should be set");
+        assert_eq!(date.year, 1850);
+        assert_eq!(date.month, Some(3));
+        assert_eq!(date.day, Some(15));
+        assert_eq!(date.quality, Some(DateQuality::Exact));
+        assert_eq!(date.modifier, Some(DateModifier::About));
+        assert_eq!(e.place_handle.as_deref(), Some("pl0001"));
+        assert_eq!(e.description.as_deref(), Some("Church ceremony"));
+        assert_eq!(e.attribute_list.len(), 1);
+        assert_eq!(e.attribute_list[0].type_field, AttributeType::Cause);
+        assert_eq!(e.attribute_list[0].value, "heart attack");
+    }
+
+    #[test]
+    fn parse_event_flat_type() {
+        // Gramps 5.1 flat format: <type>Birth</type> directly inside <event>.
+        let xml = with_db(
+            r#"  <events>
+    <event handle="e0002">
+      <type>Birth</type>
+      <dateval val="1850"/>
+    </event>
+  </events>"#,
+        );
+        let e = single_event_from_parser(&xml);
+        assert_eq!(e.event_type, EventType::Birth);
+        let date = e.date.as_ref().expect("date should be set");
+        assert_eq!(date.year, 1850);
+        assert_eq!(date.month, None);
+        assert_eq!(date.day, None);
+    }
+
+    #[test]
+    fn parse_event_minimal() {
+        let xml = with_db(r#"  <events>
+    <event handle="e0003"/>
+  </events>"#);
+        let e = single_event_from_parser(&xml);
+        assert_eq!(e.handle, "e0003");
+        assert_eq!(e.event_type, EventType::Adoption); // Default variant.
+        assert!(e.date.is_none());
+        assert!(e.place_handle.is_none());
+    }
+
+    #[test]
+    fn parse_event_malformed_xml() {
+        let xml = with_db(
+            r#"  <events>
+    <event handle="e0004">
+      <eventtype>
+  </events>"#,
+        );
+        let result = parse_graph(&xml);
+        assert!(matches!(result, Err(Error::XmlParseError { .. })));
     }
 }
