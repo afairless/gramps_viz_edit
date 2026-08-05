@@ -21,4 +21,5 @@ quick-xml = "0.36"
 ureq = "3"
 
 [dev-dependencies]
+flate2 = "1"
 tempfile = "3"

@@ -33,10 +33,7 @@ pub fn run(args: ValidateArgs) -> Result<(), crate::error::CliError> {
     let file_path = &args.file;
 
     // Read the file
-    let content = std::fs::read_to_string(file_path).map_err(|e| crate::error::CliError::Io {
-        path: file_path.clone(),
-        source: e,
-    })?;
+    let content = gramps_reader::read_gramps_file(file_path)?;
 
     // Validate XML structure
     match validate_gramps_xml_structure(&content) {
@@ -193,6 +190,38 @@ mod tests {
             Err(crate::error::CliError::Io { .. }) => {} // Expected
             _ => panic!("Expected Io error, got: {:?}", result),
         }
+    }
+
+    #[test]
+    fn validate_command_gzip_compressed_file() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // A minimal valid Gramps XML document with the expected namespace
+        // and header section.
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header>
+    <created date="2025-01-01" version="5.2"/>
+    <researcher><resname>Test</resname></researcher>
+  </header>
+</database>"#;
+
+        // Gzip-compress the XML.
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(xml.as_bytes()).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        tmp.write_all(&compressed).unwrap();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        let args = ValidateArgs {
+            file: path,
+            strict: false,
+        };
+        let result = run(args);
+        assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
     }
 
     #[test]

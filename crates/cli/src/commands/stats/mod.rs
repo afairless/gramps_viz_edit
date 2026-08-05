@@ -32,10 +32,7 @@ pub fn run(args: StatsArgs) -> Result<(), CliError> {
     let file_path = &args.file;
 
     // Read the file
-    let content = std::fs::read_to_string(file_path).map_err(|e| CliError::Io {
-        path: file_path.clone(),
-        source: e,
-    })?;
+    let content = gramps_reader::read_gramps_file(file_path)?;
 
     // Count
     let mut report = count_gramps_xml(&content)?;
@@ -368,6 +365,37 @@ mod tests {
 
         let mut tmp = NamedTempFile::new().unwrap();
         write!(tmp, "").unwrap();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        let args = StatsArgs {
+            file: path,
+            json: false,
+            no_unicode: false,
+        };
+        let result = run(args);
+        assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+    }
+
+    #[test]
+    fn stats_gzip_compressed_file_returns_success() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // A minimal valid Gramps XML document.
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <people>
+    <person handle="p1"><name><first>Test</first><surname>Person</surname></name></person>
+  </people>
+</database>"#;
+
+        // Gzip-compress the XML.
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(xml.as_bytes()).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        tmp.write_all(&compressed).unwrap();
         let path = tmp.path().to_str().unwrap().to_string();
 
         let args = StatsArgs {

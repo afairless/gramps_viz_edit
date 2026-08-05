@@ -62,8 +62,8 @@ pub fn load_graph_data_with_stats(
     no_impute: bool,
     generation_gap: u32,
 ) -> Result<LoadedGraph, String> {
-    let content =
-        std::fs::read_to_string(path).map_err(|e| format!("Cannot read file '{}': {}", path, e))?;
+    let content = gramps_reader::read_gramps_file(path)
+        .map_err(|e| format!("Cannot read file '{}': {}", path, e))?;
 
     // Compute stats from the same in-memory content.
     let stats = gramps_reader::count_gramps_xml(&content)
@@ -113,7 +113,7 @@ pub fn load_graph_data_with_stats(
 ///
 /// Returns a user-friendly error string on failure.
 pub fn get_stats(path: &str) -> Result<gramps_reader::StatsReport, String> {
-    let content = std::fs::read_to_string(path)
+    let content = gramps_reader::read_gramps_file(path)
         .map_err(|e| format!("Cannot read file '{}': {}", path, e))?;
     gramps_reader::count_gramps_xml(&content)
         .map_err(|e| format!("Failed to parse Gramps XML: {}", e))
@@ -601,5 +601,69 @@ mod tests {
         assert_eq!(from_old.nodes.len(), from_new.graph_data.nodes.len());
         assert_eq!(from_old.links.len(), from_new.graph_data.links.len());
         assert_eq!(from_old.family_groups.len(), from_new.graph_data.family_groups.len());
+    }
+
+    #[test]
+    fn load_graph_data_gzip_compressed_file() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <people>
+    <person handle="p1">
+      <gender>M</gender>
+      <name><first>John</first><surname>Smith</surname></name>
+      <birth><dateval val="1850-03-15"/></birth>
+    </person>
+    <person handle="p2">
+      <gender>F</gender>
+      <name><first>Jane</first><surname>Smith</surname></name>
+      <birth><dateval val="1855-06-01"/></birth>
+    </person>
+  </people>
+</database>"#;
+
+        // Gzip-compress the XML.
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(xml.as_bytes()).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        tmp.write_all(&compressed).unwrap();
+        let path = tmp.path().with_extension("gramps");
+        std::fs::rename(tmp.path(), &path).unwrap();
+
+        let gd = load_graph_data(path.to_str().unwrap(), false, 25).unwrap();
+        assert_eq!(gd.nodes.len(), 2);
+
+        let p1 = gd.nodes.iter().find(|n| n.handle == "p1").unwrap();
+        assert_eq!(p1.birth_year, Some(1850));
+    }
+
+    #[test]
+    fn get_stats_gzip_compressed_file() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <people>
+    <person handle="p1"><name><first>Test</first></name></person>
+  </people>
+</database>"#;
+
+        // Gzip-compress the XML.
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(xml.as_bytes()).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        tmp.write_all(&compressed).unwrap();
+        let path = tmp.path().with_extension("gramps");
+        std::fs::rename(tmp.path(), &path).unwrap();
+
+        let report = get_stats(path.to_str().unwrap()).unwrap();
+        assert_eq!(report.counts.people, 1);
     }
 }

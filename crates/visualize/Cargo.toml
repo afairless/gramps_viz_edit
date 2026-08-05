@@ -25,4 +25,5 @@ path = "src/main.rs"
 required-features = ["visualize"]
 
 [dev-dependencies]
+flate2 = "1"
 tempfile = "3"
