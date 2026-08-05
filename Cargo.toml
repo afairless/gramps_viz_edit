@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/typed-graph", "crates/output", "crates/cli", "crates/gramps-reader", "crates/visualize"]
+members = ["crates/typed-graph", "crates/output", "crates/cli", "crates/gramps-reader", "crates/visualize", "crates/diff"]
 
 default-members = ["crates/typed-graph", "crates/output", "crates/cli", "crates/gramps-reader"]
 
@@ -10,3 +10,4 @@ serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 rand = "0.8"
 quick-xml = "0.36"
+strsim = "0.11"

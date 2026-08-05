@@ -685,6 +685,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "diff"
+version = "0.1.0"
+dependencies = [
+ "gramps-reader",
+ "serde",
+ "serde_json",
+ "typed-graph",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
