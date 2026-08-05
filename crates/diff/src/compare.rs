@@ -11,8 +11,9 @@
 use std::collections::BTreeSet;
 
 use typed_graph::{
-    Address, Attribute, ChildRef, DateValue, EventData, EventRef, FamilyData, Handle, LdsOrd,
-    Location, MediaRef, Name, PersonData, PersonRef, PlaceRef, RepoRef, Surname, Url,
+    Address, Attribute, ChildRef, CitationData, DateValue, EventData, EventRef, FamilyData,
+    Handle, LdsOrd, Location, MediaRef, Name, PersonData, PersonRef, PlaceData, PlaceRef,
+    RepoRef, RepositoryData, SourceData, Surname, Url,
 };
 
 use crate::report::{FieldChange, FieldKind};
@@ -941,6 +942,289 @@ pub fn compare_event(a: &EventData, b: &EventData) -> Vec<FieldChange> {
     changes
 }
 
+/// Compare two [`PlaceData`] structs field by field.
+pub fn compare_place(a: &PlaceData, b: &PlaceData) -> Vec<FieldChange> {
+    let mut changes = Vec::new();
+
+    changes.extend(compare_field_optional_text(
+        "gramps_id",
+        a.gramps_id.as_deref(),
+        b.gramps_id.as_deref(),
+    ));
+    changes.extend(compare_location("name", Some(&a.name), Some(&b.name)));
+    changes.extend(compare_ref_array(
+        "place_ref_list",
+        &a.place_ref_list,
+        &b.place_ref_list,
+        |_, _| vec![],
+    ));
+    changes.extend(compare_handle_array(
+        "citation_list",
+        &a.citation_list,
+        &b.citation_list,
+    ));
+    changes.extend(compare_handle_array("note_list", &a.note_list, &b.note_list));
+    changes.extend(compare_handle_array("tag_list", &a.tag_list, &b.tag_list));
+    changes.extend(compare_ref_array(
+        "media_list",
+        &a.media_list,
+        &b.media_list,
+        |_, _| vec![],
+    ));
+
+    let max_attrs = a.attribute_list.len().max(b.attribute_list.len());
+    for i in 0..max_attrs {
+        let prefix = format!("attribute_list[{i}]");
+        match (a.attribute_list.get(i), b.attribute_list.get(i)) {
+            (Some(aa), Some(ab)) => {
+                changes.extend(compare_attribute(&prefix, aa, ab));
+            }
+            (Some(aa), None) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: Some(format!("{aa:?}")),
+                    new_value: None,
+                    similarity: 0.0,
+                });
+            }
+            (None, Some(ab)) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: None,
+                    new_value: Some(format!("{ab:?}")),
+                    similarity: 0.0,
+                });
+            }
+            (None, None) => {}
+        }
+    }
+
+    changes
+}
+
+/// Compare two [`SourceData`] structs field by field.
+pub fn compare_source(a: &SourceData, b: &SourceData) -> Vec<FieldChange> {
+    let mut changes = Vec::new();
+
+    changes.extend(compare_field_optional_text(
+        "gramps_id",
+        a.gramps_id.as_deref(),
+        b.gramps_id.as_deref(),
+    ));
+    changes.extend(compare_field_text("title", &a.title, &b.title));
+    changes.extend(compare_field_optional_text(
+        "author",
+        a.author.as_deref(),
+        b.author.as_deref(),
+    ));
+    changes.extend(compare_field_optional_text(
+        "pubinfo",
+        a.pubinfo.as_deref(),
+        b.pubinfo.as_deref(),
+    ));
+    changes.extend(compare_ref_array(
+        "reporef_list",
+        &a.reporef_list,
+        &b.reporef_list,
+        |x, y| {
+            let mut meta = Vec::new();
+            meta.extend(compare_field_optional_text(
+                "reporef_list.call_number",
+                x.call_number.as_deref(),
+                y.call_number.as_deref(),
+            ));
+            if x.media_type != y.media_type {
+                meta.push(FieldChange {
+                    field_kind: FieldKind::Enum,
+                    field_name: "reporef_list.media_type".into(),
+                    old_value: Some(format!("{:?}", x.media_type)),
+                    new_value: Some(format!("{:?}", y.media_type)),
+                    similarity: 0.0,
+                });
+            }
+            meta
+        },
+    ));
+    changes.extend(compare_handle_array("note_list", &a.note_list, &b.note_list));
+    changes.extend(compare_handle_array("tag_list", &a.tag_list, &b.tag_list));
+    changes.extend(compare_ref_array(
+        "media_list",
+        &a.media_list,
+        &b.media_list,
+        |_, _| vec![],
+    ));
+
+    let max_attrs = a.attribute_list.len().max(b.attribute_list.len());
+    for i in 0..max_attrs {
+        let prefix = format!("attribute_list[{i}]");
+        match (a.attribute_list.get(i), b.attribute_list.get(i)) {
+            (Some(aa), Some(ab)) => {
+                changes.extend(compare_attribute(&prefix, aa, ab));
+            }
+            (Some(aa), None) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: Some(format!("{aa:?}")),
+                    new_value: None,
+                    similarity: 0.0,
+                });
+            }
+            (None, Some(ab)) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: None,
+                    new_value: Some(format!("{ab:?}")),
+                    similarity: 0.0,
+                });
+            }
+            (None, None) => {}
+        }
+    }
+
+    changes
+}
+
+/// Compare two [`CitationData`] structs field by field.
+pub fn compare_citation(a: &CitationData, b: &CitationData) -> Vec<FieldChange> {
+    let mut changes = Vec::new();
+
+    changes.extend(compare_field_optional_text(
+        "gramps_id",
+        a.gramps_id.as_deref(),
+        b.gramps_id.as_deref(),
+    ));
+    if a.source_handle != b.source_handle {
+        changes.push(FieldChange {
+            field_kind: FieldKind::HandleRef,
+            field_name: "source_handle".into(),
+            old_value: Some(a.source_handle.clone()),
+            new_value: Some(b.source_handle.clone()),
+            similarity: 0.0,
+        });
+    }
+    changes.extend(compare_field_optional_text(
+        "page",
+        a.page.as_deref(),
+        b.page.as_deref(),
+    ));
+    if a.confidence != b.confidence {
+        changes.push(FieldChange {
+            field_kind: FieldKind::Numeric,
+            field_name: "confidence".into(),
+            old_value: a.confidence.map(|v| v.to_string()),
+            new_value: b.confidence.map(|v| v.to_string()),
+            similarity: 0.0,
+        });
+    }
+    changes.extend(compare_ref_array(
+        "media_list",
+        &a.media_list,
+        &b.media_list,
+        |_, _| vec![],
+    ));
+    changes.extend(compare_handle_array("note_list", &a.note_list, &b.note_list));
+    changes.extend(compare_handle_array("tag_list", &a.tag_list, &b.tag_list));
+
+    changes
+}
+
+/// Compare two [`RepositoryData`] structs field by field.
+pub fn compare_repository(a: &RepositoryData, b: &RepositoryData) -> Vec<FieldChange> {
+    let mut changes = Vec::new();
+
+    changes.extend(compare_field_optional_text(
+        "gramps_id",
+        a.gramps_id.as_deref(),
+        b.gramps_id.as_deref(),
+    ));
+    changes.extend(compare_field_optional_text(
+        "name",
+        a.name.as_deref(),
+        b.name.as_deref(),
+    ));
+    if a.type_field != b.type_field {
+        changes.push(FieldChange {
+            field_kind: FieldKind::Enum,
+            field_name: "type_field".into(),
+            old_value: a.type_field.map(|v| format!("{v:?}")),
+            new_value: b.type_field.map(|v| format!("{v:?}")),
+            similarity: 0.0,
+        });
+    }
+    changes.extend(compare_ref_array(
+        "media_list",
+        &a.media_list,
+        &b.media_list,
+        |_, _| vec![],
+    ));
+    changes.extend(compare_handle_array("note_list", &a.note_list, &b.note_list));
+    changes.extend(compare_handle_array("tag_list", &a.tag_list, &b.tag_list));
+
+    let max_addrs = a.address_list.len().max(b.address_list.len());
+    for i in 0..max_addrs {
+        let prefix = format!("address_list[{i}]");
+        match (a.address_list.get(i), b.address_list.get(i)) {
+            (Some(aa), Some(ab)) => {
+                changes.extend(compare_address(&prefix, aa, ab));
+            }
+            (Some(aa), None) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: Some(format!("{aa:?}")),
+                    new_value: None,
+                    similarity: 0.0,
+                });
+            }
+            (None, Some(ab)) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: None,
+                    new_value: Some(format!("{ab:?}")),
+                    similarity: 0.0,
+                });
+            }
+            (None, None) => {}
+        }
+    }
+
+    let max_urls = a.url_list.len().max(b.url_list.len());
+    for i in 0..max_urls {
+        let prefix = format!("url_list[{i}]");
+        match (a.url_list.get(i), b.url_list.get(i)) {
+            (Some(ua), Some(ub)) => {
+                changes.extend(compare_url(&prefix, ua, ub));
+            }
+            (Some(ua), None) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: Some(format!("{ua:?}")),
+                    new_value: None,
+                    similarity: 0.0,
+                });
+            }
+            (None, Some(ub)) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: None,
+                    new_value: Some(format!("{ub:?}")),
+                    similarity: 0.0,
+                });
+            }
+            (None, None) => {}
+        }
+    }
+
+    changes
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -948,7 +1232,7 @@ pub fn compare_event(a: &EventData, b: &EventData) -> Vec<FieldChange> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use typed_graph::{DateValue, EventRoleType, FamilyRelType};
+    use typed_graph::{DateValue, EventRoleType, FamilyRelType, RepositoryType};
 
     // -----------------------------------------------------------------------
     // compare_field_text
@@ -1552,5 +1836,212 @@ mod tests {
         let a = EventData::default();
         let b = EventData::default();
         assert!(compare_event(&a, &b).is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // compare_place
+    // -----------------------------------------------------------------------
+
+    fn make_place() -> PlaceData {
+        PlaceData {
+            handle: "PL001".into(),
+            gramps_id: Some("P0001".into()),
+            name: Location {
+                street: Some("123 Main St".into()),
+                city: Some("Springfield".into()),
+                ..Location::default()
+            },
+            place_ref_list: vec![],
+            citation_list: vec![],
+            media_list: vec![],
+            note_list: vec![],
+            tag_list: vec![],
+            attribute_list: vec![],
+        }
+    }
+
+    #[test]
+    fn place_identical() {
+        let a = make_place();
+        let b = make_place();
+        assert!(compare_place(&a, &b).is_empty());
+    }
+
+    #[test]
+    fn place_change_location_street() {
+        let a = make_place();
+        let mut b = make_place();
+        b.name.street = Some("456 Oak Ave".into());
+        let changes = compare_place(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "name.street");
+        assert_eq!(changes[0].field_kind, FieldKind::Text);
+    }
+
+    #[test]
+    fn place_empty_vs_empty() {
+        let a = PlaceData::default();
+        let b = PlaceData::default();
+        assert!(compare_place(&a, &b).is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // compare_source
+    // -----------------------------------------------------------------------
+
+    fn make_source() -> SourceData {
+        SourceData {
+            handle: "S001".into(),
+            gramps_id: Some("S0001".into()),
+            title: "Birth Records".into(),
+            author: Some("County Clerk".into()),
+            pubinfo: Some("Vol 1, pg 45".into()),
+            reporef_list: vec![],
+            attribute_list: vec![],
+            media_list: vec![],
+            note_list: vec![],
+            tag_list: vec![],
+        }
+    }
+
+    #[test]
+    fn source_identical() {
+        let a = make_source();
+        let b = make_source();
+        assert!(compare_source(&a, &b).is_empty());
+    }
+
+    #[test]
+    fn source_change_title() {
+        let a = make_source();
+        let mut b = make_source();
+        b.title = "Death Records".into();
+        let changes = compare_source(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "title");
+        assert_eq!(changes[0].field_kind, FieldKind::Text);
+    }
+
+    #[test]
+    fn source_reorder_reporef_list() {
+        let mut a = make_source();
+        let mut b = make_source();
+        a.reporef_list = vec![
+            RepoRef {
+                ref_field: "R001".into(),
+                call_number: None,
+                media_type: None,
+            },
+            RepoRef {
+                ref_field: "R002".into(),
+                call_number: None,
+                media_type: None,
+            },
+        ];
+        b.reporef_list = vec![
+            RepoRef {
+                ref_field: "R002".into(),
+                call_number: None,
+                media_type: None,
+            },
+            RepoRef {
+                ref_field: "R001".into(),
+                call_number: None,
+                media_type: None,
+            },
+        ];
+        assert!(compare_source(&a, &b).is_empty());
+    }
+
+    #[test]
+    fn source_empty_vs_empty() {
+        let a = SourceData::default();
+        let b = SourceData::default();
+        assert!(compare_source(&a, &b).is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // compare_citation
+    // -----------------------------------------------------------------------
+
+    fn make_citation() -> CitationData {
+        CitationData {
+            handle: "C001".into(),
+            gramps_id: Some("C0001".into()),
+            source_handle: "S001".into(),
+            page: Some("45".into()),
+            confidence: Some(2),
+            media_list: vec![],
+            note_list: vec![],
+            tag_list: vec![],
+        }
+    }
+
+    #[test]
+    fn citation_identical() {
+        let a = make_citation();
+        let b = make_citation();
+        assert!(compare_citation(&a, &b).is_empty());
+    }
+
+    #[test]
+    fn citation_change_page() {
+        let a = make_citation();
+        let mut b = make_citation();
+        b.page = Some("46".into());
+        let changes = compare_citation(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "page");
+        assert_eq!(changes[0].field_kind, FieldKind::Text);
+    }
+
+    #[test]
+    fn citation_empty_vs_empty() {
+        let a = CitationData::default();
+        let b = CitationData::default();
+        assert!(compare_citation(&a, &b).is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // compare_repository
+    // -----------------------------------------------------------------------
+
+    fn make_repository() -> RepositoryData {
+        RepositoryData {
+            handle: "R001".into(),
+            gramps_id: Some("R0001".into()),
+            name: Some("National Archives".into()),
+            type_field: Some(RepositoryType::Library),
+            address_list: vec![],
+            url_list: vec![],
+            media_list: vec![],
+            note_list: vec![],
+            tag_list: vec![],
+        }
+    }
+
+    #[test]
+    fn repository_identical() {
+        let a = make_repository();
+        let b = make_repository();
+        assert!(compare_repository(&a, &b).is_empty());
+    }
+
+    #[test]
+    fn repository_change_type() {
+        let a = make_repository();
+        let mut b = make_repository();
+        b.type_field = Some(RepositoryType::Archive);
+        let changes = compare_repository(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "type_field");
+        assert_eq!(changes[0].field_kind, FieldKind::Enum);
+    }
+
+    #[test]
+    fn repository_empty_vs_empty() {
+        let a = RepositoryData::default();
+        let b = RepositoryData::default();
+        assert!(compare_repository(&a, &b).is_empty());
     }
 }
