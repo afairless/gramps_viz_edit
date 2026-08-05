@@ -10,7 +10,10 @@
 
 use std::collections::BTreeSet;
 
-use typed_graph::{ChildRef, DateValue, EventRef, Handle, MediaRef, PersonRef, PlaceRef, RepoRef};
+use typed_graph::{
+    Address, Attribute, ChildRef, DateValue, EventRef, Handle,
+    LdsOrd, Location, MediaRef, Name, PersonData, PersonRef, PlaceRef, RepoRef, Surname, Url,
+};
 
 use crate::report::{FieldChange, FieldKind};
 
@@ -297,13 +300,497 @@ where
 }
 
 // ---------------------------------------------------------------------------
+// Per-type compare functions
+// ---------------------------------------------------------------------------
+
+/// Compare two [`Surname`] structs field by field.
+fn compare_surname(field_prefix: &str, a: &Surname, b: &Surname) -> Vec<FieldChange> {
+    let mut changes = Vec::new();
+    changes.extend(compare_field_optional_text(
+        &format!("{field_prefix}.surname"),
+        a.surname.as_deref(),
+        b.surname.as_deref(),
+    ));
+    changes.extend(compare_field_optional_text(
+        &format!("{field_prefix}.prefix"),
+        a.prefix.as_deref(),
+        b.prefix.as_deref(),
+    ));
+    if a.primary != b.primary {
+        changes.push(FieldChange {
+            field_kind: FieldKind::Boolean,
+            field_name: format!("{field_prefix}.primary"),
+            old_value: Some(format!("{:?}", a.primary)),
+            new_value: Some(format!("{:?}", b.primary)),
+            similarity: 0.0,
+        });
+    }
+    if a.origintype != b.origintype {
+        changes.push(FieldChange {
+            field_kind: FieldKind::Enum,
+            field_name: format!("{field_prefix}.origintype"),
+            old_value: Some(format!("{:?}", a.origintype)),
+            new_value: Some(format!("{:?}", b.origintype)),
+            similarity: 0.0,
+        });
+    }
+    changes
+}
+
+/// Compare two [`Name`] structs field by field.
+fn compare_name(field_prefix: &str, a: &Name, b: &Name) -> Vec<FieldChange> {
+    let mut changes = Vec::new();
+    changes.extend(compare_field_optional_text(
+        &format!("{field_prefix}.display"),
+        a.display.as_deref(),
+        b.display.as_deref(),
+    ));
+    changes.extend(compare_field_optional_text(
+        &format!("{field_prefix}.first_name"),
+        a.first_name.as_deref(),
+        b.first_name.as_deref(),
+    ));
+    changes.extend(compare_field_optional_text(
+        &format!("{field_prefix}.suffix"),
+        a.suffix.as_deref(),
+        b.suffix.as_deref(),
+    ));
+    changes.extend(compare_field_optional_text(
+        &format!("{field_prefix}.title"),
+        a.title.as_deref(),
+        b.title.as_deref(),
+    ));
+    changes.extend(compare_enum_discriminant(
+        &format!("{field_prefix}.type_field"),
+        a.type_field,
+        b.type_field,
+    ));
+    changes.extend(compare_date_value(
+        &format!("{field_prefix}.date"),
+        a.date.as_ref(),
+        b.date.as_ref(),
+    ));
+    // Compare surname_list positionally
+    let max_surnames = a.surname_list.len().max(b.surname_list.len());
+    for i in 0..max_surnames {
+        let prefix = format!("{field_prefix}.surname_list[{i}]");
+        match (a.surname_list.get(i), b.surname_list.get(i)) {
+            (Some(sa), Some(sb)) => {
+                changes.extend(compare_surname(&prefix, sa, sb));
+            }
+            (Some(sa), None) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: Some(format!("{sa:?}")),
+                    new_value: None,
+                    similarity: 0.0,
+                });
+            }
+            (None, Some(sb)) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: None,
+                    new_value: Some(format!("{sb:?}")),
+                    similarity: 0.0,
+                });
+            }
+            (None, None) => {}
+        }
+    }
+    changes
+}
+
+/// Compare two [`Location`] structs field by field.
+/// Handles `Option<Location>` for the address location field.
+fn compare_location(field_prefix: &str, a: Option<&Location>, b: Option<&Location>) -> Vec<FieldChange> {
+    let mut changes = Vec::new();
+    match (a, b) {
+        (None, None) => {}
+        (Some(la), Some(lb)) => {
+            changes.extend(compare_field_optional_text(
+                &format!("{field_prefix}.street"),
+                la.street.as_deref(),
+                lb.street.as_deref(),
+            ));
+            changes.extend(compare_field_optional_text(
+                &format!("{field_prefix}.city"),
+                la.city.as_deref(),
+                lb.city.as_deref(),
+            ));
+            changes.extend(compare_field_optional_text(
+                &format!("{field_prefix}.county"),
+                la.county.as_deref(),
+                lb.county.as_deref(),
+            ));
+            changes.extend(compare_field_optional_text(
+                &format!("{field_prefix}.state"),
+                la.state.as_deref(),
+                lb.state.as_deref(),
+            ));
+            changes.extend(compare_field_optional_text(
+                &format!("{field_prefix}.country"),
+                la.country.as_deref(),
+                lb.country.as_deref(),
+            ));
+            changes.extend(compare_field_optional_text(
+                &format!("{field_prefix}.postal"),
+                la.postal.as_deref(),
+                lb.postal.as_deref(),
+            ));
+            changes.extend(compare_field_optional_text(
+                &format!("{field_prefix}.locality"),
+                la.locality.as_deref(),
+                lb.locality.as_deref(),
+            ));
+            changes.extend(compare_field_optional_text(
+                &format!("{field_prefix}.phone"),
+                la.phone.as_deref(),
+                lb.phone.as_deref(),
+            ));
+        }
+        _ => {
+            changes.push(FieldChange {
+                field_kind: FieldKind::Text,
+                field_name: field_prefix.to_string(),
+                old_value: a.map(|l| format!("{l:?}")),
+                new_value: b.map(|l| format!("{l:?}")),
+                similarity: 0.0,
+            });
+        }
+    }
+    changes
+}
+
+/// Compare two [`Address`] structs field by field.
+fn compare_address(field_prefix: &str, a: &Address, b: &Address) -> Vec<FieldChange> {
+    let mut changes = Vec::new();
+    changes.extend(compare_date_value(
+        &format!("{field_prefix}.date"),
+        a.date.as_ref(),
+        b.date.as_ref(),
+    ));
+    changes.extend(compare_location(
+        &format!("{field_prefix}.location"),
+        a.location.as_ref(),
+        b.location.as_ref(),
+    ));
+    changes.extend(compare_handle_array(
+        &format!("{field_prefix}.citation_list"),
+        &a.citation_list,
+        &b.citation_list,
+    ));
+    changes.extend(compare_handle_array(
+        &format!("{field_prefix}.note_list"),
+        &a.note_list,
+        &b.note_list,
+    ));
+    changes
+}
+
+/// Compare two [`Attribute`] structs field by field.
+fn compare_attribute(field_prefix: &str, a: &Attribute, b: &Attribute) -> Vec<FieldChange> {
+    let mut changes = Vec::new();
+    changes.extend(compare_enum_discriminant(
+        &format!("{field_prefix}.type_field"),
+        a.type_field,
+        b.type_field,
+    ));
+    changes.extend(compare_field_text(
+        &format!("{field_prefix}.value"),
+        &a.value,
+        &b.value,
+    ));
+    changes.extend(compare_handle_array(
+        &format!("{field_prefix}.citation_list"),
+        &a.citation_list,
+        &b.citation_list,
+    ));
+    changes.extend(compare_handle_array(
+        &format!("{field_prefix}.note_list"),
+        &a.note_list,
+        &b.note_list,
+    ));
+    changes
+}
+
+/// Compare two [`LdsOrd`] structs field by field.
+fn compare_lds_ord(field_prefix: &str, a: &LdsOrd, b: &LdsOrd) -> Vec<FieldChange> {
+    let mut changes = Vec::new();
+    changes.extend(compare_enum_discriminant(
+        &format!("{field_prefix}.type_field"),
+        a.type_field,
+        b.type_field,
+    ));
+    changes.extend(compare_date_value(
+        &format!("{field_prefix}.date"),
+        a.date.as_ref(),
+        b.date.as_ref(),
+    ));
+    changes.extend(compare_field_optional_text(
+        &format!("{field_prefix}.status"),
+        a.status.as_deref(),
+        b.status.as_deref(),
+    ));
+    changes.extend(compare_field_optional_text(
+        &format!("{field_prefix}.temple"),
+        a.temple.as_deref(),
+        b.temple.as_deref(),
+    ));
+    changes.extend(compare_handle_ref(
+        &format!("{field_prefix}.place_handle"),
+        a.place_handle.as_ref(),
+        b.place_handle.as_ref(),
+    ));
+    changes.extend(compare_handle_array(
+        &format!("{field_prefix}.citation_list"),
+        &a.citation_list,
+        &b.citation_list,
+    ));
+    changes.extend(compare_handle_array(
+        &format!("{field_prefix}.note_list"),
+        &a.note_list,
+        &b.note_list,
+    ));
+    changes
+}
+
+/// Compare two [`Url`] structs field by field.
+fn compare_url(field_prefix: &str, a: &Url, b: &Url) -> Vec<FieldChange> {
+    let mut changes = Vec::new();
+    changes.extend(compare_field_optional_text(
+        &format!("{field_prefix}.desc"),
+        a.desc.as_deref(),
+        b.desc.as_deref(),
+    ));
+    changes.extend(compare_field_text(
+        &format!("{field_prefix}.href"),
+        &a.href,
+        &b.href,
+    ));
+    changes.extend(compare_enum_discriminant(
+        &format!("{field_prefix}.type_field"),
+        a.type_field,
+        b.type_field,
+    ));
+    changes
+}
+
+/// Compare two [`PersonData`] structs field by field.
+///
+/// Compares all fields except `handle` (which is the join key used by
+/// the matcher). Delegates text fields to similarity scoring, uses set
+/// comparison for handle arrays, and deep comparison for nested types.
+pub fn compare_person(a: &PersonData, b: &PersonData) -> Vec<FieldChange> {
+    let mut changes = Vec::new();
+
+    // gramps_id
+    changes.extend(compare_field_optional_text(
+        "gramps_id",
+        a.gramps_id.as_deref(),
+        b.gramps_id.as_deref(),
+    ));
+
+    // gender (i32, compared as discriminant)
+    changes.extend(compare_enum_discriminant("gender", a.gender, b.gender));
+
+    // primary_name
+    changes.extend(compare_name("primary_name", &a.primary_name, &b.primary_name));
+
+    // alternate_names: positional comparison
+    let max_alts = a.alternate_names.len().max(b.alternate_names.len());
+    for i in 0..max_alts {
+        let prefix = format!("alternate_names[{i}]");
+        match (a.alternate_names.get(i), b.alternate_names.get(i)) {
+            (Some(na), Some(nb)) => {
+                changes.extend(compare_name(&prefix, na, nb));
+            }
+            (Some(na), None) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: Some(format!("{na:?}")),
+                    new_value: None,
+                    similarity: 0.0,
+                });
+            }
+            (None, Some(nb)) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: None,
+                    new_value: Some(format!("{nb:?}")),
+                    similarity: 0.0,
+                });
+            }
+            (None, None) => {}
+        }
+    }
+
+    // Handle lists
+    changes.extend(compare_handle_array("family_list", &a.family_list, &b.family_list));
+    changes.extend(compare_handle_array(
+        "parent_family_list",
+        &a.parent_family_list,
+        &b.parent_family_list,
+    ));
+    changes.extend(compare_handle_array(
+        "citation_list",
+        &a.citation_list,
+        &b.citation_list,
+    ));
+    changes.extend(compare_handle_array("note_list", &a.note_list, &b.note_list));
+    changes.extend(compare_handle_array("tag_list", &a.tag_list, &b.tag_list));
+
+    // Ref arrays with metadata
+    changes.extend(compare_ref_array(
+        "event_ref_list",
+        &a.event_ref_list,
+        &b.event_ref_list,
+        |x, y| compare_enum_discriminant("event_ref_list.role", x.role, y.role),
+    ));
+    changes.extend(compare_ref_array(
+        "person_ref_list",
+        &a.person_ref_list,
+        &b.person_ref_list,
+        |x, y| compare_enum_discriminant("person_ref_list.relation", x.relation, y.relation),
+    ));
+    changes.extend(compare_ref_array(
+        "media_list",
+        &a.media_list,
+        &b.media_list,
+        |_, _| vec![],
+    ));
+
+    // Nested struct lists
+    let max_addrs = a.address_list.len().max(b.address_list.len());
+    for i in 0..max_addrs {
+        let prefix = format!("address_list[{i}]");
+        match (a.address_list.get(i), b.address_list.get(i)) {
+            (Some(aa), Some(ab)) => {
+                changes.extend(compare_address(&prefix, aa, ab));
+            }
+            (Some(aa), None) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: Some(format!("{aa:?}")),
+                    new_value: None,
+                    similarity: 0.0,
+                });
+            }
+            (None, Some(ab)) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: None,
+                    new_value: Some(format!("{ab:?}")),
+                    similarity: 0.0,
+                });
+            }
+            (None, None) => {}
+        }
+    }
+
+    let max_attrs = a.attribute_list.len().max(b.attribute_list.len());
+    for i in 0..max_attrs {
+        let prefix = format!("attribute_list[{i}]");
+        match (a.attribute_list.get(i), b.attribute_list.get(i)) {
+            (Some(aa), Some(ab)) => {
+                changes.extend(compare_attribute(&prefix, aa, ab));
+            }
+            (Some(aa), None) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: Some(format!("{aa:?}")),
+                    new_value: None,
+                    similarity: 0.0,
+                });
+            }
+            (None, Some(ab)) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: None,
+                    new_value: Some(format!("{ab:?}")),
+                    similarity: 0.0,
+                });
+            }
+            (None, None) => {}
+        }
+    }
+
+    let max_lds = a.lds_ord_list.len().max(b.lds_ord_list.len());
+    for i in 0..max_lds {
+        let prefix = format!("lds_ord_list[{i}]");
+        match (a.lds_ord_list.get(i), b.lds_ord_list.get(i)) {
+            (Some(la), Some(lb)) => {
+                changes.extend(compare_lds_ord(&prefix, la, lb));
+            }
+            (Some(la), None) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: Some(format!("{la:?}")),
+                    new_value: None,
+                    similarity: 0.0,
+                });
+            }
+            (None, Some(lb)) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: None,
+                    new_value: Some(format!("{lb:?}")),
+                    similarity: 0.0,
+                });
+            }
+            (None, None) => {}
+        }
+    }
+
+    let max_urls = a.url_list.len().max(b.url_list.len());
+    for i in 0..max_urls {
+        let prefix = format!("url_list[{i}]");
+        match (a.url_list.get(i), b.url_list.get(i)) {
+            (Some(ua), Some(ub)) => {
+                changes.extend(compare_url(&prefix, ua, ub));
+            }
+            (Some(ua), None) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: Some(format!("{ua:?}")),
+                    new_value: None,
+                    similarity: 0.0,
+                });
+            }
+            (None, Some(ub)) => {
+                changes.push(FieldChange {
+                    field_kind: FieldKind::Text,
+                    field_name: prefix,
+                    old_value: None,
+                    new_value: Some(format!("{ub:?}")),
+                    similarity: 0.0,
+                });
+            }
+            (None, None) => {}
+        }
+    }
+
+    changes
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use typed_graph::DateValue;
+    use typed_graph::{DateValue, EventRoleType, FamilyRelType};
 
     // -----------------------------------------------------------------------
     // compare_field_text
@@ -589,5 +1076,160 @@ mod tests {
         let a: Vec<EventRef> = vec![];
         let b: Vec<EventRef> = vec![];
         assert!(compare_ref_array("event_ref_list", &a, &b, |_, _| vec![]).is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // compare_person
+    // -----------------------------------------------------------------------
+
+    fn make_person() -> PersonData {
+        PersonData {
+            handle: "H001".into(),
+            gramps_id: Some("I0001".into()),
+            gender: 0,
+            primary_name: Name {
+                first_name: Some("John".into()),
+                surname_list: vec![Surname {
+                    surname: Some("Smith".into()),
+                    ..Surname::default()
+                }],
+                ..Name::default()
+            },
+            alternate_names: vec![],
+            event_ref_list: vec![],
+            family_list: vec!["F001".into()],
+            parent_family_list: vec![],
+            person_ref_list: vec![],
+            citation_list: vec![],
+            note_list: vec![],
+            media_list: vec![],
+            tag_list: vec![],
+            attribute_list: vec![],
+            address_list: vec![],
+            url_list: vec![],
+            lds_ord_list: vec![],
+        }
+    }
+
+    #[test]
+    fn person_identical() {
+        let a = make_person();
+        let b = make_person();
+        assert!(compare_person(&a, &b).is_empty());
+    }
+
+    #[test]
+    fn person_change_surname() {
+        let a = make_person();
+        let mut b = make_person();
+        b.primary_name.surname_list[0].surname = Some("Jones".into());
+        let changes = compare_person(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "primary_name.surname_list[0].surname");
+        assert_eq!(changes[0].field_kind, FieldKind::Text);
+        assert_eq!(changes[0].old_value.as_deref(), Some("Smith"));
+        assert_eq!(changes[0].new_value.as_deref(), Some("Jones"));
+    }
+
+    #[test]
+    fn person_change_gender() {
+        let a = make_person();
+        let mut b = make_person();
+        b.gender = 1;
+        let changes = compare_person(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "gender");
+        assert_eq!(changes[0].field_kind, FieldKind::Enum);
+    }
+
+    #[test]
+    fn person_add_alternate_name() {
+        let a = make_person();
+        let mut b = make_person();
+        b.alternate_names.push(Name {
+            first_name: Some("Jonathan".into()),
+            ..Name::default()
+        });
+        let changes = compare_person(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "alternate_names[0]");
+        assert_eq!(changes[0].field_kind, FieldKind::Text);
+    }
+
+    #[test]
+    fn person_reorder_family_list() {
+        let mut a = make_person();
+        let mut b = make_person();
+        a.family_list = vec!["F001".into(), "F002".into()];
+        b.family_list = vec!["F002".into(), "F001".into()];
+        assert!(compare_person(&a, &b).is_empty());
+    }
+
+    #[test]
+    fn person_change_gramps_id() {
+        let a = make_person();
+        let mut b = make_person();
+        b.gramps_id = Some("I0002".into());
+        let changes = compare_person(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "gramps_id");
+        assert_eq!(changes[0].field_kind, FieldKind::Text);
+    }
+
+    #[test]
+    fn person_empty_vs_empty() {
+        let a = PersonData::default();
+        let b = PersonData::default();
+        assert!(compare_person(&a, &b).is_empty());
+    }
+
+    #[test]
+    fn person_change_event_ref_role() {
+        let mut a = make_person();
+        let mut b = make_person();
+        a.event_ref_list = vec![EventRef {
+            ref_field: "E001".into(),
+            role: Some(EventRoleType::Primary),
+        }];
+        b.event_ref_list = vec![EventRef {
+            ref_field: "E001".into(),
+            role: Some(EventRoleType::Witness),
+        }];
+        let changes = compare_person(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "event_ref_list.role");
+        assert_eq!(changes[0].field_kind, FieldKind::Enum);
+    }
+
+    #[test]
+    fn person_change_person_ref_relation() {
+        let mut a = make_person();
+        let mut b = make_person();
+        a.person_ref_list = vec![PersonRef {
+            ref_field: "P001".into(),
+            relation: Some(FamilyRelType::Married),
+        }];
+        b.person_ref_list = vec![PersonRef {
+            ref_field: "P001".into(),
+            relation: Some(FamilyRelType::Birth),
+        }];
+        let changes = compare_person(&a, &b);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field_name, "person_ref_list.relation");
+        assert_eq!(changes[0].field_kind, FieldKind::Enum);
+    }
+
+    #[test]
+    fn person_multi_field_changes() {
+        let a = make_person();
+        let mut b = make_person();
+        b.gramps_id = Some("I0009".into());
+        b.gender = 2;
+        b.note_list = vec!["N001".into()];
+        let changes = compare_person(&a, &b);
+        assert_eq!(changes.len(), 3);
+        assert!(changes.iter().any(|c| c.field_name == "gramps_id"));
+        assert!(changes.iter().any(|c| c.field_name == "gender"));
+        assert!(changes.iter().any(|c| c.field_name == "note_list"));
     }
 }
