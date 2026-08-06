@@ -11,6 +11,7 @@ pub mod cascading;
 pub mod compare;
 pub mod matcher;
 pub mod normalize;
+pub mod output;
 pub mod report;
 pub mod similarity;
 
