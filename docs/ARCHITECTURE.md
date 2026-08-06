@@ -89,7 +89,6 @@ A **Python extractor** (`extract/extract_schema.py`) introspects Gramps Python c
 │  gramps-gen stats ──────────── File summary                    │
 │  gramps-gen schema list/download ── Schema management          │
 │  gramps-gen visualize ──────── Spawns gramps-gen-visualize     │
-│  gramps-gen extract-schema ── Stub                              │
 └────────────────────────────────────────────────────────────────┘
                            │
                            ▼
@@ -517,7 +516,6 @@ Future: plan describes extracting this from the Gramps RelaxNG schema at build t
 | `gramps-gen validate <file>` | Minimal XML structure check (well-formedness, root element, namespace) |
 | `gramps-gen stats <file>` | Streaming count and summary of a `.gramps` file (text or JSON) |
 | `gramps-gen visualize <file>` | Open a Tauri desktop window with force-directed graph visualization |
-| `gramps-gen extract-schema <path>` | Stub (planned: run Python extractor) |
 | `gramps-gen schema list` | List local and available Gramps schemas |
 | `gramps-gen schema download [VERSION]` | Download a schema from Gramps GitHub |
 

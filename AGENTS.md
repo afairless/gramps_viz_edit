@@ -90,7 +90,6 @@ gramps_viz_edit/
 │       │       ├── stats/        # Streaming count & report (stats command)
 │       │       ├── validate.rs   # Minimal XML structure check
 │       │       ├── visualize.rs  # Spawns gramps-gen-visualize binary
-│       │       └── extract_schema.rs # Stub
 │       └── tests/
 │           ├── e2e.rs              # Subprocess-based E2E tests
 │           └── integration.rs    # Integration tests

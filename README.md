@@ -175,7 +175,6 @@ See [Visualization](#visualization) for details on the force-directed graph.
 
 | Command | Description |
 |---|---|
-| `extract-schema <path>` | Extract the Gramps schema from a local Gramps source checkout (stub) |
 | `schema list` | List local and available Gramps schemas |
 | `schema download` | Download a schema from Gramps GitHub |
 
