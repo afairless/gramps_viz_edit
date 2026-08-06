@@ -689,6 +689,8 @@ name = "diff"
 version = "0.1.0"
 dependencies = [
  "gramps-reader",
+ "output",
+ "rand",
  "serde",
  "serde_json",
  "strsim",

@@ -40,9 +40,9 @@ pub fn detect_schema_version(content: &str) -> Result<String, Error> {
                         for attr in e.attributes().flatten() {
                             let key = attr.key.as_ref();
                             if key == b"version" || key.ends_with(b":version") {
-                                version = Some(
-                                    String::from_utf8_lossy(&attr.value).to_string(),
-                                );
+                                                version = Some(
+                                String::from_utf8_lossy(&attr.value).to_string(),
+                            );
                             }
                         }
                         // <created> is self-closing (<created version="5.2"/>)
@@ -68,12 +68,15 @@ pub fn detect_schema_version(content: &str) -> Result<String, Error> {
         }
     }
 
-    match version {
+        match version {
         Some(v) => {
+            // Extract the major.minor prefix (e.g., "5.2.0" → "5.2").
+            let schema_version = v.split('.').take(2).collect::<Vec<_>>().join(".");
+
             // Check it's compiled in.
             let available = typed_graph::Schema::available_versions();
-            if available.contains(&v.as_str()) {
-                Ok(v)
+            if available.contains(&schema_version.as_str()) {
+                Ok(schema_version)
             } else {
                 Err(Error::UnsupportedSchema { version: v })
             }
@@ -106,6 +109,17 @@ mod tests {
     #[test]
     fn detect_schema_version_5_2() {
         let xml = with_database("  <header><created version=\"5.2\"/></header>");
+        let version = detect_schema_version(&xml).unwrap();
+        assert_eq!(version, "5.2");
+    }
+
+    // -----------------------------------------------------------------------
+    // Full-version header (e.g., "5.2.0") normalizes to schema prefix
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn detect_schema_version_full_5_2_normalized() {
+        let xml = with_database("  <header><created version=\"5.2.0\"/></header>");
         let version = detect_schema_version(&xml).unwrap();
         assert_eq!(version, "5.2");
     }
