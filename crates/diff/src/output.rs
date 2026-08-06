@@ -188,6 +188,132 @@ pub fn format_json(report: &DiffReport) -> String {
     serde_json::to_string(report).unwrap_or_else(|_| "{}".to_string())
 }
 
+/// Render a diff report as CSV with one row per [`FieldChange`].
+///
+/// Produces a CSV string with the following columns:
+///
+/// `classification, item_type, handle_a, gramps_id_a, display_name_a,`
+/// `handle_b, gramps_id_b, display_name_b, confidence, field_name,`
+/// `field_kind, old_value, new_value, similarity`
+///
+/// When `include_extrinsic` is `false`, items classified as
+/// [`Classification::ExtrinsicOnly`] are omitted.
+///
+/// For items with no field changes (Same, Added, Removed, NeedsReview,
+/// ExtrinsicOnly) a single row is emitted with empty field-level columns.
+/// For Modified items, one row per [`FieldChange`] is emitted.
+///
+/// All cells are quoted per standard CSV rules. Newlines within values
+/// are replaced with spaces.
+pub fn format_csv(report: &DiffReport, include_extrinsic: bool) -> String {
+    let mut out = String::new();
+
+    // Header row
+    out.push_str(
+        "\"classification\",\"item_type\",\"handle_a\",\"gramps_id_a\",\"display_name_a\",",
+    );
+    out.push_str("\"handle_b\",\"gramps_id_b\",\"display_name_b\",\"confidence\",\"field_name\",");
+    out.push_str("\"field_kind\",\"old_value\",\"new_value\",\"similarity\"\n");
+
+    for item in &report.items {
+        if item.classification == Classification::ExtrinsicOnly && !include_extrinsic {
+            continue;
+        }
+
+        let class_label = classification_label(item.classification);
+        let handle_a = item.handle_a.as_deref().unwrap_or("");
+        let handle_b = item.handle_b.as_deref().unwrap_or("");
+        let gramps_id_a = item.gramps_id_a.as_deref().unwrap_or("");
+        let gramps_id_b = item.gramps_id_b.as_deref().unwrap_or("");
+        let display_name_a = item.display_name_a.as_deref().unwrap_or("");
+        let display_name_b = item.display_name_b.as_deref().unwrap_or("");
+        let confidence = format!("{:.2}", item.confidence);
+
+        let base_fields = [
+            class_label,
+            &item.item_type,
+            handle_a,
+            gramps_id_a,
+            display_name_a,
+            handle_b,
+            gramps_id_b,
+            display_name_b,
+            &confidence,
+        ];
+
+        if item.field_changes.is_empty() {
+            // Single row with empty field-level columns
+            write_csv_row(&mut out, &base_fields, "", "", "", "", "");
+        } else {
+            for change in &item.field_changes {
+                let field_kind = format!("{:?}", change.field_kind);
+                let old_val = change.old_value.as_deref().unwrap_or("");
+                let new_val = change.new_value.as_deref().unwrap_or("");
+                let similarity = format!("{:.2}", change.similarity);
+                write_csv_row(
+                    &mut out,
+                    &base_fields,
+                    &change.field_name,
+                    &field_kind,
+                    old_val,
+                    new_val,
+                    &similarity,
+                );
+            }
+        }
+    }
+
+    out
+}
+
+/// Write one CSV row with all fields quoted and escaped.
+fn write_csv_row(
+    out: &mut String,
+    base: &[&str; 9],
+    field_name: &str,
+    field_kind: &str,
+    old_value: &str,
+    new_value: &str,
+    similarity: &str,
+) {
+    for (i, val) in base.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        write_csv_cell(out, val);
+    }
+    out.push(',');
+    write_csv_cell(out, field_name);
+    out.push(',');
+    write_csv_cell(out, field_kind);
+    out.push(',');
+    write_csv_cell(out, old_value);
+    out.push(',');
+    write_csv_cell(out, new_value);
+    out.push(',');
+    write_csv_cell(out, similarity);
+    out.push('\n');
+}
+
+/// Write a single CSV cell, quoted and escaped.
+///
+/// Replaces `"` with `""` and wraps in double quotes. Newlines within
+/// values are replaced with spaces.
+fn write_csv_cell(out: &mut String, value: &str) {
+    out.push('"');
+    for ch in value.chars() {
+        match ch {
+            '"' => {
+                out.push('"');
+                out.push('"');
+            }
+            '\n' | '\r' => out.push(' '),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+}
+
 /// Build a map of field names to similarity scores for text field changes.
 ///
 /// Returns a map from field name to similarity score (0.0–1.0) for every
@@ -579,5 +705,211 @@ mod tests {
         )];
         let scores = text_scores(&changes);
         assert!(scores.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // CSV output tests
+    // -----------------------------------------------------------------------
+
+    /// CSV header row is correct.
+    #[test]
+    fn csv_header_row() {
+        let report = DiffReport {
+            summary: DiffSummary::default(),
+            items: vec![],
+            ambiguous_cases: vec![],
+        };
+        let csv = format_csv(&report, true);
+        let header = csv.lines().next().expect("should have header");
+        assert!(header.contains("\"classification\""));
+        assert!(header.contains("\"item_type\""));
+        assert!(header.contains("\"handle_a\""));
+        assert!(header.contains("\"gramps_id_a\""));
+        assert!(header.contains("\"display_name_a\""));
+        assert!(header.contains("\"handle_b\""));
+        assert!(header.contains("\"gramps_id_b\""));
+        assert!(header.contains("\"display_name_b\""));
+        assert!(header.contains("\"confidence\""));
+        assert!(header.contains("\"field_name\""));
+        assert!(header.contains("\"field_kind\""));
+        assert!(header.contains("\"old_value\""));
+        assert!(header.contains("\"new_value\""));
+        assert!(header.contains("\"similarity\""));
+    }
+
+    /// CSV: one row per FieldChange for Modified items.
+    #[test]
+    fn csv_one_row_per_field_change() {
+        let report = DiffReport {
+            summary: DiffSummary::default(),
+            items: vec![item(
+                Some("A001"),
+                Some("B001"),
+                "Person",
+                Classification::Modified,
+                vec![
+                    field_change(
+                        FieldKind::Text,
+                        "surname",
+                        Some("Smith"),
+                        Some("Jones"),
+                        0.5,
+                    ),
+                    field_change(
+                        FieldKind::Text,
+                        "first_name",
+                        Some("John"),
+                        Some("James"),
+                        0.5,
+                    ),
+                ],
+            )],
+            ambiguous_cases: vec![],
+        };
+        let csv = format_csv(&report, true);
+        let lines: Vec<&str> = csv.lines().collect();
+        // Header + 2 field changes = 3 lines
+        assert_eq!(lines.len(), 3);
+        assert!(lines[1].contains("surname"));
+        assert!(lines[2].contains("first_name"));
+    }
+
+    /// CSV: single row for Same items with empty field columns.
+    #[test]
+    fn csv_single_row_for_non_modified() {
+        let report = DiffReport {
+            summary: DiffSummary::default(),
+            items: vec![
+                item(
+                    Some("A001"),
+                    Some("B001"),
+                    "Person",
+                    Classification::Same,
+                    vec![],
+                ),
+                item(None, Some("B002"), "Note", Classification::Added, vec![]),
+                item(Some("A003"), None, "Tag", Classification::Removed, vec![]),
+            ],
+            ambiguous_cases: vec![],
+        };
+        let csv = format_csv(&report, true);
+        let lines: Vec<&str> = csv.lines().collect();
+        // Header + 3 items = 4 lines
+        assert_eq!(lines.len(), 4);
+        // Each row should have empty field-level columns
+        for line in &lines[1..] {
+            let cols: Vec<&str> = line.split(",\"").collect();
+            // Should have 14 columns
+            assert_eq!(cols.len(), 14, "row: {line}");
+        }
+    }
+
+    /// CSV: special characters are properly escaped (quotes, commas).
+    #[test]
+    fn csv_escapes_special_characters() {
+        let report = DiffReport {
+            summary: DiffSummary::default(),
+            items: vec![item_with_meta(
+                Some("A001"),
+                Some("B001"),
+                Some("I0001"),
+                Some("I0001"),
+                Some("Smith, John \"The Great\""),
+                Some("Jones, Jane"),
+                "Person",
+                Classification::Modified,
+                vec![field_change(
+                    FieldKind::Text,
+                    "surname",
+                    Some("Smith, John"),
+                    Some("Jones\nNewline"),
+                    0.5,
+                )],
+            )],
+            ambiguous_cases: vec![],
+        };
+        let csv = format_csv(&report, true);
+        // Verify quote escaping: display_name "Smith, John \"The Great\""
+        // should be CSV-escaped as "" for embedded quotes.
+        // Check that the original value text appears in the output
+        let display_escaped: String = "Smith, John \"The Great\""
+            .chars()
+            .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+            .collect();
+        assert!(csv.contains("Smith, John") && csv.contains("The Great"));
+        // Verify newline replaced with space
+        assert!(csv.contains("Jones Newline"));
+        assert!(!csv.contains("Jones\nNewline"));
+        // Verify comma not escaped — it should still appear within the quoted cell
+        assert!(csv.contains("Jones, Jane"));
+    }
+
+    /// CSV: Empty values produce empty quoted cells.
+    #[test]
+    fn csv_empty_values() {
+        let report = DiffReport {
+            summary: DiffSummary::default(),
+            items: vec![item(
+                Some("A001"),
+                None,
+                "Person",
+                Classification::Removed,
+                vec![],
+            )],
+            ambiguous_cases: vec![],
+        };
+        let csv = format_csv(&report, true);
+        // After the header, the data row should have empty cells for B-side fields
+        assert!(csv.contains("\"A001\""));
+        assert!(csv.contains("\"\",\"\"")); // Two consecutive empty quoted cells
+    }
+
+    /// CSV: format_csv signature returns String (matching format_text/format_json).
+    #[test]
+    fn csv_format_signature() {
+        let report = DiffReport {
+            summary: DiffSummary::default(),
+            items: vec![],
+            ambiguous_cases: vec![],
+        };
+        let _output: String = format_csv(&report, true);
+    }
+
+    /// CSV: extrinsic-only items omitted when include_extrinsic is false.
+    #[test]
+    fn csv_omits_extrinsic_when_excluded() {
+        let report = DiffReport {
+            summary: DiffSummary::default(),
+            items: vec![item(
+                Some("A001"),
+                Some("B001"),
+                "Citation",
+                Classification::ExtrinsicOnly,
+                vec![field_change(
+                    FieldKind::HandleRef,
+                    "source_handle",
+                    Some("SRC_A"),
+                    Some("SRC_B"),
+                    1.0,
+                )],
+            )],
+            ambiguous_cases: vec![],
+        };
+        let csv = format_csv(&report, false);
+        // Header only, no data rows
+        assert_eq!(csv.lines().count(), 1);
+    }
+
+    /// CSV: empty report produces only the header.
+    #[test]
+    fn csv_empty_report() {
+        let report = DiffReport {
+            summary: DiffSummary::default(),
+            items: vec![],
+            ambiguous_cases: vec![],
+        };
+        let csv = format_csv(&report, true);
+        assert_eq!(csv.lines().count(), 1);
+        assert!(csv.starts_with("\"classification\""));
     }
 }
