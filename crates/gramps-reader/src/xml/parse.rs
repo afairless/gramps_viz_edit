@@ -2600,7 +2600,17 @@ impl Parser {
 /// Parse a complete Gramps XML document into a [`Graph`].
 ///
 /// Convenience wrapper that creates a [`Parser`], runs the full
-/// parse-and-build pipeline, and returns the validated graph.
+/// parse-and-build pipeline, and returns the graph.
+///
+/// # Validation
+///
+/// Structural and referential validation errors are logged as warnings
+/// (via `log::warn!`) rather than returned as errors. This allows files
+/// with dangling references or missing required fields — common in real
+/// Gramps databases — to be parsed successfully for diff analysis.
+///
+/// Parse errors (malformed XML, unsupported schema, I/O errors) remain
+/// fatal and are returned as [`Error`].
 pub fn parse_graph(content: &str) -> Result<Graph, Error> {
     // Detect the schema version from the header.
     let version = detect_schema_version(content)?;
@@ -2612,7 +2622,13 @@ pub fn parse_graph(content: &str) -> Result<Graph, Error> {
     let mut parser = Parser::new(schema);
     parser.parse_all(content)?;
     parser.build_edges()?;
-    parser.validate()?;
+    // Validation errors are non-fatal: some are expected for placeholder
+    // nodes (missing required fields). Log warnings so the user can see
+    // integrity issues without blocking the diff.
+    let validation_errors = parser.graph.validate(schema);
+    for err in &validation_errors {
+        log::warn!("validation warning: {}", err);
+    }
     Ok(parser.into_graph())
 }
 
