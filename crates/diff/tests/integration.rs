@@ -9,10 +9,11 @@ use diff::{run_diff, DiffConfig, DiffReport};
 use gramps_reader::xml::parse::parse_graph;
 use output::GraphXmlWriter;
 use output::SerializationMap;
+use typed_graph::generate::builder::GraphBuilder;
 use typed_graph::generate::generate_random;
 use typed_graph::generate::AdversarialConfig;
 use typed_graph::generate::RandomConfig;
-use typed_graph::Schema;
+use typed_graph::{Graph, Schema};
 
 /// Create a temporary file with the given content and return its path.
 fn create_temp_file(content: &str) -> String {
@@ -46,13 +47,13 @@ fn serialize_graph(graph: &typed_graph::Graph) -> String {
 }
 
 /// Generate a small graph with a fixed seed for testing.
-fn generate_test_graph(_seed: u64, with_notes: bool) -> typed_graph::Graph {
+fn generate_test_graph() -> typed_graph::Graph {
     let config = RandomConfig {
         person_count: 5,
         generations: 1,
         start_year: 1950,
         end_year: 2000,
-        with_notes,
+        seed: Some(42),
         ..RandomConfig::default()
     };
     let adversarial_config = AdversarialConfig {
@@ -65,6 +66,42 @@ fn generate_test_graph(_seed: u64, with_notes: bool) -> typed_graph::Graph {
     result.graph
 }
 
+/// Build a minimal graph with one person and one note, where the person's
+/// note_list references the note. Returns the graph.
+fn build_graph_with_note_ref() -> Graph {
+    use typed_graph::Edge;
+
+    let mut graph = Graph::new();
+    let mut builder = GraphBuilder::new(&mut graph);
+
+    let person_h = builder
+        .add_person("p1")
+        .with_name("John", "Smith")
+        .with_gender(1)
+        .build()
+        .expect("add person");
+
+    let note_h = builder
+        .add_note("n1")
+        .with_text("Original note text")
+        .build()
+        .expect("add note");
+
+    // Add a PersonNote edge so the serialization outputs a <noteref> element.
+    // The parser will reconstruct both the edge and the note_list data field.
+    graph
+        .add_edge(Edge::PersonNote {
+            source: person_h.clone(),
+            target: note_h.clone(),
+        })
+        .expect("add PersonNote edge");
+
+    graph
+}
+
+/// Build a copy of the graph, but with the note's handle changed to the
+/// given new handle. The note content remains the same, and the person's
+/// note_list is updated to reference the new handle.
 /// Helper: run diff between two XML strings and return the report.
 fn diff_strings(xml_a: &str, xml_b: &str, config: &DiffConfig) -> DiffReport {
     let path_a = create_temp_file(xml_a);
@@ -84,7 +121,7 @@ fn diff_strings(xml_a: &str, xml_b: &str, config: &DiffConfig) -> DiffReport {
 
 #[test]
 fn identical_files_all_same() {
-    let graph = generate_test_graph(42, false);
+    let graph = generate_test_graph();
     let xml = serialize_graph(&graph);
 
     let report = diff_strings(&xml, &xml, &DiffConfig::default());
@@ -120,8 +157,35 @@ fn identical_files_all_same() {
 
 #[test]
 fn different_files_has_added_and_removed() {
-    let graph_a = generate_test_graph(42, false);
-    let graph_b = generate_test_graph(99, false);
+    // Generate two graphs with different seeds
+    let config_a = RandomConfig {
+        person_count: 5,
+        generations: 1,
+        start_year: 1950,
+        end_year: 2000,
+        seed: Some(42),
+        ..RandomConfig::default()
+    };
+    let config_b = RandomConfig {
+        person_count: 5,
+        generations: 1,
+        start_year: 1950,
+        end_year: 2000,
+        seed: Some(99),
+        ..RandomConfig::default()
+    };
+    let adversarial_config = AdversarialConfig {
+        enabled: false,
+        strategies: vec![],
+    };
+    let schema = Schema::for_version(Schema::default_version()).expect("default schema");
+    let result_a = generate_random(&config_a, &adversarial_config, None, schema)
+        .expect("generate graph A");
+    let schema = Schema::for_version(Schema::default_version()).expect("default schema");
+    let result_b = generate_random(&config_b, &adversarial_config, None, schema)
+        .expect("generate graph B");
+    let graph_a = result_a.graph;
+    let graph_b = result_b.graph;
 
     let xml_a = serialize_graph(&graph_a);
     let xml_b = serialize_graph(&graph_b);
@@ -154,30 +218,6 @@ fn different_files_has_added_and_removed() {
 }
 
 // ---------------------------------------------------------------------------
-// Graphs with notes → MODIFIED
-// ---------------------------------------------------------------------------
-
-#[test]
-fn diff_with_notes() {
-    // Generate graphs with notes enabled
-    let graph_a = generate_test_graph(42, true);
-    let graph_b = generate_test_graph(99, true);
-
-    let xml_a = serialize_graph(&graph_a);
-    let xml_b = serialize_graph(&graph_b);
-
-    let report = diff_strings(&xml_a, &xml_b, &DiffConfig::default());
-
-    // Both graphs should have at least some nodes
-    assert!(report.summary.total_a > 0);
-    assert!(report.summary.total_b > 0);
-
-    // The report should be valid JSON-serializable
-    let json = serde_json::to_string(&report).expect("serialize report to JSON");
-    assert!(!json.is_empty());
-}
-
-// ---------------------------------------------------------------------------
 // Parse error propagation
 // ---------------------------------------------------------------------------
 
@@ -202,7 +242,7 @@ fn parse_error_on_invalid_xml() {
 
 #[test]
 fn diff_config_variants() {
-    let graph = generate_test_graph(42, false);
+    let graph = generate_test_graph();
     let xml = serialize_graph(&graph);
 
     // Test with various config values — all should produce valid results
@@ -242,7 +282,7 @@ fn diff_config_variants() {
 
 #[test]
 fn round_trip_parse_serialize_diff() {
-    let graph = generate_test_graph(42, false);
+    let graph = generate_test_graph();
     let xml = serialize_graph(&graph);
 
     // Parse the serialized XML back into a graph
@@ -261,4 +301,228 @@ fn round_trip_parse_serialize_diff() {
 
     // Everything should be SAME (or at least the counts should match)
     assert_eq!(report.summary.total_a, report.summary.total_b);
+}
+
+// ---------------------------------------------------------------------------
+// Adding one person → exactly one ADDED item
+// ---------------------------------------------------------------------------
+
+#[test]
+fn add_one_person_has_one_added() {
+    // Generate graph A, then create an identical copy by parsing the serialized XML
+    let graph_a = generate_test_graph();
+    let xml_a = serialize_graph(&graph_a);
+    let mut graph_b = parse_graph(&xml_a).expect("re-parse graph B");
+
+    // Add one extra person to graph B
+    let mut builder = GraphBuilder::new(&mut graph_b);
+    builder
+        .add_person("extra-person-001")
+        .with_name("Extra", "Person")
+        .with_gender(1)
+        .build()
+        .expect("add extra person");
+
+    let xml_b = serialize_graph(&graph_b);
+
+    let report = diff_strings(&xml_a, &xml_b, &DiffConfig::default());
+
+    // B should have exactly one more node than A
+    assert_eq!(report.summary.total_b, report.summary.total_a + 1);
+
+    // There should be exactly one ADDED item
+    assert_eq!(
+        report.summary.added, 1,
+        "adding one person should produce exactly one ADDED item"
+    );
+
+    // No items should be REMOVED
+    assert_eq!(report.summary.removed, 0);
+
+    // The added item should have no handle_a and should be a Person
+    let added_items: Vec<&diff::ItemDiff> = report
+        .items
+        .iter()
+        .filter(|i| i.classification == diff::Classification::Added)
+        .collect();
+    assert_eq!(added_items.len(), 1, "exactly one ADDED item");
+    assert!(
+        added_items[0].handle_a.is_none(),
+        "ADDED item should have no handle_a"
+    );
+    assert_eq!(added_items[0].item_type, "Person");
+}
+
+// ---------------------------------------------------------------------------
+// Modified note text → one MODIFIED item with FieldKind::Text
+// ---------------------------------------------------------------------------
+
+#[test]
+fn modified_note_text_has_one_modified_with_text() {
+    use typed_graph::Node;
+
+    // Build a graph with a person and a note, then create an identical copy
+    let graph_a = build_graph_with_note_ref();
+    let xml_a = serialize_graph(&graph_a);
+    let mut graph_b = parse_graph(&xml_a).expect("re-parse graph B");
+
+    // Find a note in graph B and modify its text
+    let mut note_found = false;
+    let handles_b: Vec<typed_graph::Handle> = graph_b
+        .iter_nodes()
+        .filter_map(|(handle, node)| {
+            if matches!(node, Node::Note(_)) {
+                Some(handle.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if let Some(note_handle) = handles_b.first() {
+        if let Some(Node::Note(note_data)) = graph_b.get_node_mut(note_handle) {
+            note_data.text = "Modified text for integration test".to_string();
+            note_found = true;
+        }
+    }
+
+    assert!(note_found, "test graph should contain at least one note");
+
+    let xml_b = serialize_graph(&graph_b);
+
+    let report = diff_strings(&xml_a, &xml_b, &DiffConfig::default());
+
+    // There should be at least one MODIFIED item
+    assert!(
+        report.summary.modified > 0,
+        "modifying a note should produce at least one MODIFIED item"
+    );
+
+    // At least one MODIFIED item should have a Text field change
+    let text_modified_items: Vec<&diff::ItemDiff> = report
+        .items
+        .iter()
+        .filter(|i| {
+            i.classification == diff::Classification::Modified
+                && i.field_changes
+                    .iter()
+                    .any(|fc| fc.field_kind == diff::FieldKind::Text)
+        })
+        .collect();
+
+    assert!(
+        !text_modified_items.is_empty(),
+        "at least one MODIFIED item should have a Text field change"
+    );
+
+    // The text field change should be on the 'text' field of a Note
+    let text_changes: Vec<&diff::FieldChange> = text_modified_items
+        .iter()
+        .flat_map(|item| item.field_changes.iter())
+        .filter(|fc| fc.field_kind == diff::FieldKind::Text && fc.field_name == "text")
+        .collect();
+    assert!(
+        !text_changes.is_empty(),
+        "should have at least one Text field change on the 'text' field"
+    );
+
+    // Verify the old and new values differ
+    for change in &text_changes {
+        assert_ne!(change.old_value, change.new_value);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Handle reference change (extrinsic-only) → one EXTRINSIC_ONLY item
+// ---------------------------------------------------------------------------
+
+#[test]
+fn handle_ref_change_produces_extrinsic_only() {
+    use typed_graph::Edge;
+
+    // Build both graphs from scratch:
+    // Graph A: person "p1" with PersonNote edge to "n1"
+    // Graph B: same person "p1" with PersonNote edge to "n2"
+    // Note "n2" has same content as "n1" → fuzzy match → handle_map["n2"] = "n1"
+    // Person's note_list change (via edge) → extrinsic-only
+
+    let mut graph_a = Graph::new();
+    {
+        let mut builder = GraphBuilder::new(&mut graph_a);
+        let person_h = builder
+            .add_person("p1")
+            .with_name("John", "Smith")
+            .with_gender(1)
+            .build()
+            .expect("add person in A");
+        let note_h = builder
+            .add_note("n1")
+            .with_text("Shared note text for extrinsic test")
+            .build()
+            .expect("add note in A");
+        graph_a
+            .add_edge(Edge::PersonNote {
+                source: person_h.clone(),
+                target: note_h.clone(),
+            })
+            .expect("add PersonNote edge in A");
+    }
+
+    let mut graph_b = Graph::new();
+    {
+        let mut builder = GraphBuilder::new(&mut graph_b);
+        let person_h = builder
+            .add_person("p1")
+            .with_name("John", "Smith")
+            .with_gender(1)
+            .build()
+            .expect("add person in B");
+        let note_h = builder
+            .add_note("n2")
+            .with_text("Shared note text for extrinsic test")
+            .build()
+            .expect("add note in B");
+        graph_b
+            .add_edge(Edge::PersonNote {
+                source: person_h.clone(),
+                target: note_h.clone(),
+            })
+            .expect("add PersonNote edge in B");
+    }
+
+    let xml_a = serialize_graph(&graph_a);
+    let xml_b = serialize_graph(&graph_b);
+
+    let report = diff_strings(&xml_a, &xml_b, &DiffConfig::default());
+
+    // There should be at least one EXTRINSIC_ONLY item
+    assert!(
+        report.summary.extrinsic_only > 0,
+        "handle ref change should produce at least one EXTRINSIC_ONLY item, got {}",
+        report.summary.extrinsic_only
+    );
+
+    // The extrinsic-only item should be a Person with note_list changes
+    let extrinsic_items: Vec<&diff::ItemDiff> = report
+        .items
+        .iter()
+        .filter(|i| i.classification == diff::Classification::ExtrinsicOnly)
+        .collect();
+
+    assert!(
+        !extrinsic_items.is_empty(),
+        "should have at least one EXTRINSIC_ONLY item"
+    );
+
+    // Verify the extrinsic-only items have HandleRef-related field changes
+    for item in &extrinsic_items {
+        let has_handle_change = item.field_changes.iter().any(|fc| {
+            matches!(fc.field_kind, diff::FieldKind::HandleRef | diff::FieldKind::HandleRefList)
+        });
+        assert!(
+            has_handle_change,
+            "EXTRINSIC_ONLY item '{}' should have HandleRef or HandleRefList field changes",
+            item.handle_a.as_deref().unwrap_or("unknown")
+        );
+    }
 }
