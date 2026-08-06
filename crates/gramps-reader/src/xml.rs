@@ -32,6 +32,20 @@ pub fn read_handle_attr(e: &quick_xml::events::BytesStart) -> Option<String> {
     None
 }
 
+/// Read the `id` attribute from an element (Gramps database identifier).
+///
+/// Returns `None` when the element has no `id` attribute (whether
+/// namespaced or bare).
+pub fn read_id_attr(e: &quick_xml::events::BytesStart) -> Option<String> {
+    for attr in e.attributes().flatten() {
+        let key = attr.key.as_ref();
+        if key == b"id" || key.ends_with(b":id") {
+            return Some(String::from_utf8_lossy(&attr.value).to_string());
+        }
+    }
+    None
+}
+
 /// Read the `hlink` attribute from an element.
 ///
 /// Returns `None` when the element has no `hlink` attribute (whether
@@ -115,6 +129,34 @@ mod tests {
     fn read_handle_attr_not_handle() {
         let e = start_event(r#"<person id="xyz"/>"#);
         assert_eq!(read_handle_attr(&e), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // read_id_attr
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn read_id_attr_plain() {
+        let e = start_event(r#"<person id="I0001"/>"#);
+        assert_eq!(read_id_attr(&e).as_deref(), Some("I0001"));
+    }
+
+    #[test]
+    fn read_id_attr_namespace_prefixed() {
+        let e = start_event(r#"<ns:person ns:id="I0001"/>"#);
+        assert_eq!(read_id_attr(&e).as_deref(), Some("I0001"));
+    }
+
+    #[test]
+    fn read_id_attr_missing() {
+        let e = start_event(r#"<person/>"#);
+        assert_eq!(read_id_attr(&e), None);
+    }
+
+    #[test]
+    fn read_id_attr_not_id() {
+        let e = start_event(r#"<person handle="p0001"/>"#);
+        assert_eq!(read_id_attr(&e), None);
     }
 
     // -----------------------------------------------------------------------

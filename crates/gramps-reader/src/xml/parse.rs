@@ -21,7 +21,7 @@
 
 use crate::error::Error;
 use crate::xml::header::detect_schema_version;
-use crate::xml::{read_handle_attr, read_hlink_attr, strip_prefix};
+use crate::xml::{read_handle_attr, read_hlink_attr, read_id_attr, strip_prefix};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use typed_graph::*;
@@ -249,10 +249,12 @@ impl Parser {
                     let name = strip_prefix(&raw);
                     if name == b"person" && matches!(section, Section::People) {
                         let handle = read_handle_attr(e).unwrap_or_default();
+                        let gramps_id = read_id_attr(e);
                         self.graph
                             .add_node(
                                 handle.clone(),
                                 Node::Person(PersonData {
+                                    gramps_id,
                                     handle,
                                     ..PersonData::default()
                                 }),
@@ -260,10 +262,12 @@ impl Parser {
                             .map_err(graph_error)?;
                     } else if name == b"family" && matches!(section, Section::Families) {
                         let handle = read_handle_attr(e).unwrap_or_default();
+                        let gramps_id = read_id_attr(e);
                         self.graph
                             .add_node(
                                 handle.clone(),
                                 Node::Family(FamilyData {
+                                    gramps_id,
                                     handle,
                                     ..FamilyData::default()
                                 }),
@@ -271,10 +275,12 @@ impl Parser {
                             .map_err(graph_error)?;
                     } else if name == b"event" && matches!(section, Section::Events) {
                         let handle = read_handle_attr(e).unwrap_or_default();
+                        let gramps_id = read_id_attr(e);
                         self.graph
                             .add_node(
                                 handle.clone(),
                                 Node::Event(EventData {
+                                    gramps_id,
                                     handle,
                                     ..EventData::default()
                                 }),
@@ -282,10 +288,12 @@ impl Parser {
                             .map_err(graph_error)?;
                     } else if name == b"place" && matches!(section, Section::Places) {
                         let handle = read_handle_attr(e).unwrap_or_default();
+                        let gramps_id = read_id_attr(e);
                         self.graph
                             .add_node(
                                 handle.clone(),
                                 Node::Place(PlaceData {
+                                    gramps_id,
                                     handle,
                                     ..PlaceData::default()
                                 }),
@@ -293,10 +301,12 @@ impl Parser {
                             .map_err(graph_error)?;
                     } else if name == b"source" && matches!(section, Section::Sources) {
                         let handle = read_handle_attr(e).unwrap_or_default();
+                        let gramps_id = read_id_attr(e);
                         self.graph
                             .add_node(
                                 handle.clone(),
                                 Node::Source(SourceData {
+                                    gramps_id,
                                     handle,
                                     ..SourceData::default()
                                 }),
@@ -304,10 +314,12 @@ impl Parser {
                             .map_err(graph_error)?;
                     } else if name == b"citation" && matches!(section, Section::Citations) {
                         let handle = read_handle_attr(e).unwrap_or_default();
+                        let gramps_id = read_id_attr(e);
                         self.graph
                             .add_node(
                                 handle.clone(),
                                 Node::Citation(CitationData {
+                                    gramps_id,
                                     handle,
                                     ..CitationData::default()
                                 }),
@@ -315,10 +327,12 @@ impl Parser {
                             .map_err(graph_error)?;
                     } else if name == b"repository" && matches!(section, Section::Repositories) {
                         let handle = read_handle_attr(e).unwrap_or_default();
+                        let gramps_id = read_id_attr(e);
                         self.graph
                             .add_node(
                                 handle.clone(),
                                 Node::Repository(RepositoryData {
+                                    gramps_id,
                                     handle,
                                     ..RepositoryData::default()
                                 }),
@@ -326,10 +340,12 @@ impl Parser {
                             .map_err(graph_error)?;
                     } else if name == b"object" && matches!(section, Section::Objects) {
                         let handle = read_handle_attr(e).unwrap_or_default();
+                        let gramps_id = read_id_attr(e);
                         self.graph
                             .add_node(
                                 handle.clone(),
                                 Node::Media(MediaData {
+                                    gramps_id,
                                     handle,
                                     ..MediaData::default()
                                 }),
@@ -337,10 +353,12 @@ impl Parser {
                             .map_err(graph_error)?;
                     } else if name == b"note" && matches!(section, Section::Notes) {
                         let handle = read_handle_attr(e).unwrap_or_default();
+                        let gramps_id = read_id_attr(e);
                         self.graph
                             .add_node(
                                 handle.clone(),
                                 Node::Note(NoteData {
+                                    gramps_id,
                                     handle,
                                     ..NoteData::default()
                                 }),
@@ -348,10 +366,12 @@ impl Parser {
                             .map_err(graph_error)?;
                     } else if name == b"tag" && matches!(section, Section::Tags) {
                         let handle = read_handle_attr(e).unwrap_or_default();
+                        let gramps_id = read_id_attr(e);
                         self.graph
                             .add_node(
                                 handle.clone(),
                                 Node::Tag(TagData {
+                                    gramps_id,
                                     handle,
                                     ..TagData::default()
                                 }),
@@ -383,9 +403,11 @@ impl Parser {
         start: &quick_xml::events::BytesStart,
     ) -> Result<(), Error> {
         let handle = read_handle_attr(start).unwrap_or_default();
+        let gramps_id = read_id_attr(start);
 
         let mut person = PersonData {
             handle: handle.clone(),
+            gramps_id,
             ..PersonData::default()
         };
         let mut gender: i32 = 0;
@@ -840,9 +862,11 @@ impl Parser {
         start: &quick_xml::events::BytesStart,
     ) -> Result<(), Error> {
         let handle = read_handle_attr(start).unwrap_or_default();
+        let gramps_id = read_id_attr(start);
 
         let mut family = FamilyData {
             handle: handle.clone(),
+            gramps_id,
             ..FamilyData::default()
         };
         let mut in_attribute = false;
@@ -1098,9 +1122,11 @@ impl Parser {
         start: &quick_xml::events::BytesStart,
     ) -> Result<(), Error> {
         let handle = read_handle_attr(start).unwrap_or_default();
+        let gramps_id = read_id_attr(start);
 
         let mut event = EventData {
             handle: handle.clone(),
+            gramps_id,
             ..EventData::default()
         };
         let mut in_eventtype = false;
@@ -1335,9 +1361,11 @@ impl Parser {
         start: &quick_xml::events::BytesStart,
     ) -> Result<(), Error> {
         let handle = read_handle_attr(start).unwrap_or_default();
+        let gramps_id = read_id_attr(start);
 
         let mut place = PlaceData {
             handle: handle.clone(),
+            gramps_id,
             ..PlaceData::default()
         };
         let mut current_attr_type = String::new();
@@ -1532,9 +1560,11 @@ impl Parser {
         start: &quick_xml::events::BytesStart,
     ) -> Result<(), Error> {
         let handle = read_handle_attr(start).unwrap_or_default();
+        let gramps_id = read_id_attr(start);
 
         let mut source = SourceData {
             handle: handle.clone(),
+            gramps_id,
             ..SourceData::default()
         };
         let mut in_title = false;
@@ -1734,9 +1764,11 @@ impl Parser {
         start: &quick_xml::events::BytesStart,
     ) -> Result<(), Error> {
         let handle = read_handle_attr(start).unwrap_or_default();
+        let gramps_id = read_id_attr(start);
 
         let mut citation = CitationData {
             handle: handle.clone(),
+            gramps_id,
             ..CitationData::default()
         };
         let mut in_page = false;
@@ -1857,9 +1889,11 @@ impl Parser {
         start: &quick_xml::events::BytesStart,
     ) -> Result<(), Error> {
         let handle = read_handle_attr(start).unwrap_or_default();
+        let gramps_id = read_id_attr(start);
 
         let mut repo = RepositoryData {
             handle: handle.clone(),
+            gramps_id,
             ..RepositoryData::default()
         };
         let mut in_name = false;
@@ -2078,9 +2112,11 @@ impl Parser {
         start: &quick_xml::events::BytesStart,
     ) -> Result<(), Error> {
         let handle = read_handle_attr(start).unwrap_or_default();
+        let gramps_id = read_id_attr(start);
 
         let mut media = MediaData {
             handle: handle.clone(),
+            gramps_id,
             ..MediaData::default()
         };
         let mut in_desc = false;
@@ -2245,9 +2281,11 @@ impl Parser {
         start: &quick_xml::events::BytesStart,
     ) -> Result<(), Error> {
         let handle = read_handle_attr(start).unwrap_or_default();
+        let gramps_id = read_id_attr(start);
 
         let mut note = NoteData {
             handle: handle.clone(),
+            gramps_id,
             ..NoteData::default()
         };
         let mut in_text = false;
@@ -2361,9 +2399,11 @@ impl Parser {
         start: &quick_xml::events::BytesStart,
     ) -> Result<(), Error> {
         let handle = read_handle_attr(start).unwrap_or_default();
+        let gramps_id = read_id_attr(start);
 
         let mut tag = TagData {
             handle: handle.clone(),
+            gramps_id,
             ..TagData::default()
         };
         let mut in_name = false;
