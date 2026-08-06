@@ -80,6 +80,7 @@ gramps_viz_edit/
 │   │   │   │   ├── graph-query.ts # Adjacency indices, indirect-set queries
 │   │   │   │   ├── selection.ts  # Click-to-select, Shift multi-select, export
 │   │   │   │   ├── colors.ts     # d3.interpolateViridis, imputed dashed, gray null
+│   │   │   │   ├── stats-panel.ts  # Collapsible sidebar with file statistics
 │   │   │   │   ├── tooltip.ts    # 200ms hover tooltip
 │   │   │   │   └── types.ts      # TypeScript interfaces matching Rust types
 │   │   │   ├── styles/

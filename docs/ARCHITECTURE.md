@@ -703,6 +703,7 @@ The generation gap is configurable (default: 25 years, validated range: 1-100).
 | Hover tooltips | `tooltip.ts` | 200ms delay, name+birth+death, cursor-follow, mouse-out hide |
 | Selection | `selection.ts` | Click toggle, Shift multi-select, Export via Tauri save dialog |
 | Graph queries | `graph-query.ts` | Adjacency indices, ancestor/descendant/indirect-set queries for selection modes |
+| Stats panel | `stats-panel.ts` | Collapsible right sidebar with file statistics summary |
 | Color gradient | `colors.ts` | d3.interpolateViridis, imputed dashed border, undated gray |
 | Filter | `main.ts` | Dropdown to filter by family group (connected component) |
 | Force layout tuning | `types.ts` | `ForceConfig` with generationPull, spouseStrength, parentChildStrength; UI sliders |
