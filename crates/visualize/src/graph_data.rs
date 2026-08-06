@@ -356,6 +356,7 @@ mod tests {
     ) -> ParsedFamily {
         ParsedFamily {
             handle: handle.to_string(),
+            gramps_id: None,
             father_handle: father.map(|s| s.to_string()),
             mother_handle: mother.map(|s| s.to_string()),
             child_handles: children.iter().map(|s| s.to_string()).collect(),

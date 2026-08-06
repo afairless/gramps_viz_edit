@@ -11,9 +11,10 @@
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ParsedEvent {
     pub handle: String,
+    pub gramps_id: Option<String>, // Gramps database identifier (e.g. "E0001")
     pub event_type: Option<String>, // "Birth", "Death", "Marriage", etc.
-    pub date_val: Option<String>,   // e.g. "1850-07-13"
-    pub date_year: Option<i32>,     // e.g. 1850
+    pub date_val: Option<String>,  // e.g. "1850-07-13"
+    pub date_year: Option<i32>,    // e.g. 1850
 }
 
 /// Raw extracted person data from streaming XML parse.
@@ -23,6 +24,7 @@ pub struct ParsedEvent {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ParsedPerson {
     pub handle: String,
+    pub gramps_id: Option<String>, // Gramps database identifier (e.g. "I0001")
     pub given_name: Option<String>,
     pub surname: Option<String>,
     pub birth_date: Option<String>,
@@ -42,6 +44,7 @@ pub struct ParsedPerson {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ParsedFamily {
     pub handle: String,
+    pub gramps_id: Option<String>, // Gramps database identifier (e.g. "F0001")
     pub father_handle: Option<String>,
     pub mother_handle: Option<String>,
     pub child_handles: Vec<String>,
@@ -125,6 +128,7 @@ mod tests {
     fn parsed_event_full() {
         let e = ParsedEvent {
             handle: "e0001".to_string(),
+            gramps_id: Some("E0001".to_string()),
             event_type: Some("Birth".to_string()),
             date_val: Some("1850-07-13".to_string()),
             date_year: Some(1850),

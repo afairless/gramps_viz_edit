@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::types::{ParsedEvent, ParsedFamily, ParsedPerson};
-use crate::xml::{read_handle_attr, read_hlink_attr, strip_prefix};
+use crate::xml::{read_handle_attr, read_hlink_attr, read_id_attr, strip_prefix};
 
 /// Given persons with event_refs and a lookup of events by handle,
 /// populate birth_date/birth_year/death_date for persons whose
@@ -66,8 +66,10 @@ pub fn extract_events(content: &str) -> Result<Vec<ParsedEvent>, Error> {
                 match name {
                     b"event" => {
                         let handle = read_handle_attr(e).unwrap_or_default();
+                        let gramps_id = read_id_attr(e);
                         current = Some(ParsedEvent {
                             handle,
+                            gramps_id,
                             ..ParsedEvent::default()
                         });
                     }
@@ -106,8 +108,10 @@ pub fn extract_events(content: &str) -> Result<Vec<ParsedEvent>, Error> {
                 match name {
                     b"event" => {
                         let handle = read_handle_attr(e).unwrap_or_default();
+                        let gramps_id = read_id_attr(e);
                         events.push(ParsedEvent {
                             handle,
+                            gramps_id,
                             ..ParsedEvent::default()
                         });
                     }
@@ -177,8 +181,10 @@ pub fn extract_persons(content: &str) -> Result<Vec<ParsedPerson>, Error> {
                 match name {
                     b"person" => {
                         let handle = read_handle_attr(e).unwrap_or_default();
+                        let gramps_id = read_id_attr(e);
                         current = Some(ParsedPerson {
                             handle,
+                            gramps_id,
                             ..ParsedPerson::default()
                         });
                     }
@@ -232,8 +238,10 @@ pub fn extract_persons(content: &str) -> Result<Vec<ParsedPerson>, Error> {
                     b"person" => {
                         // Self-closing person with handle only
                         let handle = read_handle_attr(e).unwrap_or_default();
+                        let gramps_id = read_id_attr(e);
                         persons.push(ParsedPerson {
                             handle,
+                            gramps_id,
                             ..ParsedPerson::default()
                         });
                     }
@@ -335,8 +343,10 @@ pub fn extract_families(content: &str) -> Result<Vec<ParsedFamily>, Error> {
                 match name {
                     b"family" => {
                         let handle = read_handle_attr(e).unwrap_or_default();
+                        let gramps_id = read_id_attr(e);
                         current = Some(ParsedFamily {
                             handle,
+                            gramps_id,
                             ..ParsedFamily::default()
                         });
                     }
@@ -368,8 +378,10 @@ pub fn extract_families(content: &str) -> Result<Vec<ParsedFamily>, Error> {
                     b"family" => {
                         // Self-closing family with handle only
                         let handle = read_handle_attr(e).unwrap_or_default();
+                        let gramps_id = read_id_attr(e);
                         families.push(ParsedFamily {
                             handle,
+                            gramps_id,
                             ..ParsedFamily::default()
                         });
                     }
@@ -1086,6 +1098,7 @@ mod tests {
     fn event(handle: &str, event_type: &str, date_val: &str) -> ParsedEvent {
         ParsedEvent {
             handle: handle.to_string(),
+            gramps_id: None,
             event_type: Some(event_type.to_string()),
             date_val: Some(date_val.to_string()),
             date_year: date_val.split('-').next().and_then(|y| y.parse().ok()),
