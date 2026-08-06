@@ -43,6 +43,8 @@ pub enum CliError {
         /// Human-readable error message with byte position.
         message: String,
     },
+    /// Diff analysis failed.
+    DiffFailed(String),
 }
 
 impl fmt::Display for CliError {
@@ -89,6 +91,9 @@ impl fmt::Display for CliError {
             }
             CliError::XmlParseError { message } => {
                 write!(f, "XML parse error: {}", message)
+            }
+            CliError::DiffFailed(msg) => {
+                write!(f, "diff failed: {}", msg)
             }
         }
     }
