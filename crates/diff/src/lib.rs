@@ -8,6 +8,7 @@
 //! - `report`: Diff report data types
 
 pub mod compare;
+pub mod matcher;
 pub mod normalize;
 pub mod report;
 pub mod similarity;
