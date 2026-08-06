@@ -4,6 +4,7 @@
 //! in memory, and the [`ValidationState`] enum for tracking validation status.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use crate::Edge;
 use crate::Handle;
@@ -100,6 +101,10 @@ pub struct Graph {
     validation_state: ValidationState,
     /// All edges in insertion order.
     edges: Vec<Edge>,
+    /// Handles that were created as placeholders because they were
+    /// referenced (by an edge or a handle-ref field) but never defined
+    /// as a full node in the source data.
+    inferred_handles: HashSet<Handle>,
 }
 
 impl Default for Graph {
@@ -120,6 +125,7 @@ impl Graph {
             forward_edges: HashMap::new(),
             reverse_edges: HashMap::new(),
             validation_state: ValidationState::Unvalidated,
+            inferred_handles: HashSet::new(),
         }
     }
 
@@ -182,6 +188,26 @@ impl Graph {
     /// Return the number of nodes in the graph.
     pub fn node_count(&self) -> usize {
         self.nodes.len()
+    }
+
+    // -----------------------------------------------------------------------
+    // Inferred (placeholder) handles
+    // -----------------------------------------------------------------------
+
+    /// Record that a handle was inferred/placeholder rather than
+    /// sourced from the original data.
+    pub fn record_inferred_handle(&mut self, handle: Handle) {
+        self.inferred_handles.insert(handle);
+    }
+
+    /// Returns `true` if the handle was created as a placeholder.
+    pub fn is_inferred_handle(&self, handle: &Handle) -> bool {
+        self.inferred_handles.contains(handle)
+    }
+
+    /// Returns the count of inferred (placeholder) nodes.
+    pub fn inferred_handle_count(&self) -> usize {
+        self.inferred_handles.len()
     }
 
     // -----------------------------------------------------------------------
@@ -1202,5 +1228,46 @@ mod tests {
             &ValidationState::Unvalidated,
             "Adding an edge should reset validation state to Unvalidated"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Inferred handles
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn inferred_handles_new_is_empty() {
+        let graph = Graph::new();
+        assert_eq!(graph.inferred_handle_count(), 0);
+        assert!(!graph.is_inferred_handle(&"h1".to_string()));
+    }
+
+    #[test]
+    fn record_inferred_handle_increments_count() {
+        let mut graph = Graph::new();
+        graph.record_inferred_handle("h1".to_string());
+        assert_eq!(graph.inferred_handle_count(), 1);
+        assert!(graph.is_inferred_handle(&"h1".to_string()));
+        assert!(!graph.is_inferred_handle(&"h2".to_string()));
+    }
+
+    #[test]
+    fn record_inferred_handle_deduplicates() {
+        let mut graph = Graph::new();
+        graph.record_inferred_handle("h1".to_string());
+        graph.record_inferred_handle("h1".to_string());
+        assert_eq!(graph.inferred_handle_count(), 1);
+    }
+
+    #[test]
+    fn record_multiple_inferred_handles() {
+        let mut graph = Graph::new();
+        graph.record_inferred_handle("h1".to_string());
+        graph.record_inferred_handle("h2".to_string());
+        graph.record_inferred_handle("h3".to_string());
+        assert_eq!(graph.inferred_handle_count(), 3);
+        assert!(graph.is_inferred_handle(&"h1".to_string()));
+        assert!(graph.is_inferred_handle(&"h2".to_string()));
+        assert!(graph.is_inferred_handle(&"h3".to_string()));
+        assert!(!graph.is_inferred_handle(&"h4".to_string()));
     }
 }
