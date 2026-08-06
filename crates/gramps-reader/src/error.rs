@@ -26,8 +26,10 @@ pub enum Error {
     },
     /// The schema version declared in the XML header is not compiled in.
     UnsupportedSchema {
-        /// The version string found in the XML header.
+        /// The full version string found in the XML header (e.g. "5.1.6").
         version: String,
+        /// The truncated major.minor version (e.g. "5.1") that was checked.
+        schema_version: String,
     },
 }
 
@@ -43,8 +45,14 @@ impl fmt::Display for Error {
             Error::GzipError { path, source } => {
                 write!(f, "gzip decompression error for '{}': {}", path, source)
             }
-            Error::UnsupportedSchema { version } => {
-                write!(f, "unsupported schema version '{}' (not compiled in)", version)
+            Error::UnsupportedSchema { version, schema_version } => {
+                write!(
+                    f,
+                    "unsupported schema version '{}' (file reports {}; not compiled in). \
+                     hint: run `gramps-gen schema download {}` to download the schema, \
+                     or build with --no-default-features --features schema-5-2 to use only 5.2",
+                    schema_version, version, schema_version
+                )
             }
         }
     }
@@ -135,18 +143,35 @@ mod tests {
     #[test]
     fn unsupported_schema_display() {
         let err = Error::UnsupportedSchema {
-            version: "9.9".to_string(),
+            version: "9.9.9".to_string(),
+            schema_version: "9.9".to_string(),
         };
         let display = format!("{}", err);
         assert!(display.contains("unsupported schema version"));
         assert!(display.contains("9.9"));
+        assert!(display.contains("9.9.9"));
+        assert!(display.contains("hint:"));
+    }
+
+    #[test]
+    fn unsupported_schema_display_with_hint() {
+        let err = Error::UnsupportedSchema {
+            version: "5.1.6".to_string(),
+            schema_version: "5.1".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("5.1"));
+        assert!(display.contains("5.1.6"));
+        assert!(display.contains("hint:"));
+        assert!(display.contains("gramps-gen schema download 5.1"));
     }
 
     #[test]
     fn unsupported_schema_source_is_none() {
         use std::error::Error as _;
         let err = Error::UnsupportedSchema {
-            version: "9.9".to_string(),
+            version: "9.9.9".to_string(),
+            schema_version: "9.9".to_string(),
         };
         assert!(err.source().is_none());
     }

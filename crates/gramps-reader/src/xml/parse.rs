@@ -451,7 +451,7 @@ impl Parser {
                                 let key = attr.key.as_ref();
                                 let val = String::from_utf8_lossy(&attr.value).to_string();
                                 if key == b"type" || key.ends_with(b":type") {
-                                    lds.type_field = parse_lds_ord_type(&val);
+                                    lds.type_field = Some(parse_lds_ord_type(&val));
                                 } else if key == b"status" || key.ends_with(b":status") {
                                     lds.status = Some(val);
                                 } else if key == b"temple" || key.ends_with(b":temple") {
@@ -487,7 +487,7 @@ impl Parser {
                                 let key = attr.key.as_ref();
                                 let val = String::from_utf8_lossy(&attr.value).to_string();
                                 if key == b"href" || key.ends_with(b":href") {
-                                    current_url.href = val;
+                                    current_url.href = Some(val);
                                 } else if key == b"type" || key.ends_with(b":type") {
                                     url_type = Some(val);
                                 }
@@ -568,6 +568,7 @@ impl Parser {
                             let person_ref = PersonRef {
                                 ref_field: hlink.clone(),
                                 relation,
+                                ..Default::default()
                             };
                             person.person_ref_list.push(person_ref.clone());
                             self.pending.push(PendingEdge::PersonPersonRef {
@@ -578,7 +579,7 @@ impl Parser {
                         }
                         b"mediaref" => {
                             if let Some(h) = read_hlink_attr(e) {
-                                person.media_list.push(MediaRef { ref_field: h.clone() });
+                                person.media_list.push(MediaRef { ref_field: h.clone(), ..Default::default() });
                                 self.pending.push(PendingEdge::Simple {
                                     source: handle.clone(),
                                     target: h,
@@ -621,9 +622,10 @@ impl Parser {
                             }
                             if !href.is_empty() {
                                 person.url_list.push(Url {
-                                    href,
+                                    href: Some(href),
                                     type_field: url_type_val,
                                     desc: None,
+                                    path: None,
                                 });
                             }
                         }
@@ -633,7 +635,7 @@ impl Parser {
                                 let key = attr.key.as_ref();
                                 let val = String::from_utf8_lossy(&attr.value).to_string();
                                 if key == b"type" || key.ends_with(b":type") {
-                                    lds.type_field = parse_lds_ord_type(&val);
+                                    lds.type_field = Some(parse_lds_ord_type(&val));
                                 } else if key == b"status" || key.ends_with(b":status") {
                                     lds.status = Some(val);
                                 } else if key == b"temple" || key.ends_with(b":temple") {
@@ -743,9 +745,7 @@ impl Parser {
                         b"address" => {
                             person.address_list.push(Address {
                                 location: Some(current_location.clone()),
-                                date: None,
-                                citation_list: vec![],
-                                note_list: vec![],
+                                ..Default::default()
                             });
                             in_address = false;
                             in_address_location = false;
@@ -954,7 +954,7 @@ impl Parser {
                         }
                         b"mediaref" => {
                             if let Some(h) = read_hlink_attr(e) {
-                                family.media_list.push(MediaRef { ref_field: h.clone() });
+family.media_list.push(MediaRef { ref_field: h.clone(), ..Default::default() });
                                 self.pending.push(PendingEdge::Simple {
                                     source: handle.clone(),
                                     target: h,
@@ -1174,7 +1174,7 @@ impl Parser {
                         }
                         b"mediaref" => {
                             if let Some(h) = read_hlink_attr(e) {
-                                event.media_list.push(MediaRef { ref_field: h.clone() });
+event.media_list.push(MediaRef { ref_field: h.clone(), ..Default::default() });
                                 self.pending.push(PendingEdge::Simple {
                                     source: handle.clone(),
                                     target: h,
@@ -1355,6 +1355,7 @@ impl Parser {
                             if let Some(h) = read_hlink_attr(e) {
                                 place.place_ref_list.push(PlaceRef {
                                     ref_field: h.clone(),
+                                    date: None,
                                 });
                                 self.pending.push(PendingEdge::Simple {
                                     source: handle.clone(),
@@ -1395,7 +1396,7 @@ impl Parser {
                         }
                         b"mediaref" => {
                             if let Some(h) = read_hlink_attr(e) {
-                                place.media_list.push(MediaRef { ref_field: h.clone() });
+                                place.media_list.push(MediaRef { ref_field: h.clone(), ..Default::default() });
                                 self.pending.push(PendingEdge::Simple {
                                     source: handle.clone(),
                                     target: h,
@@ -1547,6 +1548,7 @@ impl Parser {
                                 call_number,
                                 media_type,
                                 ref_field: hlink.clone(),
+                                note_list: vec![],
                             };
                             source.reporef_list.push(repo_ref.clone());
                             self.pending.push(PendingEdge::SourceRepoRef {
@@ -1577,7 +1579,7 @@ impl Parser {
                         }
                         b"mediaref" => {
                             if let Some(h) = read_hlink_attr(e) {
-                                source.media_list.push(MediaRef { ref_field: h.clone() });
+                                source.media_list.push(MediaRef { ref_field: h.clone(), ..Default::default() });
                                 self.pending.push(PendingEdge::Simple {
                                     source: handle.clone(),
                                     target: h,
@@ -1734,7 +1736,7 @@ impl Parser {
                         }
                         b"mediaref" => {
                             if let Some(h) = read_hlink_attr(e) {
-                                citation.media_list.push(MediaRef { ref_field: h.clone() });
+                                citation.media_list.push(MediaRef { ref_field: h.clone(), ..Default::default() });
                                 self.pending.push(PendingEdge::Simple {
                                     source: handle.clone(),
                                     target: h,
@@ -1851,7 +1853,7 @@ impl Parser {
                                 let key = attr.key.as_ref();
                                 let val = String::from_utf8_lossy(&attr.value).to_string();
                                 if key == b"href" || key.ends_with(b":href") {
-                                    current_url.href = val;
+                                    current_url.href = Some(val);
                                 } else if key == b"type" || key.ends_with(b":type") {
                                     url_type = Some(val);
                                 }
@@ -1887,7 +1889,7 @@ impl Parser {
                         }
                         b"mediaref" => {
                             if let Some(h) = read_hlink_attr(e) {
-                                repo.media_list.push(MediaRef { ref_field: h.clone() });
+                                repo.media_list.push(MediaRef { ref_field: h.clone(), ..Default::default() });
                                 self.pending.push(PendingEdge::Simple {
                                     source: handle.clone(),
                                     target: h,
@@ -1909,9 +1911,10 @@ impl Parser {
                             }
                             if !href.is_empty() {
                                 repo.url_list.push(Url {
-                                    href,
+                                    href: Some(href),
                                     type_field: url_type_val,
                                     desc: None,
+                                    path: None,
                                 });
                             }
                         }
@@ -1964,9 +1967,7 @@ impl Parser {
                         b"address" => {
                             repo.address_list.push(Address {
                                 location: Some(current_location.clone()),
-                                date: None,
-                                citation_list: vec![],
-                                note_list: vec![],
+                                ..Default::default()
                             });
                             in_address = false;
                             in_address_location = false;
@@ -2496,6 +2497,7 @@ pub fn parse_graph(content: &str) -> Result<Graph, Error> {
     let version = detect_schema_version(content)?;
     let schema = Schema::for_version(&version).ok_or_else(|| Error::UnsupportedSchema {
         version: version.clone(),
+        schema_version: version.clone(),
     })?;
 
     let mut parser = Parser::new(schema);
@@ -2518,6 +2520,38 @@ fn graph_error(err: GraphError) -> Error {
 /// Construct a simple (no metadata) edge from a `SimpleEdgeKind`.
 fn simple_edge(kind: SimpleEdgeKind, source: Handle, target: Handle) -> Edge {
     match kind {
+        SimpleEdgeKind::PlacePlaceRef => {
+            let meta_target = target.clone();
+            Edge::PlacePlaceRef { source, target, metadata: Box::new(PlaceRef { ref_field: meta_target, date: None }) }
+        }
+        SimpleEdgeKind::PersonMediaRef => {
+            let meta_target = target.clone();
+            Edge::PersonMediaRef { source, target, metadata: Box::new(MediaRef { ref_field: meta_target, ..Default::default() }) }
+        }
+        SimpleEdgeKind::EventMediaRef => {
+            let meta_target = target.clone();
+            Edge::EventMediaRef { source, target, metadata: Box::new(MediaRef { ref_field: meta_target, ..Default::default() }) }
+        }
+        SimpleEdgeKind::FamilyMediaRef => {
+            let meta_target = target.clone();
+            Edge::FamilyMediaRef { source, target, metadata: Box::new(MediaRef { ref_field: meta_target, ..Default::default() }) }
+        }
+        SimpleEdgeKind::CitationMediaRef => {
+            let meta_target = target.clone();
+            Edge::CitationMediaRef { source, target, metadata: Box::new(MediaRef { ref_field: meta_target, ..Default::default() }) }
+        }
+        SimpleEdgeKind::SourceMediaRef => {
+            let meta_target = target.clone();
+            Edge::SourceMediaRef { source, target, metadata: Box::new(MediaRef { ref_field: meta_target, ..Default::default() }) }
+        }
+        SimpleEdgeKind::PlaceMediaRef => {
+            let meta_target = target.clone();
+            Edge::PlaceMediaRef { source, target, metadata: Box::new(MediaRef { ref_field: meta_target, ..Default::default() }) }
+        }
+        SimpleEdgeKind::RepositoryMediaRef => {
+            let meta_target = target.clone();
+            Edge::RepositoryMediaRef { source, target, metadata: Box::new(MediaRef { ref_field: meta_target, ..Default::default() }) }
+        }
         SimpleEdgeKind::PersonFamily => Edge::PersonFamily { source, target },
         SimpleEdgeKind::PersonParentFamily => Edge::PersonParentFamily { source, target },
         SimpleEdgeKind::FamilyFather => Edge::FamilyFather { source, target },
@@ -2535,7 +2569,6 @@ fn simple_edge(kind: SimpleEdgeKind, source: Handle, target: Handle) -> Edge {
         SimpleEdgeKind::PlaceCitation => Edge::PlaceCitation { source, target },
         SimpleEdgeKind::PlaceNote => Edge::PlaceNote { source, target },
         SimpleEdgeKind::PlaceTag => Edge::PlaceTag { source, target },
-        SimpleEdgeKind::PlacePlaceRef => Edge::PlacePlaceRef { source, target },
         SimpleEdgeKind::SourceNote => Edge::SourceNote { source, target },
         SimpleEdgeKind::SourceTag => Edge::SourceTag { source, target },
         SimpleEdgeKind::CitationNote => Edge::CitationNote { source, target },
@@ -2553,13 +2586,6 @@ fn simple_edge(kind: SimpleEdgeKind, source: Handle, target: Handle) -> Edge {
         SimpleEdgeKind::TagRef => Edge::TagRef { source, target },
         SimpleEdgeKind::RepositoryNote => Edge::RepositoryNote { source, target },
         SimpleEdgeKind::RepositoryTag => Edge::RepositoryTag { source, target },
-        SimpleEdgeKind::PersonMediaRef => Edge::PersonMediaRef { source, target },
-        SimpleEdgeKind::EventMediaRef => Edge::EventMediaRef { source, target },
-        SimpleEdgeKind::FamilyMediaRef => Edge::FamilyMediaRef { source, target },
-        SimpleEdgeKind::CitationMediaRef => Edge::CitationMediaRef { source, target },
-        SimpleEdgeKind::SourceMediaRef => Edge::SourceMediaRef { source, target },
-        SimpleEdgeKind::PlaceMediaRef => Edge::PlaceMediaRef { source, target },
-        SimpleEdgeKind::RepositoryMediaRef => Edge::RepositoryMediaRef { source, target },
     }
 }
 
@@ -2920,7 +2946,7 @@ mod tests {
             Some("Smith")
         );
         // Gender: M = 1
-        assert_eq!(p.gender, 1);
+        assert_eq!(p.gender, Some(1));
         // Event refs should be populated
         assert_eq!(p.event_ref_list.len(), 2);
         assert_eq!(p.event_ref_list[0].ref_field, "e0001");
@@ -3025,7 +3051,7 @@ mod tests {
         );
         let p = single_person(&xml);
         assert_eq!(p.url_list.len(), 1);
-        assert_eq!(p.url_list[0].href, "https://example.com");
+        assert_eq!(p.url_list[0].href.as_deref(), Some("https://example.com"));
         assert_eq!(p.url_list[0].type_field, Some(UrlType::WebHome));
     }
 
@@ -3228,7 +3254,7 @@ mod tests {
         );
         let p = single_person(&xml);
         assert_eq!(p.lds_ord_list.len(), 1);
-        assert_eq!(p.lds_ord_list[0].type_field, LdsOrdType::Baptism);
+        assert_eq!(p.lds_ord_list[0].type_field, Some(LdsOrdType::Baptism));
         assert_eq!(
             p.lds_ord_list[0].status.as_deref(),
             Some("completed")
@@ -3445,7 +3471,7 @@ mod tests {
         );
         let e = single_event_from_parser(&xml);
         assert_eq!(e.handle, "e0001");
-        assert_eq!(e.event_type, EventType::Marriage);
+        assert_eq!(e.event_type, Some(EventType::Marriage));
         let date = e.date.as_ref().expect("date should be set");
         assert_eq!(date.year, 1850);
         assert_eq!(date.month, Some(3));
@@ -3471,7 +3497,7 @@ mod tests {
   </events>"#,
         );
         let e = single_event_from_parser(&xml);
-        assert_eq!(e.event_type, EventType::Birth);
+        assert_eq!(e.event_type, Some(EventType::Birth));
         let date = e.date.as_ref().expect("date should be set");
         assert_eq!(date.year, 1850);
         assert_eq!(date.month, None);
@@ -3485,7 +3511,8 @@ mod tests {
   </events>"#);
         let e = single_event_from_parser(&xml);
         assert_eq!(e.handle, "e0003");
-        assert_eq!(e.event_type, EventType::Adoption); // Default variant.
+        // When no event type is specified in XML, event_type is None.
+        assert_eq!(e.event_type, None);
         assert!(e.date.is_none());
         assert!(e.place_handle.is_none());
     }
@@ -3724,7 +3751,7 @@ mod tests {
         );
         let c = single_citation_from_parser(&xml);
         assert_eq!(c.handle, "c0001");
-        assert_eq!(c.source_handle, "s0001");
+        assert_eq!(c.source_handle.as_deref(), Some("s0001"));
         assert_eq!(c.page.as_deref(), Some("p. 42"));
         assert_eq!(c.confidence, Some(2));
         assert_eq!(c.note_list, vec!["n0001"]);
@@ -3740,7 +3767,7 @@ mod tests {
   </citations>"#);
         let c = single_citation_from_parser(&xml);
         assert_eq!(c.handle, "c0002");
-        assert!(c.source_handle.is_empty());
+        assert!(c.source_handle.as_deref().unwrap_or("").is_empty());
         assert!(c.page.is_none());
         assert!(c.confidence.is_none());
     }
@@ -3828,7 +3855,7 @@ mod tests {
             Some("USA")
         );
         assert_eq!(r.url_list.len(), 1);
-        assert_eq!(r.url_list[0].href, "https://library.example.com");
+        assert_eq!(r.url_list[0].href.as_deref(), Some("https://library.example.com"));
         assert_eq!(r.url_list[0].type_field, Some(UrlType::WebHome));
         assert_eq!(r.note_list, vec!["n0001"]);
         assert_eq!(r.tag_list, vec!["t0001"]);

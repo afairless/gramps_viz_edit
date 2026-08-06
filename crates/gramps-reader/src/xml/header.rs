@@ -78,7 +78,10 @@ pub fn detect_schema_version(content: &str) -> Result<String, Error> {
             if available.contains(&schema_version.as_str()) {
                 Ok(schema_version)
             } else {
-                Err(Error::UnsupportedSchema { version: v })
+                Err(Error::UnsupportedSchema {
+                    version: v,
+                    schema_version,
+                })
             }
         }
         None => Err(Error::XmlParseError {
@@ -132,13 +135,8 @@ mod tests {
     fn detect_schema_version_5_1() {
         let xml = with_database("  <header><created version=\"5.1\"/></header>");
         let result = detect_schema_version(&xml);
-        // With default features, only 5.2 is compiled in.
-        match result {
-            Err(Error::UnsupportedSchema { version }) => {
-                assert_eq!(version, "5.1");
-            }
-            other => panic!("Expected UnsupportedSchema for 5.1, got: {:?}", other.map(|_| ())),
-        }
+        // With both schemas as default features, 5.1 is now compiled in.
+        assert_eq!(result.unwrap(), "5.1");
     }
 
     // -----------------------------------------------------------------------
@@ -150,8 +148,9 @@ mod tests {
         let xml = with_database("  <header><created version=\"99.99\"/></header>");
         let result = detect_schema_version(&xml);
         match result {
-            Err(Error::UnsupportedSchema { version }) => {
+            Err(Error::UnsupportedSchema { version, schema_version }) => {
                 assert_eq!(version, "99.99");
+                assert_eq!(schema_version, "99.99");
             }
             other => panic!("Expected UnsupportedSchema, got: {:?}", other.map(|_| ())),
         }
@@ -206,17 +205,21 @@ mod tests {
     #[test]
     fn unsupported_schema_display_from_header() {
         let err = Error::UnsupportedSchema {
-            version: "9.9".to_string(),
+            version: "9.9.9".to_string(),
+            schema_version: "9.9".to_string(),
         };
         let display = format!("{}", err);
         assert!(display.contains("unsupported schema version"));
         assert!(display.contains("9.9"));
+        assert!(display.contains("9.9.9"));
+        assert!(display.contains("hint:"));
     }
 
     #[test]
     fn unsupported_schema_source_is_none_from_header() {
         let err = Error::UnsupportedSchema {
-            version: "9.9".to_string(),
+            version: "9.9.9".to_string(),
+            schema_version: "9.9".to_string(),
         };
         assert!(err.source().is_none());
     }
