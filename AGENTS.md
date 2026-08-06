@@ -120,7 +120,7 @@ gramps_viz_edit/
 - The project supports multiple Gramps schema versions via Cargo features. Each version has its own file.
 - `typed-graph/build.rs` reads all enabled versioned schema files at compile time and generates `$OUT_DIR/generated_schema.rs` containing: `Node` enum, `Edge` enum, all `XxxData` structs, secondary/embedded ref structs, enum types, and `Schema` runtime metadata.
 - `typed-graph/src/schema.rs` includes the generated code via `include!`.
-- To update the schema: run `gramps-gen schema download <version>` or manually place `schema-{version}.json` and rebuild with the corresponding feature flag.
+- To update the schema: run `gramps-gen schema download <version>` or manually place `schema-{version}.json` and rebuild. All schema files found in `schemas/` are compiled in by default for transparent auto-detection at runtime.
 
 #### Schema Formats
 

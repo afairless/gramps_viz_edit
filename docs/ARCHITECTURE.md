@@ -193,10 +193,10 @@ Re-runs `graph.validate(&schema)` to catch any issues introduced by transforms.
 A committed JSON artifact describing the Gramps data model for a specific version.
 
 **Multi-version support**: The project supports multiple Gramps schema versions
-via Cargo features. Each version has its own file (`schema-5.0.json`,
-`schema-5.1.json`, `schema-5.2.json`, etc.). The build script reads all enabled
-schemas and generates a **union type** covering all fields and enum variants
-across versions.
+via Cargo features. All schema files found in `schemas/` are compiled in by
+default for transparent auto-detection at runtime. The build script reads all
+enabled schemas and generates a **union type** covering all fields and enum
+variants across versions.
 
 Each schema file describes:
 
@@ -216,10 +216,11 @@ select which schema versions to compile in:
 
 | Feature | Version | Description |
 |---|---|---|
-| `schema-5-0` | 5.0 | Gramps 5.0.x support (forward-compat stub) |
 | `schema-5-1` | 5.1 | Gramps 5.1.x support |
-| `schema-5-2` (default) | 5.2 | Gramps 5.2.x support |
-| `schema-6-0` | 6.0 | Gramps 6.0.x support (experimental, forward-compat stub) |
+| `schema-5-2` | 5.2 | Gramps 5.2.x support (also default) |
+
+Both `schema-5-1` and `schema-5-2` are enabled by default. To build with only
+a single version, use `--no-default-features --features schema-5-2`.
 | `all-schemas` | all | Enable all available versions |
 
 > **Note:** `schema-5-0` and `schema-6-0` exist as Cargo features for forward

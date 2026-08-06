@@ -39,12 +39,30 @@ gramps-gen generate --count 1000 --seed 42 --output reproducible.gramps
 gramps-gen generate --count 500 --depth 5 --output deep-tree.gramps
 ```
 
-### With optional features
+### With optional features (data content)
 
 ```bash
 gramps-gen generate --count 500 \
   --with-places --with-citations --with-notes \
   --with-media --with-tags
+```
+
+### Schema versions
+
+`gramps-gen` supports Gramps 5.1 and 5.2 schema versions out of the box.
+Both schemas are compiled in by default for transparent auto-detection —
+you don't need to pass `--features` flags at build time. The tool
+automatically detects the schema version from each file's XML header.
+
+```bash
+# Build (includes both 5.1 and 5.2)
+cargo build
+
+# Build with only a specific version (smaller binary)
+cargo build --no-default-features --features schema-5-2
+
+# Both versions work without --features flags
+gramps-gen diff archive_v5_1.gramps archive_v5_2.gramps
 ```
 
 ### Adversarial datasets
