@@ -66,6 +66,16 @@ pub fn format_text(report: &DiffReport, include_extrinsic: bool) -> String {
     let _ = writeln!(out, "Removed:          {}", report.summary.removed);
     let _ = writeln!(out, "Needs Review:     {}", report.summary.needs_review);
     let _ = writeln!(out, "Extrinsic Only:   {}", report.summary.extrinsic_only);
+    let _ = writeln!(
+        out,
+        "Dangling (A):       {}",
+        report.summary.dangling_count_a
+    );
+    let _ = writeln!(
+        out,
+        "Dangling (B):       {}",
+        report.summary.dangling_count_b
+    );
     out.push('\n');
 
     // Per-item details
@@ -405,6 +415,8 @@ mod tests {
                 removed: 1,
                 needs_review: 1,
                 extrinsic_only: 1,
+                dangling_count_a: 0,
+                dangling_count_b: 0,
             },
             items: vec![
                 item(
@@ -832,7 +844,7 @@ mod tests {
         // Verify quote escaping: display_name "Smith, John \"The Great\""
         // should be CSV-escaped as "" for embedded quotes.
         // Check that the original value text appears in the output
-        let display_escaped: String = "Smith, John \"The Great\""
+        let _display_escaped: String = "Smith, John \"The Great\""
             .chars()
             .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
             .collect();

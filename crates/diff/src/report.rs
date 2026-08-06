@@ -37,6 +37,11 @@ pub struct DiffSummary {
     pub needs_review: usize,
     /// Number of items classified as EXTRINSIC_ONLY (only handle references changed).
     pub extrinsic_only: usize,
+    /// Number of placeholder (inferred) nodes in graph A — nodes created
+    /// because a reference targeted a handle that was not defined in the file.
+    pub dangling_count_a: usize,
+    /// Same for graph B.
+    pub dangling_count_b: usize,
 }
 
 /// Classification of a single item in the diff.
@@ -182,6 +187,8 @@ mod tests {
         // DiffSummary
         let summary = DiffSummary::default();
         let _ = format!("{summary:?}");
+        assert_eq!(summary.dangling_count_a, 0);
+        assert_eq!(summary.dangling_count_b, 0);
 
         // ItemDiff
         let item = ItemDiff {
@@ -279,6 +286,8 @@ mod tests {
                 removed: 1,
                 needs_review: 1,
                 extrinsic_only: 0,
+                dangling_count_a: 0,
+                dangling_count_b: 0,
             },
             items: vec![
                 ItemDiff {

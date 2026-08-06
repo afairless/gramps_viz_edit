@@ -112,6 +112,8 @@ pub fn run_diff(file_a: &str, file_b: &str, _config: &DiffConfig) -> Result<Diff
     let mut summary = DiffSummary {
         total_a: graph_a.node_count(),
         total_b: graph_b.node_count(),
+        dangling_count_a: graph_a.inferred_handle_count(),
+        dangling_count_b: graph_b.inferred_handle_count(),
         ..Default::default()
     };
 
