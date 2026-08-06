@@ -14,6 +14,7 @@ pub mod normalize;
 pub mod output;
 pub mod report;
 pub mod similarity;
+pub mod visualizer_index;
 
 pub use cascading::resolve_extrinsic;
 
