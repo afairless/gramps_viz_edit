@@ -1,19 +1,10 @@
-# Implementation Plan: Gramps Diff Analyzer (Steps 9–10)
+# Implementation Plan: Gramps Diff Analyzer (Steps 11–12)
+
+> **Note:** Steps 1–10 are already complete. This plan covers only the remaining steps.
 
 Source: `docs/research/gramps-diff-plan.md`
 
-> **Prerequisite status:** Steps 1–8 are complete.
->
-> - Step 1 (full graph parser) — done via `gramps-reader`
-> - Step 2 (diff crate skeleton) — `crates/diff/Cargo.toml`, `crates/diff/src/lib.rs`
-> - Step 3 (similarity) — `similarity.rs`
-> - Step 4 (normalization) — `normalize.rs`
-> - Step 5 (report types) — `report.rs`
-> - Step 6 (compare) — `compare.rs`
-> - Step 7 (matcher) — `matcher.rs`
-> - Step 8 (cascading) — `cascading.rs`
-
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 9 | `feat: add text and JSON output formatters` | Output formatters | `crates/diff/src/output.rs` — `format_text(report, include_extrinsic) -> String` (summary table + per-item details with optional extrinsic filtering) and `format_json(report) -> String` (compact JSON). Update `crates/diff/src/lib.rs` to add `pub mod output;`. | Unit (text output contains expected headings and summary counts; JSON round-trips via serde; empty report renders correctly; extrinsic-only items are omitted from text when `include_extrinsic: false`; all classification labels appear for text output) |
-| 10 | `feat: add visualizer index output format` | Visualizer index | `crates/diff/src/visualizer_index.rs` — `format_visualizer(report) -> String` producing compact JSON with `handle_map` (all matched A↔B handle pairs) + per-handle entry `{class, intrinsic_fields?, text_scores?}`. Update `crates/diff/src/lib.rs` to add `pub mod visualizer_index;`. | Unit (output parses as JSON; all 6 `Classification` variants are represented; handle_map keys/values match report items; intrinsic_fields appear for MODIFIED items; text_scores appear for MODIFIED items with text field changes; empty report produces valid JSON) |
+| 11 | `feat: wire run_diff orchestrator` | Diff orchestrator | `crates/diff/src/lib.rs` — `run_diff(file_a, file_b, config, schema) -> Result<DiffReport, DiffError>` where `config: DiffConfig { thresholds, include_extrinsic, normalize_enabled }`. Orchestrates: parse both files → match (Pass 1) → cascade (Pass 2) → apply thresholds → return report. Parse failures return `DiffError::ParseError` (no partial results — both files must parse). Schema version mismatch: diff proceeds using the higher version's merged schema with a warning in the report. Initial implementation loads both graphs in memory; future optimization can stream one graph while indexing the other. | Integration (fixtures generated via `generate_random()` with fixed seeds: identical → all SAME; add one person → one ADDED; modify note text → one MODIFIED; change handle refs matched as SAME → EXTRINSIC_ONLY) |
+| 12 | `feat: add gramps-gen diff CLI subcommand` | CLI subcommand | `crates/cli/src/commands/diff.rs` — `DiffArgs` with `file_a`, `file_b`, `--output`, `--output-file`, `--threshold`, `--no-normalize`, `--include-extrinsic`, `--summary-only`. `run(args)` maps `--no-normalize` to `DiffConfig::normalize_enabled` and threads into `diff::run_diff()`. Writes to stdout/file. Update `crates/cli/src/commands/mod.rs` and `crates/cli/src/main.rs`. | Smoke (compiles, help text works). Integration (subprocess E2E test with two generated files) |
