@@ -352,7 +352,7 @@ fn compare_nodes(kind: NodeKind, node_a: &Node, node_b: &Node) -> Vec<FieldChang
 }
 
 /// Extract a display name from a node for use in context information.
-fn display_name_for_node(kind: NodeKind, node: &Node) -> String {
+fn display_name_for_node(kind: NodeKind, node: &Node, graph: &Graph) -> String {
     match kind {
         NodeKind::Person => {
             if let Node::Person(data) = node {
@@ -369,8 +369,31 @@ fn display_name_for_node(kind: NodeKind, node: &Node) -> String {
             }
         }
         NodeKind::Family => {
-            if let Node::Family(_) = node {
-                "Family".to_string()
+            if let Node::Family(data) = node {
+                let person_name = |handle: &Handle| -> Option<String> {
+                    let n = graph.get_node(handle)?;
+                    if let Node::Person(p) = n {
+                        let first = p.primary_name.first_name.as_deref().unwrap_or("");
+                        let surname = p
+                            .primary_name
+                            .surname_list
+                            .first()
+                            .and_then(|s| s.surname.as_deref())
+                            .unwrap_or("");
+                        let name = format!("{} {}", first, surname).trim().to_string();
+                        if name.is_empty() { None } else { Some(name) }
+                    } else {
+                        None
+                    }
+                };
+                let father_name = data.father_handle.as_ref().and_then(person_name);
+                let mother_name = data.mother_handle.as_ref().and_then(person_name);
+                match (father_name, mother_name) {
+                    (Some(f), Some(m)) => format!("Family of {} & {}", f, m),
+                    (Some(f), None) => format!("Family of {}", f),
+                    (None, Some(m)) => format!("Family of {}", m),
+                    (None, None) => "Family".to_string(),
+                }
             } else {
                 String::new()
             }
@@ -445,9 +468,81 @@ fn display_name_for_node(kind: NodeKind, node: &Node) -> String {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Strong key extraction by kind
-// ---------------------------------------------------------------------------
+/// Extract the Gramps database ID from a node, if present.
+fn extract_gramps_id(kind: NodeKind, node: &Node) -> Option<String> {
+    match kind {
+        NodeKind::Person => {
+            if let Node::Person(data) = node {
+                data.gramps_id.clone()
+            } else {
+                None
+            }
+        }
+        NodeKind::Family => {
+            if let Node::Family(data) = node {
+                data.gramps_id.clone()
+            } else {
+                None
+            }
+        }
+        NodeKind::Event => {
+            if let Node::Event(data) = node {
+                data.gramps_id.clone()
+            } else {
+                None
+            }
+        }
+        NodeKind::Place => {
+            if let Node::Place(data) = node {
+                data.gramps_id.clone()
+            } else {
+                None
+            }
+        }
+        NodeKind::Source => {
+            if let Node::Source(data) = node {
+                data.gramps_id.clone()
+            } else {
+                None
+            }
+        }
+        NodeKind::Citation => {
+            if let Node::Citation(data) = node {
+                data.gramps_id.clone()
+            } else {
+                None
+            }
+        }
+        NodeKind::Repository => {
+            if let Node::Repository(data) = node {
+                data.gramps_id.clone()
+            } else {
+                None
+            }
+        }
+        NodeKind::Media => {
+            if let Node::Media(data) = node {
+                data.gramps_id.clone()
+            } else {
+                None
+            }
+        }
+        NodeKind::Note => {
+            if let Node::Note(data) = node {
+                data.gramps_id.clone()
+            } else {
+                None
+            }
+        }
+        NodeKind::Tag => {
+            if let Node::Tag(data) = node {
+                data.gramps_id.clone()
+            } else {
+                None
+            }
+        }
+    }
+}
 
 /// Extract the strong match key for a node, if one can be derived.
 fn strong_key_for_node(kind: NodeKind, graph: &Graph, handle: &Handle) -> Option<String> {
@@ -601,13 +696,17 @@ pub fn match_graphs(graph_a: &Graph, graph_b: &Graph) -> MatchResult {
             };
 
             handle_map.insert(handle_b.clone(), handle_a.clone());
+            let display_name_a = Some(display_name_for_node(kind, node_a, graph_a));
+            let display_name_b = Some(display_name_for_node(kind, node_b, graph_b));
+            let gramps_id_a = extract_gramps_id(kind, node_a);
+            let gramps_id_b = extract_gramps_id(kind, node_b);
             item_diffs.push(ItemDiff {
                 handle_a: Some(handle_a.clone()),
                 handle_b: Some(handle_b),
-                gramps_id_a: None,
-                gramps_id_b: None,
-                display_name_a: None,
-                display_name_b: None,
+                gramps_id_a,
+                gramps_id_b,
+                display_name_a,
+                display_name_b,
                 item_type: item_type.to_string(),
                 classification,
                 field_changes,
@@ -678,13 +777,17 @@ pub fn match_graphs(graph_a: &Graph, graph_b: &Graph) -> MatchResult {
                 };
 
                 handle_map.insert(handle_b.clone(), handle_a.clone());
+                let display_name_a = Some(display_name_for_node(kind, node_a, graph_a));
+                let display_name_b = Some(display_name_for_node(kind, node_b, graph_b));
+                let gramps_id_a = extract_gramps_id(kind, node_a);
+                let gramps_id_b = extract_gramps_id(kind, node_b);
                 item_diffs.push(ItemDiff {
                     handle_a: Some(handle_a.clone()),
                     handle_b: Some(handle_b.clone()),
-                    gramps_id_a: None,
-                    gramps_id_b: None,
-                    display_name_a: None,
-                    display_name_b: None,
+                    gramps_id_a,
+                    gramps_id_b,
+                    display_name_a,
+                    display_name_b,
                     item_type: item_type.to_string(),
                     classification,
                     field_changes,
@@ -727,12 +830,15 @@ pub fn match_graphs(graph_a: &Graph, graph_b: &Graph) -> MatchResult {
             if consumed_a.contains(handle) {
                 continue;
             }
+            let node_a = graph_a.get_node(handle);
+            let display_name_a = node_a.map(|n| display_name_for_node(kind, n, graph_a));
+            let gramps_id_a = node_a.and_then(|n| extract_gramps_id(kind, n));
             item_diffs.push(ItemDiff {
                 handle_a: Some(handle.clone()),
                 handle_b: None,
-                gramps_id_a: None,
+                gramps_id_a,
                 gramps_id_b: None,
-                display_name_a: None,
+                display_name_a,
                 display_name_b: None,
                 item_type: item_type.to_string(),
                 classification: Classification::Removed,
@@ -745,13 +851,16 @@ pub fn match_graphs(graph_a: &Graph, graph_b: &Graph) -> MatchResult {
             if consumed_b.contains(handle) {
                 continue;
             }
+            let node_b = graph_b.get_node(handle);
+            let display_name_b = node_b.map(|n| display_name_for_node(kind, n, graph_b));
+            let gramps_id_b = node_b.and_then(|n| extract_gramps_id(kind, n));
             item_diffs.push(ItemDiff {
                 handle_a: None,
                 handle_b: Some(handle.clone()),
                 gramps_id_a: None,
-                gramps_id_b: None,
+                gramps_id_b,
                 display_name_a: None,
-                display_name_b: None,
+                display_name_b,
                 item_type: item_type.to_string(),
                 classification: Classification::Added,
                 field_changes: vec![],
@@ -771,7 +880,7 @@ pub fn match_graphs(graph_a: &Graph, graph_b: &Graph) -> MatchResult {
 fn build_context(kind: NodeKind, graph: &Graph, handle: &Handle) -> AmbiguousContext {
     let node = graph.get_node(handle);
     let display_name = node
-        .map(|n| display_name_for_node(kind, n))
+        .map(|n| display_name_for_node(kind, n, graph))
         .unwrap_or_default();
     AmbiguousContext {
         display_name,
