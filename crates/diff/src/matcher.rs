@@ -381,7 +381,11 @@ fn display_name_for_node(kind: NodeKind, node: &Node, graph: &Graph) -> String {
                             .and_then(|s| s.surname.as_deref())
                             .unwrap_or("");
                         let name = format!("{} {}", first, surname).trim().to_string();
-                        if name.is_empty() { None } else { Some(name) }
+                        if name.is_empty() {
+                            None
+                        } else {
+                            Some(name)
+                        }
                     } else {
                         None
                     }

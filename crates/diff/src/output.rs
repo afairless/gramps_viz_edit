@@ -124,10 +124,14 @@ fn write_item(out: &mut String, item: &crate::report::ItemDiff) {
         None => "-",
     };
 
+    // Format enriched header: handle [gramps_id] "display_name"
+    let side_a = format_side(handle_a, &item.gramps_id_a, &item.display_name_a);
+    let side_b = format_side(handle_b, &item.gramps_id_b, &item.display_name_b);
+
     let _ = writeln!(
         out,
         "[{}] {} (A: {}, B: {})",
-        class_label, item.item_type, handle_a, handle_b
+        class_label, item.item_type, side_a, side_b
     );
 
     for change in &item.field_changes {
@@ -139,6 +143,23 @@ fn write_item(out: &mut String, item: &crate::report::ItemDiff) {
             change.field_name, old, new, change.similarity
         );
     }
+}
+
+/// Format one side of an item header with optional Gramps ID and display name.
+///
+/// Produces `"handle [gramps_id] \"display_name\""` when both are present,
+/// falling back to just the handle or `"-"` for missing sides.
+fn format_side(handle: &str, gramps_id: &Option<String>, display_name: &Option<String>) -> String {
+    let mut s = handle.to_string();
+    if let Some(gid) = gramps_id {
+        write!(s, " [{}]", gid).unwrap();
+    }
+    if let Some(name) = display_name {
+        if !name.is_empty() {
+            write!(s, " \"{}\"", name).unwrap();
+        }
+    }
+    s
 }
 
 /// Get a short display label for a classification.
@@ -207,7 +228,7 @@ mod tests {
         }
     }
 
-    /// Helper: build an item diff.
+    /// Helper: build an item diff with optional metadata.
     fn item(
         handle_a: Option<&str>,
         handle_b: Option<&str>,
@@ -215,13 +236,30 @@ mod tests {
         class: Classification,
         changes: Vec<FieldChange>,
     ) -> ItemDiff {
+        item_with_meta(
+            handle_a, handle_b, None, None, None, None, item_type, class, changes,
+        )
+    }
+
+    /// Helper: build an item diff with full metadata (gramps_id, display_name).
+    fn item_with_meta(
+        handle_a: Option<&str>,
+        handle_b: Option<&str>,
+        gramps_id_a: Option<&str>,
+        gramps_id_b: Option<&str>,
+        display_name_a: Option<&str>,
+        display_name_b: Option<&str>,
+        item_type: &str,
+        class: Classification,
+        changes: Vec<FieldChange>,
+    ) -> ItemDiff {
         ItemDiff {
             handle_a: handle_a.map(String::from),
             handle_b: handle_b.map(String::from),
-            gramps_id_a: None,
-            gramps_id_b: None,
-            display_name_a: None,
-            display_name_b: None,
+            gramps_id_a: gramps_id_a.map(String::from),
+            gramps_id_b: gramps_id_b.map(String::from),
+            display_name_a: display_name_a.map(String::from),
+            display_name_b: display_name_b.map(String::from),
             item_type: item_type.to_string(),
             classification: class,
             field_changes: changes,
@@ -349,6 +387,93 @@ mod tests {
         assert!(text.contains("Smith"));
         assert!(text.contains("Jones"));
         assert!(text.contains("similarity 0.50"));
+    }
+
+    /// Text output shows Gramps IDs and display names when present.
+    #[test]
+    fn text_output_shows_gramps_id_and_display_name() {
+        let report = DiffReport {
+            summary: DiffSummary::default(),
+            items: vec![item_with_meta(
+                Some("abc123"),
+                Some("def456"),
+                Some("I0001"),
+                Some("I0001"),
+                Some("John Smith"),
+                Some("John Smith"),
+                "Person",
+                Classification::Same,
+                vec![],
+            )],
+            ambiguous_cases: vec![],
+        };
+        let text = format_text(&report, true);
+        assert!(text.contains("abc123 [I0001]"));
+        assert!(text.contains("def456 [I0001]"));
+        assert!(text.contains("\"John Smith\""));
+    }
+
+    /// Text output handles None gramps_id and display_name gracefully with just handle.
+    #[test]
+    fn text_output_handle_none_metadata_gracefully() {
+        let report = DiffReport {
+            summary: DiffSummary::default(),
+            items: vec![item(
+                Some("abc123"),
+                Some("def456"),
+                "Person",
+                Classification::Same,
+                vec![],
+            )],
+            ambiguous_cases: vec![],
+        };
+        let text = format_text(&report, true);
+        assert!(text.contains("(A: abc123, B: def456)"));
+        assert!(!text.contains("[I0001]"));
+    }
+
+    /// Text output with gramps_id but no display name.
+    #[test]
+    fn text_output_gramps_id_no_display_name() {
+        let report = DiffReport {
+            summary: DiffSummary::default(),
+            items: vec![item_with_meta(
+                Some("abc123"),
+                None,
+                Some("I0002"),
+                None,
+                None,
+                None,
+                "Event",
+                Classification::Removed,
+                vec![],
+            )],
+            ambiguous_cases: vec![],
+        };
+        let text = format_text(&report, true);
+        assert!(text.contains("abc123 [I0002]"));
+    }
+
+    /// Text output with display name but no gramps_id.
+    #[test]
+    fn text_output_display_name_no_gramps_id() {
+        let report = DiffReport {
+            summary: DiffSummary::default(),
+            items: vec![item_with_meta(
+                None,
+                Some("def456"),
+                None,
+                None,
+                None,
+                Some("Birth"),
+                "Event",
+                Classification::Added,
+                vec![],
+            )],
+            ambiguous_cases: vec![],
+        };
+        let text = format_text(&report, true);
+        assert!(text.contains("def456 \"Birth\""));
     }
 
     /// Extrinsic-only items are omitted when include_extrinsic is false.
