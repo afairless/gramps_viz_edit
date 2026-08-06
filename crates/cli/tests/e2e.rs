@@ -819,6 +819,65 @@ fn e2e_diff_json_output() {
 }
 
 #[test]
+fn e2e_diff_csv_output() {
+    let output_a = temp_output_path("diff_csv_a");
+    let output_b = temp_output_path("diff_csv_b");
+
+    // Generate two files with different seeds to produce some diffs
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "generate", "--count", "5", "--seed", "42", "--output", &output_a,
+    ]);
+    assert_eq!(code, Some(0), "Generate A failed: {}", stderr);
+
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "generate", "--count", "5", "--seed", "99", "--output", &output_b,
+    ]);
+    assert_eq!(code, Some(0), "Generate B failed: {}", stderr);
+
+    // Run diff with CSV output
+    let (stdout, stderr, code) = gramps_gen(&["diff", &output_a, &output_b, "--output", "csv"]);
+    assert_eq!(code, Some(0), "Diff CSV failed: {}", stderr);
+
+    // Verify CSV header is present
+    assert!(
+        stdout.contains("\"classification\""),
+        "CSV should have classification header"
+    );
+    assert!(
+        stdout.contains("\"item_type\""),
+        "CSV should have item_type header"
+    );
+    assert!(
+        stdout.contains("\"handle_a\""),
+        "CSV should have handle_a header"
+    );
+    assert!(
+        stdout.contains("\"field_name\""),
+        "CSV should have field_name header"
+    );
+    assert!(
+        stdout.contains("\"old_value\""),
+        "CSV should have old_value header"
+    );
+    assert!(
+        stdout.contains("\"new_value\""),
+        "CSV should have new_value header"
+    );
+
+    // Verify at least one data row exists
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert!(
+        lines.len() > 1,
+        "CSV should have header plus data rows, got {} lines",
+        lines.len()
+    );
+
+    // Clean up
+    let _ = std::fs::remove_file(&output_a);
+    let _ = std::fs::remove_file(&output_b);
+}
+
+#[test]
 fn e2e_diff_missing_file_shows_error() {
     let (_stdout, stderr, code) = gramps_gen(&[
         "diff",

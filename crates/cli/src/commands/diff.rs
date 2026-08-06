@@ -6,7 +6,7 @@
 use std::io::Write;
 
 use clap::Args;
-use diff::output::{format_json, format_text};
+use diff::output::{format_csv, format_json, format_text};
 use diff::DiffConfig;
 
 /// Arguments for the `diff` subcommand.
@@ -18,7 +18,7 @@ pub struct DiffArgs {
     /// Second Gramps XML file (B)
     pub file_b: String,
 
-    /// Output format: text (default) or json
+    /// Output format: text (default), json, or csv
     #[arg(long, default_value = "text")]
     pub output: String,
 
@@ -59,6 +59,7 @@ pub fn run(args: DiffArgs) -> Result<(), crate::CliError> {
     // Format output
     let output = match args.output.as_str() {
         "json" => format_json(&report),
+        "csv" => format_csv(&report, config.include_extrinsic),
         _ => {
             let text = format_text(&report, config.include_extrinsic);
             if args.summary_only {
