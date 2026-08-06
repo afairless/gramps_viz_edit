@@ -3,13 +3,18 @@ name = "diff"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+resolve = ["dep:crossterm"]
+
 [dependencies]
 typed-graph = { path = "../typed-graph" }
 gramps-reader = { path = "../gramps-reader" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 strsim = { workspace = true }
+crossterm = { version = "0.28", optional = true }
 
 [dev-dependencies]
 output = { path = "../output" }
 rand = { workspace = true }
+diff = { path = ".", features = ["resolve"] }

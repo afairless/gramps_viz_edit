@@ -12,9 +12,15 @@ pub mod report;
 pub mod similarity;
 pub mod visualizer_index;
 
+#[cfg(feature = "resolve")]
+pub mod resolve;
+
 pub use cascading::resolve_extrinsic;
 pub use matcher::match_graphs;
 pub use report::*;
+
+#[cfg(feature = "resolve")]
+pub use resolve::{run_interactive_resolution, ResolvedMatches};
 
 use std::error::Error;
 use std::fmt;
