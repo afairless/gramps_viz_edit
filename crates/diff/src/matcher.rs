@@ -21,20 +21,17 @@
 use std::collections::HashMap;
 
 use typed_graph::{
-    graph::node_kind, EventType, Graph, Handle, Node, NodeKind,
-    CitationData, EventData, FamilyData, MediaData, NoteData, PersonData,
-    PlaceData, RepositoryData, SourceData, TagData,
+    graph::node_kind, CitationData, EventData, EventType, FamilyData, Graph, Handle, MediaData,
+    Node, NodeKind, NoteData, PersonData, PlaceData, RepositoryData, SourceData, TagData,
 };
 
 use crate::compare::{
-    compare_citation, compare_event, compare_family, compare_media,
-    compare_note, compare_person, compare_place, compare_repository,
-    compare_source, compare_tag,
+    compare_citation, compare_event, compare_family, compare_media, compare_note, compare_person,
+    compare_place, compare_repository, compare_source, compare_tag,
 };
 use crate::normalize::case_fold;
 use crate::report::{
-    AmbiguousCase, AmbiguousContext, Candidate, Classification, FieldChange,
-    ItemDiff,
+    AmbiguousCase, AmbiguousContext, Candidate, Classification, FieldChange, ItemDiff,
 };
 
 // ---------------------------------------------------------------------------
@@ -139,7 +136,11 @@ fn place_strong_key(data: &PlaceData) -> Option<String> {
 /// Returns `None` when title is empty.
 fn source_strong_key(data: &SourceData) -> Option<String> {
     let key = normalize_key(&data.title);
-    if key.is_empty() { None } else { Some(key) }
+    if key.is_empty() {
+        None
+    } else {
+        Some(key)
+    }
 }
 
 /// Build a normalized strong match key for a citation.
@@ -163,7 +164,11 @@ fn citation_strong_key(data: &CitationData) -> Option<String> {
 /// Returns `None` when name is empty.
 fn repository_strong_key(data: &RepositoryData) -> Option<String> {
     let key = normalize_key(data.name.as_deref().unwrap_or(""));
-    if key.is_empty() { None } else { Some(key) }
+    if key.is_empty() {
+        None
+    } else {
+        Some(key)
+    }
 }
 
 /// Build a normalized strong match key for media.
@@ -187,7 +192,11 @@ fn media_strong_key(data: &MediaData) -> Option<String> {
 /// Returns `None` when text is empty.
 fn note_strong_key(data: &NoteData) -> Option<String> {
     let key = normalize_key(&data.text);
-    if key.is_empty() { None } else { Some(key) }
+    if key.is_empty() {
+        None
+    } else {
+        Some(key)
+    }
 }
 
 /// Build a normalized strong match key for a tag.
@@ -196,7 +205,11 @@ fn note_strong_key(data: &NoteData) -> Option<String> {
 /// Returns `None` when name is empty.
 fn tag_strong_key(data: &TagData) -> Option<String> {
     let key = normalize_key(&data.name);
-    if key.is_empty() { None } else { Some(key) }
+    if key.is_empty() {
+        None
+    } else {
+        Some(key)
+    }
 }
 
 /// Normalize a string for use as a strong match key.
@@ -262,11 +275,7 @@ fn item_type_string(kind: NodeKind) -> &'static str {
 }
 
 /// Compare two nodes by their kind, returning the field-level changes.
-fn compare_nodes(
-    kind: NodeKind,
-    node_a: &Node,
-    node_b: &Node,
-) -> Vec<FieldChange> {
+fn compare_nodes(kind: NodeKind, node_a: &Node, node_b: &Node) -> Vec<FieldChange> {
     match kind {
         NodeKind::Person => {
             if let (Node::Person(a), Node::Person(b)) = (node_a, node_b) {
@@ -353,7 +362,7 @@ fn display_name_for_node(kind: NodeKind, node: &Node) -> String {
                     .first()
                     .and_then(|s| s.surname.as_deref())
                     .unwrap_or("");
-format!("{} {}", first, surname).trim().to_string()
+                format!("{} {}", first, surname).trim().to_string()
             } else {
                 String::new()
             }
@@ -562,20 +571,14 @@ pub fn match_graphs(graph_a: &Graph, graph_b: &Graph) -> MatchResult {
     ];
 
     for &kind in &all_kinds {
-        let handles_a: Vec<Handle> = groups_a
-            .get(&kind).cloned()
-            .unwrap_or_default();
-        let handles_b: Vec<Handle> = groups_b
-            .get(&kind).cloned()
-            .unwrap_or_default();
+        let handles_a: Vec<Handle> = groups_a.get(&kind).cloned().unwrap_or_default();
+        let handles_b: Vec<Handle> = groups_b.get(&kind).cloned().unwrap_or_default();
 
         let item_type = item_type_string(kind);
 
         // Build handle sets for quick lookup
-        let set_a: std::collections::HashSet<Handle> =
-            handles_a.iter().cloned().collect();
-        let set_b: std::collections::HashSet<Handle> =
-            handles_b.iter().cloned().collect();
+        let set_a: std::collections::HashSet<Handle> = handles_a.iter().cloned().collect();
+        let set_b: std::collections::HashSet<Handle> = handles_b.iter().cloned().collect();
 
         // ------------------------------------------------------------------
         // Pass 1a: Exact handle match
@@ -630,16 +633,17 @@ pub fn match_graphs(graph_a: &Graph, graph_b: &Graph) -> MatchResult {
         let mut strong_key_index: HashMap<String, Vec<Handle>> = HashMap::new();
         for handle in &unmatched_a {
             if let Some(key) = strong_key_for_node(kind, graph_a, handle) {
-                strong_key_index.entry(key).or_default().push(handle.clone());
+                strong_key_index
+                    .entry(key)
+                    .or_default()
+                    .push(handle.clone());
             }
         }
 
         // Track which unmatched A items have been consumed
-        let mut consumed_a: std::collections::HashSet<Handle> =
-            std::collections::HashSet::new();
+        let mut consumed_a: std::collections::HashSet<Handle> = std::collections::HashSet::new();
         // Track which unmatched B items have been consumed
-        let mut consumed_b: std::collections::HashSet<Handle> =
-            std::collections::HashSet::new();
+        let mut consumed_b: std::collections::HashSet<Handle> = std::collections::HashSet::new();
 
         for handle_b in &unmatched_b {
             let Some(key) = strong_key_for_node(kind, graph_b, handle_b) else {
@@ -766,8 +770,7 @@ fn build_context(kind: NodeKind, graph: &Graph, handle: &Handle) -> AmbiguousCon
 mod tests {
     use super::*;
     use typed_graph::{
-        DateValue, EventRef, EventType, FamilyData, Name, NoteData, PersonData,
-        TagData, Surname,
+        DateValue, EventRef, EventType, FamilyData, Name, NoteData, PersonData, Surname, TagData,
     };
 
     /// Helper: create a graph with a single person node (no events).
@@ -792,12 +795,7 @@ mod tests {
     }
 
     /// Helper: create a graph with a single person node and a birth event.
-    fn person_graph(
-        handle: &str,
-        first_name: &str,
-        surname: &str,
-        birth_year: i32,
-    ) -> Graph {
+    fn person_graph(handle: &str, first_name: &str, surname: &str, birth_year: i32) -> Graph {
         let mut graph = Graph::new();
         let h: Handle = handle.to_string();
 
@@ -899,7 +897,11 @@ mod tests {
         let tag_data = TagData {
             handle: h.clone(),
             name: name.to_string(),
-            color: if color.is_empty() { None } else { Some(color.to_string()) },
+            color: if color.is_empty() {
+                None
+            } else {
+                Some(color.to_string())
+            },
             gramps_id: None,
             priority: None,
             tag_list: vec![],
@@ -951,10 +953,7 @@ mod tests {
             .iter()
             .find(|d| d.item_type == "Person")
             .expect("should have Person diff");
-        assert_eq!(
-            person_diff.classification,
-            Classification::Modified
-        );
+        assert_eq!(person_diff.classification, Classification::Modified);
         assert!(!person_diff.field_changes.is_empty());
     }
 
@@ -1045,18 +1044,19 @@ mod tests {
             },
             ..PersonData::default()
         };
-        graph_a.add_node("P001".into(), Node::Person(person_a)).unwrap();
-        graph_b.add_node("P002".into(), Node::Person(person_b)).unwrap();
+        graph_a
+            .add_node("P001".into(), Node::Person(person_a))
+            .unwrap();
+        graph_b
+            .add_node("P002".into(), Node::Person(person_b))
+            .unwrap();
 
         let result = match_graphs(&graph_a, &graph_b);
 
         // Person fuzzy matched by strong key (same name) → Modified (different gramps_id)
         assert_eq!(result.item_diffs.len(), 1);
         let person_diff = &result.item_diffs[0];
-        assert_eq!(
-            person_diff.classification,
-            Classification::Modified
-        );
+        assert_eq!(person_diff.classification, Classification::Modified);
         assert!(!person_diff.field_changes.is_empty());
         assert_eq!(
             result.handle_map.get("P002").map(|s| s.as_str()),
@@ -1086,11 +1086,8 @@ mod tests {
         // Two items: Person P001 (Removed) + Person P002 (Added)
         // No fuzzy match because Person with no name has no strong key
         assert_eq!(result.item_diffs.len(), 2);
-        let classifications: Vec<Classification> = result
-            .item_diffs
-            .iter()
-            .map(|d| d.classification)
-            .collect();
+        let classifications: Vec<Classification> =
+            result.item_diffs.iter().map(|d| d.classification).collect();
         assert!(classifications.contains(&Classification::Removed));
         assert!(classifications.contains(&Classification::Added));
     }
@@ -1123,7 +1120,9 @@ mod tests {
             date: Some(DateValue::new(1850)),
             ..EventData::default()
         };
-        graph_a.add_node(birth_handle.into(), Node::Event(birth_data)).unwrap();
+        graph_a
+            .add_node(birth_handle.into(), Node::Event(birth_data))
+            .unwrap();
 
         // Create birth event for graph B
         let birth_handle_b = "birth_shared_b";
@@ -1133,7 +1132,9 @@ mod tests {
             date: Some(DateValue::new(1850)),
             ..EventData::default()
         };
-        graph_b.add_node(birth_handle_b.into(), Node::Event(birth_data_b)).unwrap();
+        graph_b
+            .add_node(birth_handle_b.into(), Node::Event(birth_data_b))
+            .unwrap();
 
         // Two people in A with same name/date
         let p1 = PersonData {
@@ -1259,7 +1260,9 @@ mod tests {
             text: "Hello".into(),
             ..NoteData::default()
         };
-        graph_a.add_node("P001".into(), Node::Person(person_a)).unwrap();
+        graph_a
+            .add_node("P001".into(), Node::Person(person_a))
+            .unwrap();
         graph_a.add_node("N001".into(), Node::Note(note_a)).unwrap();
 
         // Graph B: same person (different handle) + same note (same handle) + new tag
@@ -1287,7 +1290,9 @@ mod tests {
             name: "important".into(),
             ..TagData::default()
         };
-        graph_b.add_node("P002".into(), Node::Person(person_b)).unwrap();
+        graph_b
+            .add_node("P002".into(), Node::Person(person_b))
+            .unwrap();
         graph_b.add_node("N001".into(), Node::Note(note_b)).unwrap();
         graph_b.add_node("T001".into(), Node::Tag(tag_b)).unwrap();
 
@@ -1300,10 +1305,7 @@ mod tests {
             .find(|d| d.item_type == "Note")
             .expect("should have Note diff");
         assert_eq!(note_diff.classification, Classification::Same);
-        assert_eq!(
-            note_diff.handle_a.as_deref(),
-            Some("N001")
-        );
+        assert_eq!(note_diff.handle_a.as_deref(), Some("N001"));
 
         // Person matches by fuzzy strong key → Same
         let person_diff = result
@@ -1334,10 +1336,7 @@ mod tests {
         let result = match_graphs(&graph_a, &graph_b);
 
         assert_eq!(result.item_diffs.len(), 1);
-        assert_eq!(
-            result.item_diffs[0].classification,
-            Classification::Same
-        );
+        assert_eq!(result.item_diffs[0].classification, Classification::Same);
     }
 
     #[test]
@@ -1349,11 +1348,11 @@ mod tests {
         let result = match_graphs(&graph_a, &graph_b);
 
         assert_eq!(result.item_diffs.len(), 1);
+        assert_eq!(result.item_diffs[0].classification, Classification::Same);
         assert_eq!(
-            result.item_diffs[0].classification,
-            Classification::Same
+            result.handle_map.get("F002").map(|s| s.as_str()),
+            Some("F001")
         );
-        assert_eq!(result.handle_map.get("F002").map(|s| s.as_str()), Some("F001"));
     }
 
     // -----------------------------------------------------------------------
@@ -1368,10 +1367,7 @@ mod tests {
         let result = match_graphs(&graph_a, &graph_b);
 
         assert_eq!(result.item_diffs.len(), 1);
-        assert_eq!(
-            result.item_diffs[0].classification,
-            Classification::Same
-        );
+        assert_eq!(result.item_diffs[0].classification, Classification::Same);
     }
 
     #[test]
@@ -1383,11 +1379,11 @@ mod tests {
         let result = match_graphs(&graph_a, &graph_b);
 
         assert_eq!(result.item_diffs.len(), 1);
+        assert_eq!(result.item_diffs[0].classification, Classification::Same);
         assert_eq!(
-            result.item_diffs[0].classification,
-            Classification::Same
+            result.handle_map.get("N002").map(|s| s.as_str()),
+            Some("N001")
         );
-        assert_eq!(result.handle_map.get("N002").map(|s| s.as_str()), Some("N001"));
     }
 
     #[test]
@@ -1398,10 +1394,7 @@ mod tests {
         let result = match_graphs(&graph_a, &graph_b);
 
         assert_eq!(result.item_diffs.len(), 1);
-        assert_eq!(
-            result.item_diffs[0].classification,
-            Classification::Same
-        );
+        assert_eq!(result.item_diffs[0].classification, Classification::Same);
     }
 
     #[test]
@@ -1413,11 +1406,11 @@ mod tests {
         let result = match_graphs(&graph_a, &graph_b);
 
         assert_eq!(result.item_diffs.len(), 1);
+        assert_eq!(result.item_diffs[0].classification, Classification::Same);
         assert_eq!(
-            result.item_diffs[0].classification,
-            Classification::Same
+            result.handle_map.get("T002").map(|s| s.as_str()),
+            Some("T001")
         );
-        assert_eq!(result.handle_map.get("T002").map(|s| s.as_str()), Some("T001"));
     }
 
     // -----------------------------------------------------------------------
@@ -1507,7 +1500,9 @@ mod tests {
             date: Some(DateValue::new(1850)),
             ..EventData::default()
         };
-        graph_a.add_node("birth_a".into(), Node::Event(birth_a)).unwrap();
+        graph_a
+            .add_node("birth_a".into(), Node::Event(birth_a))
+            .unwrap();
 
         let match_a = PersonData {
             handle: "match_a".into(),
@@ -1526,7 +1521,9 @@ mod tests {
             }],
             ..PersonData::default()
         };
-        graph_a.add_node("match_a".into(), Node::Person(match_a)).unwrap();
+        graph_a
+            .add_node("match_a".into(), Node::Person(match_a))
+            .unwrap();
 
         // Create birth event in B
         let birth_b = EventData {
@@ -1535,7 +1532,9 @@ mod tests {
             date: Some(DateValue::new(1850)),
             ..EventData::default()
         };
-        graph_b.add_node("birth_b".into(), Node::Event(birth_b)).unwrap();
+        graph_b
+            .add_node("birth_b".into(), Node::Event(birth_b))
+            .unwrap();
 
         let match_b = PersonData {
             handle: "match_b".into(),
@@ -1554,7 +1553,9 @@ mod tests {
             }],
             ..PersonData::default()
         };
-        graph_b.add_node("match_b".into(), Node::Person(match_b)).unwrap();
+        graph_b
+            .add_node("match_b".into(), Node::Person(match_b))
+            .unwrap();
 
         let result = match_graphs(&graph_a, &graph_b);
 

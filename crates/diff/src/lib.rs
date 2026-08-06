@@ -7,11 +7,14 @@
 //! - `normalize`: Text normalization utilities
 //! - `report`: Diff report data types
 
+pub mod cascading;
 pub mod compare;
 pub mod matcher;
 pub mod normalize;
 pub mod report;
 pub mod similarity;
+
+pub use cascading::resolve_extrinsic;
 
 use std::error::Error;
 use std::fmt;

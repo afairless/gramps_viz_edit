@@ -308,40 +308,36 @@ mod tests {
                     confidence: 1.0,
                 },
             ],
-            ambiguous_cases: vec![
-                AmbiguousCase {
-                    handle_a: "H005".into(),
-                    item_type_a: "Person".into(),
-                    context_a: AmbiguousContext {
-                        display_name: "John Smith".into(),
-                        related_items: vec![
-                            RelatedItem {
-                                handle: "F001".into(),
-                                relationship: "spouse".into(),
-                                display_name: "Jane Smith".into(),
-                            },
-                        ],
-                    },
-                    candidates: vec![
-                        Candidate {
-                            handle_b: "H010".into(),
-                            score: 0.85,
-                            context_b: AmbiguousContext {
-                                display_name: "Johnny Smith".into(),
-                                related_items: vec![],
-                            },
-                        },
-                        Candidate {
-                            handle_b: "H011".into(),
-                            score: 0.72,
-                            context_b: AmbiguousContext {
-                                display_name: "Jon Smith".into(),
-                                related_items: vec![],
-                            },
-                        },
-                    ],
+            ambiguous_cases: vec![AmbiguousCase {
+                handle_a: "H005".into(),
+                item_type_a: "Person".into(),
+                context_a: AmbiguousContext {
+                    display_name: "John Smith".into(),
+                    related_items: vec![RelatedItem {
+                        handle: "F001".into(),
+                        relationship: "spouse".into(),
+                        display_name: "Jane Smith".into(),
+                    }],
                 },
-            ],
+                candidates: vec![
+                    Candidate {
+                        handle_b: "H010".into(),
+                        score: 0.85,
+                        context_b: AmbiguousContext {
+                            display_name: "Johnny Smith".into(),
+                            related_items: vec![],
+                        },
+                    },
+                    Candidate {
+                        handle_b: "H011".into(),
+                        score: 0.72,
+                        context_b: AmbiguousContext {
+                            display_name: "Jon Smith".into(),
+                            related_items: vec![],
+                        },
+                    },
+                ],
+            }],
         };
 
         // Serialize to JSON

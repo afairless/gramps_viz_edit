@@ -316,7 +316,10 @@ mod tests {
 
     #[test]
     fn collapse_whitespace_mixed_whitespace() {
-        assert_eq!(collapse_whitespace("hello\t  world\n  test"), "hello world test");
+        assert_eq!(
+            collapse_whitespace("hello\t  world\n  test"),
+            "hello world test"
+        );
     }
 
     #[test]
@@ -340,10 +343,7 @@ mod tests {
         for s in &inputs {
             let once = collapse_whitespace(s);
             let twice = collapse_whitespace(&once);
-            assert_eq!(
-                once, twice,
-                "collapse_whitespace not idempotent for {s:?}"
-            );
+            assert_eq!(once, twice, "collapse_whitespace not idempotent for {s:?}");
         }
     }
 
@@ -356,10 +356,7 @@ mod tests {
 
     #[test]
     fn strip_html_tags_simple() {
-        assert_eq!(
-            strip_html_tags("<span>hello</span>"),
-            "hello"
-        );
+        assert_eq!(strip_html_tags("<span>hello</span>"), "hello");
     }
 
     #[test]
@@ -402,7 +399,10 @@ mod tests {
 
     #[test]
     fn expand_street_abbreviations_blvd() {
-        assert_eq!(expand_street_abbreviations("Sunset Blvd"), "Sunset Boulevard");
+        assert_eq!(
+            expand_street_abbreviations("Sunset Blvd"),
+            "Sunset Boulevard"
+        );
     }
 
     #[test]
@@ -500,10 +500,7 @@ mod tests {
         for s in &inputs {
             let once = strip_page_prefix(s);
             let twice = strip_page_prefix(&once);
-            assert_eq!(
-                once, twice,
-                "strip_page_prefix not idempotent for {s:?}"
-            );
+            assert_eq!(once, twice, "strip_page_prefix not idempotent for {s:?}");
         }
     }
 
@@ -543,22 +540,12 @@ mod tests {
     #[test]
     fn property_normalize_tag_color_idempotent() {
         let inputs = [
-            "",
-            "red",
-            "green",
-            "blue",
-            "#123456",
-            "white",
-            "black",
-            "yellow",
+            "", "red", "green", "blue", "#123456", "white", "black", "yellow",
         ];
         for s in &inputs {
             let once = normalize_tag_color(s);
             let twice = normalize_tag_color(&once);
-            assert_eq!(
-                once, twice,
-                "normalize_tag_color not idempotent for {s:?}"
-            );
+            assert_eq!(once, twice, "normalize_tag_color not idempotent for {s:?}");
         }
     }
 

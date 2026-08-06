@@ -11,9 +11,9 @@
 use std::collections::BTreeSet;
 
 use typed_graph::{
-    Address, Attribute, ChildRef, CitationData, DateValue, EventData, EventRef, FamilyData,
-    Handle, LdsOrd, Location, MediaData, MediaRef, Name, NoteData, PersonData, PersonRef,
-    PlaceData, PlaceRef, RepoRef, RepositoryData, SourceData, Surname, TagData, Url,
+    Address, Attribute, ChildRef, CitationData, DateValue, EventData, EventRef, FamilyData, Handle,
+    LdsOrd, Location, MediaData, MediaRef, Name, NoteData, PersonData, PersonRef, PlaceData,
+    PlaceRef, RepoRef, RepositoryData, SourceData, Surname, TagData, Url,
 };
 
 use crate::report::{FieldChange, FieldKind};
@@ -405,7 +405,11 @@ fn compare_name(field_prefix: &str, a: &Name, b: &Name) -> Vec<FieldChange> {
 
 /// Compare two [`Location`] structs field by field.
 /// Handles `Option<Location>` for the address location field.
-fn compare_location(field_prefix: &str, a: Option<&Location>, b: Option<&Location>) -> Vec<FieldChange> {
+fn compare_location(
+    field_prefix: &str,
+    a: Option<&Location>,
+    b: Option<&Location>,
+) -> Vec<FieldChange> {
     let mut changes = Vec::new();
     match (a, b) {
         (None, None) => {}
@@ -597,7 +601,11 @@ pub fn compare_person(a: &PersonData, b: &PersonData) -> Vec<FieldChange> {
     changes.extend(compare_enum_discriminant("gender", a.gender, b.gender));
 
     // primary_name
-    changes.extend(compare_name("primary_name", &a.primary_name, &b.primary_name));
+    changes.extend(compare_name(
+        "primary_name",
+        &a.primary_name,
+        &b.primary_name,
+    ));
 
     // alternate_names: positional comparison
     let max_alts = a.alternate_names.len().max(b.alternate_names.len());
@@ -630,7 +638,11 @@ pub fn compare_person(a: &PersonData, b: &PersonData) -> Vec<FieldChange> {
     }
 
     // Handle lists
-    changes.extend(compare_handle_array("family_list", &a.family_list, &b.family_list));
+    changes.extend(compare_handle_array(
+        "family_list",
+        &a.family_list,
+        &b.family_list,
+    ));
     changes.extend(compare_handle_array(
         "parent_family_list",
         &a.parent_family_list,
@@ -641,7 +653,11 @@ pub fn compare_person(a: &PersonData, b: &PersonData) -> Vec<FieldChange> {
         &a.citation_list,
         &b.citation_list,
     ));
-    changes.extend(compare_handle_array("note_list", &a.note_list, &b.note_list));
+    changes.extend(compare_handle_array(
+        "note_list",
+        &a.note_list,
+        &b.note_list,
+    ));
     changes.extend(compare_handle_array("tag_list", &a.tag_list, &b.tag_list));
 
     // Ref arrays with metadata
@@ -832,7 +848,11 @@ pub fn compare_family(a: &FamilyData, b: &FamilyData) -> Vec<FieldChange> {
         &a.citation_list,
         &b.citation_list,
     ));
-    changes.extend(compare_handle_array("note_list", &a.note_list, &b.note_list));
+    changes.extend(compare_handle_array(
+        "note_list",
+        &a.note_list,
+        &b.note_list,
+    ));
     changes.extend(compare_handle_array("tag_list", &a.tag_list, &b.tag_list));
 
     // Attribute list
@@ -879,7 +899,11 @@ pub fn compare_event(a: &EventData, b: &EventData) -> Vec<FieldChange> {
         a.gramps_id.as_deref(),
         b.gramps_id.as_deref(),
     ));
-    changes.extend(compare_enum_discriminant("event_type", a.event_type, b.event_type));
+    changes.extend(compare_enum_discriminant(
+        "event_type",
+        a.event_type,
+        b.event_type,
+    ));
     changes.extend(compare_date_value("date", a.date.as_ref(), b.date.as_ref()));
     changes.extend(compare_field_optional_text(
         "description",
@@ -898,7 +922,11 @@ pub fn compare_event(a: &EventData, b: &EventData) -> Vec<FieldChange> {
         &a.citation_list,
         &b.citation_list,
     ));
-    changes.extend(compare_handle_array("note_list", &a.note_list, &b.note_list));
+    changes.extend(compare_handle_array(
+        "note_list",
+        &a.note_list,
+        &b.note_list,
+    ));
     changes.extend(compare_handle_array("tag_list", &a.tag_list, &b.tag_list));
 
     // Ref arrays
@@ -963,7 +991,11 @@ pub fn compare_place(a: &PlaceData, b: &PlaceData) -> Vec<FieldChange> {
         &a.citation_list,
         &b.citation_list,
     ));
-    changes.extend(compare_handle_array("note_list", &a.note_list, &b.note_list));
+    changes.extend(compare_handle_array(
+        "note_list",
+        &a.note_list,
+        &b.note_list,
+    ));
     changes.extend(compare_handle_array("tag_list", &a.tag_list, &b.tag_list));
     changes.extend(compare_ref_array(
         "media_list",
@@ -1047,7 +1079,11 @@ pub fn compare_source(a: &SourceData, b: &SourceData) -> Vec<FieldChange> {
             meta
         },
     ));
-    changes.extend(compare_handle_array("note_list", &a.note_list, &b.note_list));
+    changes.extend(compare_handle_array(
+        "note_list",
+        &a.note_list,
+        &b.note_list,
+    ));
     changes.extend(compare_handle_array("tag_list", &a.tag_list, &b.tag_list));
     changes.extend(compare_ref_array(
         "media_list",
@@ -1126,7 +1162,11 @@ pub fn compare_citation(a: &CitationData, b: &CitationData) -> Vec<FieldChange> 
         &b.media_list,
         |_, _| vec![],
     ));
-    changes.extend(compare_handle_array("note_list", &a.note_list, &b.note_list));
+    changes.extend(compare_handle_array(
+        "note_list",
+        &a.note_list,
+        &b.note_list,
+    ));
     changes.extend(compare_handle_array("tag_list", &a.tag_list, &b.tag_list));
 
     changes
@@ -1161,7 +1201,11 @@ pub fn compare_repository(a: &RepositoryData, b: &RepositoryData) -> Vec<FieldCh
         &b.media_list,
         |_, _| vec![],
     ));
-    changes.extend(compare_handle_array("note_list", &a.note_list, &b.note_list));
+    changes.extend(compare_handle_array(
+        "note_list",
+        &a.note_list,
+        &b.note_list,
+    ));
     changes.extend(compare_handle_array("tag_list", &a.tag_list, &b.tag_list));
 
     let max_addrs = a.address_list.len().max(b.address_list.len());
@@ -1259,7 +1303,11 @@ pub fn compare_media(a: &MediaData, b: &MediaData) -> Vec<FieldChange> {
         &a.citation_list,
         &b.citation_list,
     ));
-    changes.extend(compare_handle_array("note_list", &a.note_list, &b.note_list));
+    changes.extend(compare_handle_array(
+        "note_list",
+        &a.note_list,
+        &b.note_list,
+    ));
     changes.extend(compare_handle_array("tag_list", &a.tag_list, &b.tag_list));
 
     let max_attrs = a.attribute_list.len().max(b.attribute_list.len());
@@ -1703,7 +1751,10 @@ mod tests {
         b.primary_name.surname_list[0].surname = Some("Jones".into());
         let changes = compare_person(&a, &b);
         assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].field_name, "primary_name.surname_list[0].surname");
+        assert_eq!(
+            changes[0].field_name,
+            "primary_name.surname_list[0].surname"
+        );
         assert_eq!(changes[0].field_kind, FieldKind::Text);
         assert_eq!(changes[0].old_value.as_deref(), Some("Smith"));
         assert_eq!(changes[0].new_value.as_deref(), Some("Jones"));
