@@ -1,11 +1,19 @@
-# Implementation Plan: Gramps Diff Analyzer — Step 8
+# Implementation Plan: Gramps Diff Analyzer (Steps 9–10)
 
 Source: `docs/research/gramps-diff-plan.md`
 
-## Status
-
-Steps 1–7 are complete. This plan covers **Step 8 only**.
+> **Prerequisite status:** Steps 1–8 are complete.
+>
+> - Step 1 (full graph parser) — done via `gramps-reader`
+> - Step 2 (diff crate skeleton) — `crates/diff/Cargo.toml`, `crates/diff/src/lib.rs`
+> - Step 3 (similarity) — `similarity.rs`
+> - Step 4 (normalization) — `normalize.rs`
+> - Step 5 (report types) — `report.rs`
+> - Step 6 (compare) — `compare.rs`
+> - Step 7 (matcher) — `matcher.rs`
+> - Step 8 (cascading) — `cascading.rs`
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 8 | `feat: add Pass 2 extrinsic/cascading diff resolution` | Cascading module | `crates/diff/src/cascading.rs` — `resolve_extrinsic(item_diffs: Vec<ItemDiff>, handle_map: &HashMap<Handle, Handle>) -> Vec<ItemDiff>`. For each matched pair (both `handle_a` and `handle_b` present), re-evaluate every `FieldChange` whose `field_kind` is `HandleRef` or `HandleRefList` against the handle map. A handle-ref change is **extrinsic** when the B-side handle, looked up through the handle map, equals the A-side handle — meaning the referenced item is the same, only the handle value changed. Non-handle-ref changes are always intrinsic. If a matched pair has **only** extrinsic handle-ref changes (no intrinsic changes), reclassify it from `Modified` to `ExtrinsicOnly`. Items with a mix of intrinsic and extrinsic changes remain `Modified`. Items classified as `Same`, `Added`, `Removed`, or `NeedsReview` pass through unchanged. Add `mod cascading;` and `pub use cascading::resolve_extrinsic;` to `crates/diff/src/lib.rs`. | Unit (extrinsic-only case: citation with same source_handle content but different handle value → handle_map resolves it → `ExtrinsicOnly`; intrinsic + extrinsic mix: same citation but page text also changed → remains `Modified`; no remap needed: identical handles and fields → unchanged `Same`; unmatched items pass through unchanged; edge cases: B-side handle not in handle_map → treated as intrinsic change, empty handle_map → all handle-ref changes are intrinsic, empty item_diffs → empty output) |
+| 9 | `feat: add text and JSON output formatters` | Output formatters | `crates/diff/src/output.rs` — `format_text(report, include_extrinsic) -> String` (summary table + per-item details with optional extrinsic filtering) and `format_json(report) -> String` (compact JSON). Update `crates/diff/src/lib.rs` to add `pub mod output;`. | Unit (text output contains expected headings and summary counts; JSON round-trips via serde; empty report renders correctly; extrinsic-only items are omitted from text when `include_extrinsic: false`; all classification labels appear for text output) |
+| 10 | `feat: add visualizer index output format` | Visualizer index | `crates/diff/src/visualizer_index.rs` — `format_visualizer(report) -> String` producing compact JSON with `handle_map` (all matched A↔B handle pairs) + per-handle entry `{class, intrinsic_fields?, text_scores?}`. Update `crates/diff/src/lib.rs` to add `pub mod visualizer_index;`. | Unit (output parses as JSON; all 6 `Classification` variants are represented; handle_map keys/values match report items; intrinsic_fields appear for MODIFIED items; text_scores appear for MODIFIED items with text field changes; empty report produces valid JSON) |
