@@ -1,10 +1,38 @@
-# Implementation Plan: Gramps Diff Analyzer (Steps 13–14)
+# Implementation Plan: Documentation Update
 
-Source: `docs/research/gramps-diff-plan.md`
+Source: `docs/research/doc-update-plan.md`
 
-**Steps 1–12 are complete.** This plan covers only the remaining two steps.
+Updates `AGENTS.md`, `README.md`, and `docs/ARCHITECTURE.md` to remove stale
+references and add new content for changes since the August 2025 audit.
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 13 | `feat: add interactive resolution for ambiguous matches` | Interactive resolution | `crates/diff/src/resolve.rs` (new) — `run_interactive_resolution(cases, resolutions_file) -> ResolvedMatches` with terminal TUI loop presenting side-by-side candidate details and edge context. Saves/loads `.gramps-diff-resolve.json`. `crates/diff/Cargo.toml` — add `resolve` feature, add `crossterm` as optional dep behind the feature. `crates/diff/src/lib.rs` — add `#[cfg(feature = "resolve")] pub mod resolve;` and conditionally re-export `ResolvedMatches`/`run_interactive_resolution`. | Unit (resolution file save/load JSON round-trip), Smoke (crate compiles with `--features resolve`) |
-| 14 | `test: add integration tests for diff pipeline` | Diff integration tests | `crates/diff/tests/integration.rs` (extend) — three new test cases: (1) generate two graphs differing by one added person → exactly one ADDED item; (2) generate two graphs with modified note text on an otherwise identical person → one MODIFIED item with `FieldKind::Text` similarity; (3) generate two graphs where only handle references change (extrinsic-only) → one EXTRINSIC_ONLY item. | Integration (three precise end-to-end test cases covering ADDED, MODIFIED, EXTRINSIC classifications) |
+| 1 | `docs: remove stale extract_schema.rs references from AGENTS.md, README.md, and ARCHITECTURE.md` | Remove stale `extract_schema.rs` entries | `AGENTS.md`, `README.md`, `docs/ARCHITECTURE.md` | — |
+| 2 | `docs: add diff crate to AGENTS.md, README.md, and ARCHITECTURE.md` | Add `diff` crate documentation across all three docs | `AGENTS.md`, `README.md`, `docs/ARCHITECTURE.md` | — |
+| 3 | `docs: add io.rs to AGENTS.md and ARCHITECTURE.md, document compute_generation_table` | Add `io.rs` entries and `compute_generation_table` prose | `AGENTS.md`, `docs/ARCHITECTURE.md` | — |
+| 4 | `docs: add stats-panel.ts to AGENTS.md and ARCHITECTURE.md frontend listings` | Add `stats-panel.ts` entry | `AGENTS.md`, `docs/ARCHITECTURE.md` | — |
+
+### Step Details
+
+**Step 1** — Remove stale `extract_schema.rs` references:
+
+- `AGENTS.md`: remove the `extract_schema.rs # Stub` line from workspace tree
+- `README.md`: remove the `extract-schema` row from CLI commands table
+- `ARCHITECTURE.md`: remove `gramps-gen extract-schema ── Stub` from CLI diagram box
+- `ARCHITECTURE.md`: remove the `extract-schema` row from CLI Commands table
+
+**Step 2** — Add `diff` crate:
+
+- `AGENTS.md`: add full `crates/diff/` source tree to workspace structure; add `diff.rs` under `cli/src/commands/`
+- `README.md`: add row to Crate Structure table; add row to CLI commands table
+- `ARCHITECTURE.md`: update "five crates" → "six crates"; add crate overview row; add diagram box; add `## Diff Analyzer` section; add CLI commands row; add `strsim` dependency row
+
+**Step 3** — Add `io.rs` and `compute_generation_table` prose:
+
+- `AGENTS.md`: add `io.rs` entry under gramps-reader subtree
+- `ARCHITECTURE.md`: add `io.rs` to architecture diagram; add sentence about `compute_generation_table` in gramps-reader prose
+
+**Step 4** — Add `stats-panel.ts`:
+
+- `AGENTS.md`: add `stats-panel.ts` entry under visualize/frontend tree
+- `ARCHITECTURE.md`: add row to frontend features table
