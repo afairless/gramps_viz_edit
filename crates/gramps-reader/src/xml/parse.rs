@@ -2492,14 +2492,15 @@ impl Parser {
     pub fn build_edges(&mut self) -> Result<(), Error> {
         let pending = std::mem::take(&mut self.pending);
         for edge in pending {
+            let target_kind = target_kind_for_edge(&edge);
             match edge {
                 PendingEdge::Simple {
                     source,
                     target,
                     kind,
                 } => {
+                    ensure_target_exists(&mut self.graph, &target, target_kind)?;
                     let e = simple_edge(kind, source, target);
-                    // Check both nodes exist before adding the edge
                     self.graph.add_edge(e).map_err(graph_error)?;
                 }
                 PendingEdge::PersonEventRef {
@@ -2507,6 +2508,7 @@ impl Parser {
                     target,
                     metadata,
                 } => {
+                    ensure_target_exists(&mut self.graph, &target, target_kind)?;
                     self.graph
                         .add_edge(Edge::PersonEventRef {
                             source,
@@ -2520,6 +2522,7 @@ impl Parser {
                     target,
                     metadata,
                 } => {
+                    ensure_target_exists(&mut self.graph, &target, target_kind)?;
                     self.graph
                         .add_edge(Edge::FamilyChildRef {
                             source,
@@ -2533,6 +2536,7 @@ impl Parser {
                     target,
                     metadata,
                 } => {
+                    ensure_target_exists(&mut self.graph, &target, target_kind)?;
                     self.graph
                         .add_edge(Edge::FamilyEventRef {
                             source,
@@ -2546,6 +2550,7 @@ impl Parser {
                     target,
                     metadata,
                 } => {
+                    ensure_target_exists(&mut self.graph, &target, target_kind)?;
                     self.graph
                         .add_edge(Edge::PersonPersonRef {
                             source,
@@ -2559,6 +2564,7 @@ impl Parser {
                     target,
                     metadata,
                 } => {
+                    ensure_target_exists(&mut self.graph, &target, target_kind)?;
                     self.graph
                         .add_edge(Edge::SourceRepoRef {
                             source,
@@ -2615,6 +2621,135 @@ pub fn parse_graph(content: &str) -> Result<Graph, Error> {
 // ---------------------------------------------------------------------------
 
 /// Convert a [`GraphError`] into a reader [`Error`].
+/// Map a `PendingEdge` variant to the `NodeKind` of its target node.
+///
+/// The compiler enforces exhaustiveness: every variant of both
+/// `SimpleEdgeKind` and `PendingEdge` must be covered.
+fn target_kind_for_edge(edge: &PendingEdge) -> NodeKind {
+    match edge {
+        PendingEdge::Simple { kind, .. } => target_kind_for_simple(kind),
+        PendingEdge::PersonEventRef { .. } => NodeKind::Event,
+        PendingEdge::FamilyChildRef { .. } => NodeKind::Person,
+        PendingEdge::FamilyEventRef { .. } => NodeKind::Event,
+        PendingEdge::PersonPersonRef { .. } => NodeKind::Person,
+        PendingEdge::SourceRepoRef { .. } => NodeKind::Repository,
+    }
+}
+
+/// Map a `SimpleEdgeKind` to the `NodeKind` of its target node.
+fn target_kind_for_simple(kind: &SimpleEdgeKind) -> NodeKind {
+    match kind {
+        SimpleEdgeKind::PersonFamily | SimpleEdgeKind::PersonParentFamily => NodeKind::Family,
+        SimpleEdgeKind::FamilyFather | SimpleEdgeKind::FamilyMother => NodeKind::Person,
+        SimpleEdgeKind::FamilyCitation
+        | SimpleEdgeKind::EventCitation
+        | SimpleEdgeKind::PersonCitation
+        | SimpleEdgeKind::PlaceCitation
+        | SimpleEdgeKind::MediaCitation
+        | SimpleEdgeKind::NoteCitation
+        | SimpleEdgeKind::CitationRef => NodeKind::Citation,
+        SimpleEdgeKind::FamilyNote
+        | SimpleEdgeKind::EventNote
+        | SimpleEdgeKind::PersonNote
+        | SimpleEdgeKind::PlaceNote
+        | SimpleEdgeKind::SourceNote
+        | SimpleEdgeKind::CitationNote
+        | SimpleEdgeKind::MediaNote
+        | SimpleEdgeKind::NoteRef
+        | SimpleEdgeKind::RepositoryNote => NodeKind::Note,
+        SimpleEdgeKind::FamilyTag
+        | SimpleEdgeKind::EventTag
+        | SimpleEdgeKind::PersonTag
+        | SimpleEdgeKind::PlaceTag
+        | SimpleEdgeKind::SourceTag
+        | SimpleEdgeKind::CitationTag
+        | SimpleEdgeKind::MediaTag
+        | SimpleEdgeKind::NoteTag
+        | SimpleEdgeKind::RepositoryTag
+        | SimpleEdgeKind::TagTag
+        | SimpleEdgeKind::TagRef => NodeKind::Tag,
+        SimpleEdgeKind::EventPlace | SimpleEdgeKind::PlacePlaceRef => NodeKind::Place,
+        SimpleEdgeKind::CitationSource => NodeKind::Source,
+        SimpleEdgeKind::PersonMediaRef
+        | SimpleEdgeKind::EventMediaRef
+        | SimpleEdgeKind::FamilyMediaRef
+        | SimpleEdgeKind::CitationMediaRef
+        | SimpleEdgeKind::SourceMediaRef
+        | SimpleEdgeKind::PlaceMediaRef
+        | SimpleEdgeKind::RepositoryMediaRef
+        | SimpleEdgeKind::MediaRef => NodeKind::Media,
+    }
+}
+
+/// Create a minimal default-constructed node of the given kind,
+/// with the handle field set to the supplied handle.
+fn placeholder_node(kind: NodeKind, handle: &str) -> Node {
+    let h = handle.to_string();
+    match kind {
+        NodeKind::Person => Node::Person(PersonData {
+            handle: h,
+            ..PersonData::default()
+        }),
+        NodeKind::Family => Node::Family(FamilyData {
+            handle: h,
+            ..FamilyData::default()
+        }),
+        NodeKind::Event => Node::Event(EventData {
+            handle: h,
+            ..EventData::default()
+        }),
+        NodeKind::Place => Node::Place(PlaceData {
+            handle: h,
+            ..PlaceData::default()
+        }),
+        NodeKind::Source => Node::Source(SourceData {
+            handle: h,
+            ..SourceData::default()
+        }),
+        NodeKind::Citation => Node::Citation(CitationData {
+            handle: h,
+            ..CitationData::default()
+        }),
+        NodeKind::Repository => Node::Repository(RepositoryData {
+            handle: h,
+            ..RepositoryData::default()
+        }),
+        NodeKind::Media => Node::Media(MediaData {
+            handle: h,
+            ..MediaData::default()
+        }),
+        NodeKind::Note => Node::Note(NoteData {
+            handle: h,
+            ..NoteData::default()
+        }),
+        NodeKind::Tag => Node::Tag(TagData {
+            handle: h,
+            ..TagData::default()
+        }),
+    }
+}
+
+/// Ensure the target node exists in the graph. If it does not, create a
+/// placeholder node and record it as inferred. If a placeholder already
+/// exists but the new edge expects a different kind, log a warning.
+fn ensure_target_exists(graph: &mut Graph, target: &Handle, kind: NodeKind) -> Result<(), Error> {
+    if graph.get_node(target).is_none() {
+        let node = placeholder_node(kind, target);
+        graph.add_node(target.clone(), node).map_err(graph_error)?;
+        graph.record_inferred_handle(target.clone());
+    } else if graph.is_inferred_handle(target) {
+        let expected_kind = kind;
+        let actual_kind = graph::node_kind(graph.get_node(target).unwrap());
+        if expected_kind != actual_kind {
+            log::warn!(
+                "kind conflict for inferred handle '{}': edge expects {:?}, but {:?} placeholder already exists",
+                target, expected_kind, actual_kind
+            );
+        }
+    }
+    Ok(())
+}
+
 fn graph_error(err: GraphError) -> Error {
     Error::XmlParseError {
         message: format!("graph error: {}", err),
@@ -3467,9 +3602,21 @@ mod tests {
     </person>
   </people>"#,
         );
-        // Event e0001 doesn't exist — build_edges will error
-        let result = parse_graph(&xml);
-        assert!(result.is_err(), "expected error for dangling eventref");
+        // Event e0001 doesn't exist — placeholder Event node is created
+        let graph = parse_graph(&xml).expect("should succeed with placeholder");
+        assert!(
+            graph.is_inferred_handle(&"e0001".to_string()),
+            "e0001 should be inferred"
+        );
+        assert_eq!(graph.inferred_handle_count(), 1);
+        // The person node still exists
+        assert!(graph.contains_node(&"p0001".to_string()));
+        // The edge should exist linking p0001 to the placeholder event
+        let edges = graph.edges_from(&"p0001".to_string());
+        assert!(
+            !edges.is_empty(),
+            "should have an edge to the placeholder event"
+        );
     }
 
     // -----------------------------------------------------------------------
