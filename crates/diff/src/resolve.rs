@@ -83,8 +83,12 @@ pub fn run_interactive_resolution(
         }
 
         // Clear screen and show header
-        execute!(stdout, terminal::Clear(terminal::ClearType::All), cursor::MoveTo(0, 0))
-            .expect("clear screen");
+        execute!(
+            stdout,
+            terminal::Clear(terminal::ClearType::All),
+            cursor::MoveTo(0, 0)
+        )
+        .expect("clear screen");
 
         writeln!(
             stdout,
@@ -101,12 +105,7 @@ pub fn run_interactive_resolution(
         // Show item A details
         writeln!(stdout, "\nItem A (source):").expect("write section header");
         writeln!(stdout, "  Handle: {}", case.handle_a).expect("write handle");
-        writeln!(
-            stdout,
-            "  Display: {}",
-            case.context_a.display_name
-        )
-        .expect("write display name");
+        writeln!(stdout, "  Display: {}", case.context_a.display_name).expect("write display name");
         if !case.context_a.related_items.is_empty() {
             writeln!(stdout, "  Related items:").expect("write related header");
             for rel in &case.context_a.related_items {
@@ -132,12 +131,8 @@ pub fn run_interactive_resolution(
                     score = candidate.score
                 )
                 .expect("write candidate number");
-                writeln!(
-                    stdout,
-                    "       Handle: {}",
-                    candidate.handle_b
-                )
-                .expect("write candidate handle");
+                writeln!(stdout, "       Handle: {}", candidate.handle_b)
+                    .expect("write candidate handle");
                 writeln!(
                     stdout,
                     "       Display: {}",
@@ -159,14 +154,13 @@ pub fn run_interactive_resolution(
         }
 
         // Prompt for user input
-        writeln!(
+        writeln!(stdout, "\n{}", "─".repeat(80)).expect("write separator");
+        write!(
             stdout,
-            "\n{}",
-            "─".repeat(80)
+            "Select candidate [1-{n}], s=skip, q=quit: ",
+            n = case.candidates.len()
         )
-        .expect("write separator");
-        write!(stdout, "Select candidate [1-{n}], s=skip, q=quit: ", n = case.candidates.len())
-            .expect("write prompt");
+        .expect("write prompt");
         stdout.flush().expect("flush stdout");
 
         // Read user input
@@ -266,8 +260,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&matches).expect("serialize");
-        let deserialized: ResolvedMatches =
-            serde_json::from_str(&json).expect("deserialize");
+        let deserialized: ResolvedMatches = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(matches, deserialized);
     }
 
@@ -295,8 +288,7 @@ mod tests {
         };
 
         let json = serde_json::to_string_pretty(&matches).expect("serialize");
-        let deserialized: ResolvedMatches =
-            serde_json::from_str(&json).expect("deserialize");
+        let deserialized: ResolvedMatches = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(matches, deserialized);
     }
 

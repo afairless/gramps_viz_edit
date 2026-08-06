@@ -21,8 +21,9 @@
 use std::collections::HashMap;
 
 use typed_graph::{
-    graph::node_kind, CitationData, EventData, EventType, FamilyData, Graph, Handle, MediaData,
-    Node, NodeKind, NoteData, PersonData, PlaceData, RepositoryData, SourceData, TagData,
+    event_type_eq, get_source_handle, graph::node_kind, CitationData, EventData, FamilyData, Graph,
+    Handle, MediaData, Node, NodeKind, NoteData, PersonData, PlaceData, RepositoryData, SourceData,
+    TagData,
 };
 
 use crate::compare::{
@@ -148,7 +149,7 @@ fn source_strong_key(data: &SourceData) -> Option<String> {
 /// Strong key: `source_handle | page`
 /// Returns `None` when both are empty.
 fn citation_strong_key(data: &CitationData) -> Option<String> {
-    let source = &data.source_handle;
+    let source = get_source_handle(&data.source_handle);
     let page = data.page.as_deref().unwrap_or("");
     let key = normalize_key(&format!("{source}|{page}"));
     if key.is_empty() || key == "|" {
@@ -231,7 +232,7 @@ fn find_birth_date(
 ) -> Option<typed_graph::DateValue> {
     for event_ref in event_refs {
         if let Some(Node::Event(event_data)) = graph.get_node(&event_ref.ref_field) {
-            if event_data.event_type == EventType::Birth {
+            if event_type_eq(&event_data.event_type, typed_graph::EventType::Birth) {
                 return event_data.date.clone();
             }
         }
@@ -779,7 +780,7 @@ mod tests {
         let h: Handle = handle.to_string();
         let person_data = PersonData {
             handle: h.clone(),
-            gender: 1,
+            gender: Some(1),
             primary_name: Name {
                 first_name: Some(first_name.to_string()),
                 surname_list: vec![Surname {
@@ -809,7 +810,7 @@ mod tests {
         };
         let event_data = EventData {
             handle: event_handle.clone(),
-            event_type: EventType::Birth,
+            event_type: Some(EventType::Birth),
             date: birth_date,
             gramps_id: None,
             description: None,
@@ -819,6 +820,7 @@ mod tests {
             media_list: vec![],
             tag_list: vec![],
             attribute_list: vec![],
+            ..Default::default()
         };
         graph
             .add_node(event_handle.clone(), Node::Event(event_data))
@@ -828,7 +830,7 @@ mod tests {
         let person_data = PersonData {
             handle: h.clone(),
             gramps_id: None,
-            gender: 1,
+            gender: Some(1),
             primary_name: Name {
                 first_name: Some(first_name.to_string()),
                 surname_list: vec![Surname {
@@ -840,6 +842,7 @@ mod tests {
             event_ref_list: vec![EventRef {
                 ref_field: event_handle,
                 role: Some(typed_graph::EventRoleType::Primary),
+                ..Default::default()
             }],
             ..PersonData::default()
         };
@@ -1018,7 +1021,7 @@ mod tests {
 
         let person_a = PersonData {
             handle: "P001".into(),
-            gender: 1,
+            gender: Some(1),
             gramps_id: Some("I001".into()),
             primary_name: Name {
                 first_name: Some("John".into()),
@@ -1032,7 +1035,7 @@ mod tests {
         };
         let person_b = PersonData {
             handle: "P002".into(),
-            gender: 1,
+            gender: Some(1),
             gramps_id: Some("I002".into()),
             primary_name: Name {
                 first_name: Some("John".into()),
@@ -1116,7 +1119,7 @@ mod tests {
         let birth_handle = "birth_shared";
         let birth_data = EventData {
             handle: birth_handle.into(),
-            event_type: EventType::Birth,
+            event_type: Some(EventType::Birth),
             date: Some(DateValue::new(1850)),
             ..EventData::default()
         };
@@ -1128,7 +1131,7 @@ mod tests {
         let birth_handle_b = "birth_shared_b";
         let birth_data_b = EventData {
             handle: birth_handle_b.into(),
-            event_type: EventType::Birth,
+            event_type: Some(EventType::Birth),
             date: Some(DateValue::new(1850)),
             ..EventData::default()
         };
@@ -1139,7 +1142,7 @@ mod tests {
         // Two people in A with same name/date
         let p1 = PersonData {
             handle: "P001".into(),
-            gender: 1,
+            gender: Some(1),
             primary_name: Name {
                 first_name: Some("John".into()),
                 surname_list: vec![Surname {
@@ -1151,12 +1154,13 @@ mod tests {
             event_ref_list: vec![EventRef {
                 ref_field: birth_handle.into(),
                 role: Some(typed_graph::EventRoleType::Primary),
+                ..Default::default()
             }],
             ..PersonData::default()
         };
         let p2 = PersonData {
             handle: "P002".into(),
-            gender: 1,
+            gender: Some(1),
             primary_name: Name {
                 first_name: Some("John".into()),
                 surname_list: vec![Surname {
@@ -1168,6 +1172,7 @@ mod tests {
             event_ref_list: vec![EventRef {
                 ref_field: birth_handle.into(),
                 role: Some(typed_graph::EventRoleType::Primary),
+                ..Default::default()
             }],
             ..PersonData::default()
         };
@@ -1177,7 +1182,7 @@ mod tests {
         // One person in B with same name/date
         let p3 = PersonData {
             handle: "P003".into(),
-            gender: 1,
+            gender: Some(1),
             primary_name: Name {
                 first_name: Some("John".into()),
                 surname_list: vec![Surname {
@@ -1189,6 +1194,7 @@ mod tests {
             event_ref_list: vec![EventRef {
                 ref_field: birth_handle_b.into(),
                 role: Some(typed_graph::EventRoleType::Primary),
+                ..Default::default()
             }],
             ..PersonData::default()
         };
@@ -1244,7 +1250,7 @@ mod tests {
         let mut graph_a = Graph::new();
         let person_a = PersonData {
             handle: "P001".into(),
-            gender: 1,
+            gender: Some(1),
             primary_name: Name {
                 first_name: Some("John".into()),
                 surname_list: vec![Surname {
@@ -1269,7 +1275,7 @@ mod tests {
         let mut graph_b = Graph::new();
         let person_b = PersonData {
             handle: "P002".into(),
-            gender: 1,
+            gender: Some(1),
             primary_name: Name {
                 first_name: Some("John".into()),
                 surname_list: vec![Surname {
@@ -1459,7 +1465,7 @@ mod tests {
             let handle = format!("P{:03}", i);
             let person = PersonData {
                 handle: handle.clone(),
-                gender: 1,
+                gender: Some(1),
                 primary_name: Name {
                     first_name: Some(format!("FirstName{}", i)),
                     surname_list: vec![Surname {
@@ -1478,7 +1484,7 @@ mod tests {
             let handle = format!("Q{:03}", i);
             let person = PersonData {
                 handle: handle.clone(),
-                gender: 1,
+                gender: Some(1),
                 primary_name: Name {
                     first_name: Some(format!("OtherName{}", i)),
                     surname_list: vec![Surname {
@@ -1496,7 +1502,7 @@ mod tests {
         // Create birth event in A
         let birth_a = EventData {
             handle: "birth_a".into(),
-            event_type: EventType::Birth,
+            event_type: Some(EventType::Birth),
             date: Some(DateValue::new(1850)),
             ..EventData::default()
         };
@@ -1506,7 +1512,7 @@ mod tests {
 
         let match_a = PersonData {
             handle: "match_a".into(),
-            gender: 1,
+            gender: Some(1),
             primary_name: Name {
                 first_name: Some("Matching".into()),
                 surname_list: vec![Surname {
@@ -1518,6 +1524,7 @@ mod tests {
             event_ref_list: vec![EventRef {
                 ref_field: "birth_a".into(),
                 role: Some(typed_graph::EventRoleType::Primary),
+                ..Default::default()
             }],
             ..PersonData::default()
         };
@@ -1528,7 +1535,7 @@ mod tests {
         // Create birth event in B
         let birth_b = EventData {
             handle: "birth_b".into(),
-            event_type: EventType::Birth,
+            event_type: Some(EventType::Birth),
             date: Some(DateValue::new(1850)),
             ..EventData::default()
         };
@@ -1538,7 +1545,7 @@ mod tests {
 
         let match_b = PersonData {
             handle: "match_b".into(),
-            gender: 1,
+            gender: Some(1),
             primary_name: Name {
                 first_name: Some("Matching".into()),
                 surname_list: vec![Surname {
@@ -1550,6 +1557,7 @@ mod tests {
             event_ref_list: vec![EventRef {
                 ref_field: "birth_b".into(),
                 role: Some(typed_graph::EventRoleType::Primary),
+                ..Default::default()
             }],
             ..PersonData::default()
         };

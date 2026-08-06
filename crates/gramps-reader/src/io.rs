@@ -56,10 +56,12 @@ pub fn read_gramps_file(path: &str) -> Result<String, Error> {
         })?;
         let mut decoder = flate2::read::GzDecoder::new(file);
         let mut content = String::new();
-        decoder.read_to_string(&mut content).map_err(|e| Error::GzipError {
-            path: path.to_string(),
-            source: e,
-        })?;
+        decoder
+            .read_to_string(&mut content)
+            .map_err(|e| Error::GzipError {
+                path: path.to_string(),
+                source: e,
+            })?;
         Ok(content)
     } else {
         // Plain XML: seek back to start and read the full file.
@@ -68,10 +70,11 @@ pub fn read_gramps_file(path: &str) -> Result<String, Error> {
             source: e,
         })?;
         let mut content = String::new();
-        file.read_to_string(&mut content).map_err(|e| Error::IoError {
-            path: path.to_string(),
-            source: e,
-        })?;
+        file.read_to_string(&mut content)
+            .map_err(|e| Error::IoError {
+                path: path.to_string(),
+                source: e,
+            })?;
         Ok(content)
     }
 }

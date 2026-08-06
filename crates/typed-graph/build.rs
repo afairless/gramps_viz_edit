@@ -31,10 +31,7 @@ mod schema_convert;
 // ---------------------------------------------------------------------------
 
 /// Feature name → version string (e.g., "schema-5-2" → "5.2")
-const FEATURE_VERSIONS: &[(&str, &str)] = &[
-    ("schema-5-1", "5.1"),
-    ("schema-5-2", "5.2"),
-];
+const FEATURE_VERSIONS: &[(&str, &str)] = &[("schema-5-1", "5.1"), ("schema-5-2", "5.2")];
 
 /// Version string → feature env var name (e.g., "5.2" → "CARGO_FEATURE_SCHEMA_5_2")
 fn version_to_env_var(version: &str) -> String {
@@ -158,7 +155,10 @@ fn load_schemas(
                 eprintln!("error: {} not found.", schema_path.display());
                 std::process::exit(1);
             }
-            println!("cargo::warning=schema-{}.json not found; skipping schema {}", version, version);
+            println!(
+                "cargo::warning=schema-{}.json not found; skipping schema {}",
+                version, version
+            );
             continue;
         }
 

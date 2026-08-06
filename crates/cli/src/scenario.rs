@@ -175,7 +175,9 @@ impl Scenario {
                     .map(|strat_list| {
                         strat_list
                             .iter()
-                            .filter_map(|s| typed_graph::generate::AdversarialStrategy::from_name(s))
+                            .filter_map(|s| {
+                                typed_graph::generate::AdversarialStrategy::from_name(s)
+                            })
                             .collect()
                     })
                     .unwrap_or_default();

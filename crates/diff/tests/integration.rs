@@ -25,8 +25,7 @@ fn create_temp_file(content: &str) -> String {
     path.push(format!("test_{}.gramps", rand::random::<u64>()));
 
     let mut file = std::fs::File::create(&path).expect("create temp file");
-    file.write_all(content.as_bytes())
-        .expect("write temp file");
+    file.write_all(content.as_bytes()).expect("write temp file");
     path.to_string_lossy().to_string()
 }
 
@@ -61,8 +60,8 @@ fn generate_test_graph() -> typed_graph::Graph {
         strategies: vec![],
     };
     let schema = Schema::for_version(Schema::default_version()).expect("default schema");
-    let result = generate_random(&config, &adversarial_config, None, schema)
-        .expect("generate test graph");
+    let result =
+        generate_random(&config, &adversarial_config, None, schema).expect("generate test graph");
     result.graph
 }
 
@@ -128,8 +127,7 @@ fn identical_files_all_same() {
 
     // All items should be SAME
     assert_eq!(
-        report.summary.same,
-        report.summary.total_a,
+        report.summary.same, report.summary.total_a,
         "all items should be SAME when files are identical"
     );
     assert_eq!(report.summary.total_a, report.summary.total_b);
@@ -179,11 +177,11 @@ fn different_files_has_added_and_removed() {
         strategies: vec![],
     };
     let schema = Schema::for_version(Schema::default_version()).expect("default schema");
-    let result_a = generate_random(&config_a, &adversarial_config, None, schema)
-        .expect("generate graph A");
+    let result_a =
+        generate_random(&config_a, &adversarial_config, None, schema).expect("generate graph A");
     let schema = Schema::for_version(Schema::default_version()).expect("default schema");
-    let result_b = generate_random(&config_b, &adversarial_config, None, schema)
-        .expect("generate graph B");
+    let result_b =
+        generate_random(&config_b, &adversarial_config, None, schema).expect("generate graph B");
     let graph_a = result_a.graph;
     let graph_b = result_b.graph;
 
@@ -227,10 +225,7 @@ fn parse_error_on_invalid_xml() {
     let path_b = create_temp_file("<xml></xml>");
 
     let result = run_diff(&path_a, &path_b, &DiffConfig::default());
-    assert!(
-        result.is_err(),
-        "should return error for invalid XML"
-    );
+    assert!(result.is_err(), "should return error for invalid XML");
 
     cleanup_temp_file(&path_a);
     cleanup_temp_file(&path_b);
@@ -268,8 +263,7 @@ fn diff_config_variants() {
     for config in &configs {
         let report = diff_strings(&xml, &xml, config);
         assert_eq!(
-            report.summary.same,
-            report.summary.total_a,
+            report.summary.same, report.summary.total_a,
             "identical files should be all SAME with config {:?}",
             config
         );
@@ -517,7 +511,10 @@ fn handle_ref_change_produces_extrinsic_only() {
     // Verify the extrinsic-only items have HandleRef-related field changes
     for item in &extrinsic_items {
         let has_handle_change = item.field_changes.iter().any(|fc| {
-            matches!(fc.field_kind, diff::FieldKind::HandleRef | diff::FieldKind::HandleRefList)
+            matches!(
+                fc.field_kind,
+                diff::FieldKind::HandleRef | diff::FieldKind::HandleRefList
+            )
         });
         assert!(
             has_handle_change,

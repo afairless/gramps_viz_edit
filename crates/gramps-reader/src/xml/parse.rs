@@ -76,20 +76,47 @@ enum PendingEdge {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
 enum SimpleEdgeKind {
-    PersonFamily,    PersonParentFamily,    FamilyFather,    FamilyMother,
-    FamilyCitation,  FamilyNote,           FamilyTag,
-    EventPlace,      EventCitation,        EventNote,      EventTag,
-    PersonCitation, PersonNote,           PersonTag,
-    PlaceCitation,  PlaceNote,            PlaceTag,        PlacePlaceRef,
-    SourceNote,      SourceTag,
-    CitationNote,    CitationTag,          CitationRef,     CitationSource,
-    MediaCitation,   MediaNote,            MediaTag,
-    NoteCitation,    NoteTag,
-    RepositoryNote,  RepositoryTag,
+    PersonFamily,
+    PersonParentFamily,
+    FamilyFather,
+    FamilyMother,
+    FamilyCitation,
+    FamilyNote,
+    FamilyTag,
+    EventPlace,
+    EventCitation,
+    EventNote,
+    EventTag,
+    PersonCitation,
+    PersonNote,
+    PersonTag,
+    PlaceCitation,
+    PlaceNote,
+    PlaceTag,
+    PlacePlaceRef,
+    SourceNote,
+    SourceTag,
+    CitationNote,
+    CitationTag,
+    CitationRef,
+    CitationSource,
+    MediaCitation,
+    MediaNote,
+    MediaTag,
+    NoteCitation,
+    NoteTag,
+    RepositoryNote,
+    RepositoryTag,
     TagTag,
-    NoteRef,         MediaRef,              TagRef,
-    PersonMediaRef,  EventMediaRef,         FamilyMediaRef,
-    CitationMediaRef,SourceMediaRef,        PlaceMediaRef,
+    NoteRef,
+    MediaRef,
+    TagRef,
+    PersonMediaRef,
+    EventMediaRef,
+    FamilyMediaRef,
+    CitationMediaRef,
+    SourceMediaRef,
+    PlaceMediaRef,
     RepositoryMediaRef,
 }
 
@@ -127,9 +154,18 @@ impl Parser {
 
         // Track which top-level section we are in.
         enum Section {
-            TopLevel,            Header,            Tags,            Events,            People,            Families,
-            Citations,            Sources,            Places,            Objects,
-            Repositories,            Notes,
+            TopLevel,
+            Header,
+            Tags,
+            Events,
+            People,
+            Families,
+            Citations,
+            Sources,
+            Places,
+            Objects,
+            Repositories,
+            Notes,
         }
 
         let mut section = Section::TopLevel;
@@ -201,8 +237,8 @@ impl Parser {
                     let name = strip_prefix(&raw);
                     match name {
                         b"header" | b"tags" | b"events" | b"people" | b"families"
-                        | b"citations" | b"sources" | b"places" | b"objects"
-                        | b"repositories" | b"notes" => {
+                        | b"citations" | b"sources" | b"places" | b"objects" | b"repositories"
+                        | b"notes" => {
                             section = Section::TopLevel;
                         }
                         _ => {}
@@ -374,7 +410,8 @@ impl Parser {
         let mut in_county = false;
         let mut in_state = false;
         let mut in_street = false;
-        let mut in_postal = false;        let mut in_locality = false;
+        let mut in_postal = false;
+        let mut in_locality = false;
         let mut in_phone = false;
         let mut current_url = Url::default();
         let mut in_url_desc = false;
@@ -494,8 +531,8 @@ impl Parser {
                             }
                         }
                         b"desc" if in_url => in_url_desc = true,
-                        b"eventref" | b"citationref" | b"noteref" | b"tagref"
-                        | b"personref" | b"mediaref" => {
+                        b"eventref" | b"citationref" | b"noteref" | b"tagref" | b"personref"
+                        | b"mediaref" => {
                             // These are handled in the Empty branch
                             // For non-self-closing, they'd be processed on </...>
                             // but in Gramps XML they're always self-closing
@@ -560,7 +597,8 @@ impl Parser {
                             let hlink = read_hlink_attr(e).unwrap_or_default();
                             let mut relation = None;
                             for attr in e.attributes().flatten() {
-                                let key = attr.key.as_ref();                                let val = String::from_utf8_lossy(&attr.value).to_string();
+                                let key = attr.key.as_ref();
+                                let val = String::from_utf8_lossy(&attr.value).to_string();
                                 if key == b"relation" || key.ends_with(b":relation") {
                                     relation = parse_family_rel_type(&val);
                                 }
@@ -579,7 +617,10 @@ impl Parser {
                         }
                         b"mediaref" => {
                             if let Some(h) = read_hlink_attr(e) {
-                                person.media_list.push(MediaRef { ref_field: h.clone(), ..Default::default() });
+                                person.media_list.push(MediaRef {
+                                    ref_field: h.clone(),
+                                    ..Default::default()
+                                });
                                 self.pending.push(PendingEdge::Simple {
                                     source: handle.clone(),
                                     target: h,
@@ -695,7 +736,8 @@ impl Parser {
                     match name {
                         b"person" => {
                             set_gender(&mut person, gender);
-                            self.graph.add_node(handle.clone(), Node::Person(person))
+                            self.graph
+                                .add_node(handle.clone(), Node::Person(person))
                                 .map_err(graph_error)?;
                             return Ok(());
                         }
@@ -954,7 +996,10 @@ impl Parser {
                         }
                         b"mediaref" => {
                             if let Some(h) = read_hlink_attr(e) {
-family.media_list.push(MediaRef { ref_field: h.clone(), ..Default::default() });
+                                family.media_list.push(MediaRef {
+                                    ref_field: h.clone(),
+                                    ..Default::default()
+                                });
                                 self.pending.push(PendingEdge::Simple {
                                     source: handle.clone(),
                                     target: h,
@@ -1174,7 +1219,10 @@ family.media_list.push(MediaRef { ref_field: h.clone(), ..Default::default() });
                         }
                         b"mediaref" => {
                             if let Some(h) = read_hlink_attr(e) {
-event.media_list.push(MediaRef { ref_field: h.clone(), ..Default::default() });
+                                event.media_list.push(MediaRef {
+                                    ref_field: h.clone(),
+                                    ..Default::default()
+                                });
                                 self.pending.push(PendingEdge::Simple {
                                     source: handle.clone(),
                                     target: h,
@@ -1396,7 +1444,10 @@ event.media_list.push(MediaRef { ref_field: h.clone(), ..Default::default() });
                         }
                         b"mediaref" => {
                             if let Some(h) = read_hlink_attr(e) {
-                                place.media_list.push(MediaRef { ref_field: h.clone(), ..Default::default() });
+                                place.media_list.push(MediaRef {
+                                    ref_field: h.clone(),
+                                    ..Default::default()
+                                });
                                 self.pending.push(PendingEdge::Simple {
                                     source: handle.clone(),
                                     target: h,
@@ -1579,7 +1630,10 @@ event.media_list.push(MediaRef { ref_field: h.clone(), ..Default::default() });
                         }
                         b"mediaref" => {
                             if let Some(h) = read_hlink_attr(e) {
-                                source.media_list.push(MediaRef { ref_field: h.clone(), ..Default::default() });
+                                source.media_list.push(MediaRef {
+                                    ref_field: h.clone(),
+                                    ..Default::default()
+                                });
                                 self.pending.push(PendingEdge::Simple {
                                     source: handle.clone(),
                                     target: h,
@@ -1705,8 +1759,7 @@ event.media_list.push(MediaRef { ref_field: h.clone(), ..Default::default() });
                     match name {
                         b"sourceref" => {
                             if let Some(h) = read_hlink_attr(e) {
-                                citation.source_handle =
-                                    into_source_handle_field(h.clone());
+                                citation.source_handle = into_source_handle_field(h.clone());
                                 self.pending.push(PendingEdge::Simple {
                                     source: handle.clone(),
                                     target: h,
@@ -1736,7 +1789,10 @@ event.media_list.push(MediaRef { ref_field: h.clone(), ..Default::default() });
                         }
                         b"mediaref" => {
                             if let Some(h) = read_hlink_attr(e) {
-                                citation.media_list.push(MediaRef { ref_field: h.clone(), ..Default::default() });
+                                citation.media_list.push(MediaRef {
+                                    ref_field: h.clone(),
+                                    ..Default::default()
+                                });
                                 self.pending.push(PendingEdge::Simple {
                                     source: handle.clone(),
                                     target: h,
@@ -1889,7 +1945,10 @@ event.media_list.push(MediaRef { ref_field: h.clone(), ..Default::default() });
                         }
                         b"mediaref" => {
                             if let Some(h) = read_hlink_attr(e) {
-                                repo.media_list.push(MediaRef { ref_field: h.clone(), ..Default::default() });
+                                repo.media_list.push(MediaRef {
+                                    ref_field: h.clone(),
+                                    ..Default::default()
+                                });
                                 self.pending.push(PendingEdge::Simple {
                                     source: handle.clone(),
                                     target: h,
@@ -2394,7 +2453,11 @@ event.media_list.push(MediaRef { ref_field: h.clone(), ..Default::default() });
         let pending = std::mem::take(&mut self.pending);
         for edge in pending {
             match edge {
-                PendingEdge::Simple { source, target, kind } => {
+                PendingEdge::Simple {
+                    source,
+                    target,
+                    kind,
+                } => {
                     let e = simple_edge(kind, source, target);
                     // Check both nodes exist before adding the edge
                     self.graph.add_edge(e).map_err(graph_error)?;
@@ -2522,35 +2585,91 @@ fn simple_edge(kind: SimpleEdgeKind, source: Handle, target: Handle) -> Edge {
     match kind {
         SimpleEdgeKind::PlacePlaceRef => {
             let meta_target = target.clone();
-            Edge::PlacePlaceRef { source, target, metadata: Box::new(PlaceRef { ref_field: meta_target, date: None }) }
+            Edge::PlacePlaceRef {
+                source,
+                target,
+                metadata: Box::new(PlaceRef {
+                    ref_field: meta_target,
+                    date: None,
+                }),
+            }
         }
         SimpleEdgeKind::PersonMediaRef => {
             let meta_target = target.clone();
-            Edge::PersonMediaRef { source, target, metadata: Box::new(MediaRef { ref_field: meta_target, ..Default::default() }) }
+            Edge::PersonMediaRef {
+                source,
+                target,
+                metadata: Box::new(MediaRef {
+                    ref_field: meta_target,
+                    ..Default::default()
+                }),
+            }
         }
         SimpleEdgeKind::EventMediaRef => {
             let meta_target = target.clone();
-            Edge::EventMediaRef { source, target, metadata: Box::new(MediaRef { ref_field: meta_target, ..Default::default() }) }
+            Edge::EventMediaRef {
+                source,
+                target,
+                metadata: Box::new(MediaRef {
+                    ref_field: meta_target,
+                    ..Default::default()
+                }),
+            }
         }
         SimpleEdgeKind::FamilyMediaRef => {
             let meta_target = target.clone();
-            Edge::FamilyMediaRef { source, target, metadata: Box::new(MediaRef { ref_field: meta_target, ..Default::default() }) }
+            Edge::FamilyMediaRef {
+                source,
+                target,
+                metadata: Box::new(MediaRef {
+                    ref_field: meta_target,
+                    ..Default::default()
+                }),
+            }
         }
         SimpleEdgeKind::CitationMediaRef => {
             let meta_target = target.clone();
-            Edge::CitationMediaRef { source, target, metadata: Box::new(MediaRef { ref_field: meta_target, ..Default::default() }) }
+            Edge::CitationMediaRef {
+                source,
+                target,
+                metadata: Box::new(MediaRef {
+                    ref_field: meta_target,
+                    ..Default::default()
+                }),
+            }
         }
         SimpleEdgeKind::SourceMediaRef => {
             let meta_target = target.clone();
-            Edge::SourceMediaRef { source, target, metadata: Box::new(MediaRef { ref_field: meta_target, ..Default::default() }) }
+            Edge::SourceMediaRef {
+                source,
+                target,
+                metadata: Box::new(MediaRef {
+                    ref_field: meta_target,
+                    ..Default::default()
+                }),
+            }
         }
         SimpleEdgeKind::PlaceMediaRef => {
             let meta_target = target.clone();
-            Edge::PlaceMediaRef { source, target, metadata: Box::new(MediaRef { ref_field: meta_target, ..Default::default() }) }
+            Edge::PlaceMediaRef {
+                source,
+                target,
+                metadata: Box::new(MediaRef {
+                    ref_field: meta_target,
+                    ..Default::default()
+                }),
+            }
         }
         SimpleEdgeKind::RepositoryMediaRef => {
             let meta_target = target.clone();
-            Edge::RepositoryMediaRef { source, target, metadata: Box::new(MediaRef { ref_field: meta_target, ..Default::default() }) }
+            Edge::RepositoryMediaRef {
+                source,
+                target,
+                metadata: Box::new(MediaRef {
+                    ref_field: meta_target,
+                    ..Default::default()
+                }),
+            }
         }
         SimpleEdgeKind::PersonFamily => Edge::PersonFamily { source, target },
         SimpleEdgeKind::PersonParentFamily => Edge::PersonParentFamily { source, target },
@@ -2895,7 +3014,8 @@ mod tests {
         let schema = Schema::for_version(&version).unwrap();
         let mut parser = Parser::new(schema);
         parser.parse_all(xml).unwrap();
-        parser.graph
+        parser
+            .graph
             .nodes_by_kind(NodeKind::Person)
             .iter()
             .map(|h| match parser.graph.get_node(h) {
@@ -3001,10 +3121,7 @@ mod tests {
             Some("Doe")
         );
         assert_eq!(p.alternate_names.len(), 1);
-        assert_eq!(
-            p.alternate_names[0].first_name.as_deref(),
-            Some("Janey")
-        );
+        assert_eq!(p.alternate_names[0].first_name.as_deref(), Some("Janey"));
     }
 
     // -----------------------------------------------------------------------
@@ -3143,10 +3260,7 @@ mod tests {
         let p = single_person_from_parser(&xml);
         assert_eq!(p.person_ref_list.len(), 1);
         assert_eq!(p.person_ref_list[0].ref_field, "p0009");
-        assert_eq!(
-            p.person_ref_list[0].relation,
-            Some(FamilyRelType::Birth)
-        );
+        assert_eq!(p.person_ref_list[0].relation, Some(FamilyRelType::Birth));
     }
 
     // -----------------------------------------------------------------------
@@ -3255,10 +3369,7 @@ mod tests {
         let p = single_person(&xml);
         assert_eq!(p.lds_ord_list.len(), 1);
         assert_eq!(p.lds_ord_list[0].type_field, Some(LdsOrdType::Baptism));
-        assert_eq!(
-            p.lds_ord_list[0].status.as_deref(),
-            Some("completed")
-        );
+        assert_eq!(p.lds_ord_list[0].status.as_deref(), Some("completed"));
         assert_eq!(p.lds_ord_list[0].temple.as_deref(), Some("SLC"));
     }
 
@@ -3428,9 +3539,11 @@ mod tests {
 
     #[test]
     fn parse_family_minimal() {
-        let xml = with_db(r#"  <families>
+        let xml = with_db(
+            r#"  <families>
     <family handle="f0003"/>
-  </families>"#);
+  </families>"#,
+        );
         let f = single_family_from_parser(&xml);
         assert_eq!(f.handle, "f0003");
         assert!(f.father_handle.is_none());
@@ -3506,9 +3619,11 @@ mod tests {
 
     #[test]
     fn parse_event_minimal() {
-        let xml = with_db(r#"  <events>
+        let xml = with_db(
+            r#"  <events>
     <event handle="e0003"/>
-  </events>"#);
+  </events>"#,
+        );
         let e = single_event_from_parser(&xml);
         assert_eq!(e.handle, "e0003");
         // When no event type is specified in XML, event_type is None.
@@ -3592,9 +3707,11 @@ mod tests {
 
     #[test]
     fn parse_place_minimal() {
-        let xml = with_db(r#"  <places>
+        let xml = with_db(
+            r#"  <places>
     <place handle="pl0002"/>
-  </places>"#);
+  </places>"#,
+        );
         let p = single_place_from_parser(&xml);
         assert_eq!(p.handle, "pl0002");
         assert!(p.name.city.is_none());
@@ -3668,10 +3785,7 @@ mod tests {
         assert_eq!(s.reporef_list.len(), 1);
         assert_eq!(s.reporef_list[0].ref_field, "r0001");
         assert_eq!(s.reporef_list[0].call_number.as_deref(), Some("AB-123"));
-        assert_eq!(
-            s.reporef_list[0].media_type,
-            Some(SourceMediaType::Book)
-        );
+        assert_eq!(s.reporef_list[0].media_type, Some(SourceMediaType::Book));
         assert_eq!(s.note_list, vec!["n0001"]);
         assert_eq!(s.tag_list, vec!["t0001"]);
         assert_eq!(s.media_list.len(), 1);
@@ -3682,9 +3796,11 @@ mod tests {
 
     #[test]
     fn parse_source_minimal() {
-        let xml = with_db(r#"  <sources>
+        let xml = with_db(
+            r#"  <sources>
     <source handle="s0002"/>
-  </sources>"#);
+  </sources>"#,
+        );
         let s = single_source_from_parser(&xml);
         assert_eq!(s.handle, "s0002");
         assert!(s.title.is_empty());
@@ -3762,9 +3878,11 @@ mod tests {
 
     #[test]
     fn parse_citation_minimal() {
-        let xml = with_db(r#"  <citations>
+        let xml = with_db(
+            r#"  <citations>
     <citation handle="c0002"/>
-  </citations>"#);
+  </citations>"#,
+        );
         let c = single_citation_from_parser(&xml);
         assert_eq!(c.handle, "c0002");
         assert!(c.source_handle.as_deref().unwrap_or("").is_empty());
@@ -3855,7 +3973,10 @@ mod tests {
             Some("USA")
         );
         assert_eq!(r.url_list.len(), 1);
-        assert_eq!(r.url_list[0].href.as_deref(), Some("https://library.example.com"));
+        assert_eq!(
+            r.url_list[0].href.as_deref(),
+            Some("https://library.example.com")
+        );
         assert_eq!(r.url_list[0].type_field, Some(UrlType::WebHome));
         assert_eq!(r.note_list, vec!["n0001"]);
         assert_eq!(r.tag_list, vec!["t0001"]);
@@ -3865,9 +3986,11 @@ mod tests {
 
     #[test]
     fn parse_repository_minimal() {
-        let xml = with_db(r#"  <repositories>
+        let xml = with_db(
+            r#"  <repositories>
     <repository handle="r0002"/>
-  </repositories>"#);
+  </repositories>"#,
+        );
         let r = single_repository_from_parser(&xml);
         assert_eq!(r.handle, "r0002");
         assert!(r.name.is_none());
@@ -3949,9 +4072,11 @@ mod tests {
 
     #[test]
     fn parse_media_minimal() {
-        let xml = with_db(r#"  <objects>
+        let xml = with_db(
+            r#"  <objects>
     <object handle="m0002"/>
-  </objects>"#);
+  </objects>"#,
+        );
         let m = single_media_from_parser(&xml);
         assert_eq!(m.handle, "m0002");
         assert!(m.path.is_none());

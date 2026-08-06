@@ -52,15 +52,31 @@ fn stats_simple_family() {
     // Family size distribution: 1 family of size 3
     let mut fam_size = report.family_size_distribution.clone();
     let size3 = fam_size.remove(&3).unwrap_or(0);
-    assert_eq!(size3, 1, "expected 1 family of size 3, got {:#?}", report.family_size_distribution);
+    assert_eq!(
+        size3, 1,
+        "expected 1 family of size 3, got {:#?}",
+        report.family_size_distribution
+    );
     // No other family sizes
-    assert!(fam_size.is_empty(), "unexpected family sizes: {:#?}", fam_size);
+    assert!(
+        fam_size.is_empty(),
+        "unexpected family sizes: {:#?}",
+        fam_size
+    );
 
     // Family group distribution: 1 group of size 3
     let mut group_dist = report.family_group_distribution.clone();
     let group3 = group_dist.remove(&3).unwrap_or(0);
-    assert_eq!(group3, 1, "expected 1 group of size 3, got {:#?}", report.family_group_distribution);
-    assert!(group_dist.is_empty(), "unexpected group sizes: {:#?}", group_dist);
+    assert_eq!(
+        group3, 1,
+        "expected 1 group of size 3, got {:#?}",
+        report.family_group_distribution
+    );
+    assert!(
+        group_dist.is_empty(),
+        "unexpected group sizes: {:#?}",
+        group_dist
+    );
 
     // All 3 people are in a family
     assert_eq!(report.people_not_in_family, 0);

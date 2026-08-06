@@ -45,8 +45,7 @@ pub fn load_graph_data(
     no_impute: bool,
     generation_gap: u32,
 ) -> Result<GraphData, String> {
-    load_graph_data_with_stats(path, no_impute, generation_gap)
-        .map(|loaded| loaded.graph_data)
+    load_graph_data_with_stats(path, no_impute, generation_gap).map(|loaded| loaded.graph_data)
 }
 
 /// Load a Gramps XML file and return both graph data and summary statistics.
@@ -738,7 +737,10 @@ mod tests {
         let from_new = load_graph_data_with_stats(path.to_str().unwrap(), false, 25).unwrap();
         assert_eq!(from_old.nodes.len(), from_new.graph_data.nodes.len());
         assert_eq!(from_old.links.len(), from_new.graph_data.links.len());
-        assert_eq!(from_old.family_groups.len(), from_new.graph_data.family_groups.len());
+        assert_eq!(
+            from_old.family_groups.len(),
+            from_new.graph_data.family_groups.len()
+        );
     }
 
     #[test]

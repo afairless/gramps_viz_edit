@@ -2114,7 +2114,11 @@ mod tests {
         let result = transform(graph).unwrap();
 
         if let Some(crate::Node::Person(p)) = result.get_node(&"p1".to_string()) {
-            assert_eq!(gender_val(p), 0, "Gender should be unchanged with fraction=0.0");
+            assert_eq!(
+                gender_val(p),
+                0,
+                "Gender should be unchanged with fraction=0.0"
+            );
         } else {
             panic!("Person node should exist");
         }
@@ -2160,9 +2164,18 @@ mod tests {
     #[test]
     fn from_name_aliases_map_to_same_variant() {
         let expected = AdversarialStrategy::DisconnectedSubgraphs;
-        assert_eq!(AdversarialStrategy::from_name("disconnected"), Some(expected.clone()));
-        assert_eq!(AdversarialStrategy::from_name("disconnected_subgraphs"), Some(expected.clone()));
-        assert_eq!(AdversarialStrategy::from_name("disconnected-subgraphs"), Some(expected.clone()));
+        assert_eq!(
+            AdversarialStrategy::from_name("disconnected"),
+            Some(expected.clone())
+        );
+        assert_eq!(
+            AdversarialStrategy::from_name("disconnected_subgraphs"),
+            Some(expected.clone())
+        );
+        assert_eq!(
+            AdversarialStrategy::from_name("disconnected-subgraphs"),
+            Some(expected.clone())
+        );
     }
 
     #[test]

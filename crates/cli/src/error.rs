@@ -148,13 +148,14 @@ impl From<gramps_reader::Error> for CliError {
                 CliError::GzipError { path, source }
             }
             gramps_reader::Error::XmlParseError { message } => CliError::XmlParseError { message },
-            gramps_reader::Error::UnsupportedSchema { version, schema_version } => {
-                CliError::ConfigError(format!(
-                    "unsupported schema version '{}' (file reports {}; not compiled in). \
+            gramps_reader::Error::UnsupportedSchema {
+                version,
+                schema_version,
+            } => CliError::ConfigError(format!(
+                "unsupported schema version '{}' (file reports {}; not compiled in). \
                      hint: run `gramps-gen schema download {}` to add support",
-                    schema_version, version, schema_version
-                ))
-            }
+                schema_version, version, schema_version
+            )),
         }
     }
 }
@@ -258,10 +259,7 @@ mod tests {
     fn cli_error_gzip_error_display() {
         let err = CliError::GzipError {
             path: "corrupt.gramps".to_string(),
-            source: std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "corrupt gzip data",
-            ),
+            source: std::io::Error::new(std::io::ErrorKind::InvalidData, "corrupt gzip data"),
         };
         let display = format!("{}", err);
         assert!(display.contains("gzip decompression error"));

@@ -1781,6 +1781,10 @@ mod tests {
                 .add_edge(Edge::PersonMediaRef {
                     source: "p1".to_string(),
                     target: "m1".to_string(),
+                    metadata: Box::new(MediaRef {
+                        ref_field: "m1".to_string(),
+                        ..Default::default()
+                    }),
                 })
                 .unwrap();
 

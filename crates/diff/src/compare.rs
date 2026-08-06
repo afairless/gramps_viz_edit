@@ -11,9 +11,10 @@
 use std::collections::BTreeSet;
 
 use typed_graph::{
-    Address, Attribute, ChildRef, CitationData, DateValue, EventData, EventRef, FamilyData, Handle,
-    LdsOrd, Location, MediaData, MediaRef, Name, NoteData, PersonData, PersonRef, PlaceData,
-    PlaceRef, RepoRef, RepositoryData, SourceData, Surname, TagData, Url,
+    event_type_display, get_source_handle, Address, Attribute, ChildRef, CitationData, DateValue,
+    EventData, EventRef, FamilyData, Handle, LdsOrd, Location, MediaData, MediaRef, Name, NoteData,
+    PersonData, PersonRef, PlaceData, PlaceRef, RepoRef, RepositoryData, SourceData, Surname,
+    TagData, Url,
 };
 
 use crate::report::{FieldChange, FieldKind};
@@ -571,8 +572,8 @@ fn compare_url(field_prefix: &str, a: &Url, b: &Url) -> Vec<FieldChange> {
     ));
     changes.extend(compare_field_text(
         &format!("{field_prefix}.href"),
-        &a.href,
-        &b.href,
+        a.href.as_deref().unwrap_or(""),
+        b.href.as_deref().unwrap_or(""),
     ));
     changes.extend(compare_enum_discriminant(
         &format!("{field_prefix}.type_field"),
@@ -899,11 +900,15 @@ pub fn compare_event(a: &EventData, b: &EventData) -> Vec<FieldChange> {
         a.gramps_id.as_deref(),
         b.gramps_id.as_deref(),
     ));
-    changes.extend(compare_enum_discriminant(
-        "event_type",
-        a.event_type,
-        b.event_type,
-    ));
+    if a.event_type != b.event_type {
+        changes.push(FieldChange {
+            field_kind: FieldKind::Enum,
+            field_name: "event_type".to_string(),
+            old_value: Some(event_type_display(&a.event_type)),
+            new_value: Some(event_type_display(&b.event_type)),
+            similarity: 0.0,
+        });
+    }
     changes.extend(compare_date_value("date", a.date.as_ref(), b.date.as_ref()));
     changes.extend(compare_field_optional_text(
         "description",
@@ -1137,8 +1142,8 @@ pub fn compare_citation(a: &CitationData, b: &CitationData) -> Vec<FieldChange> 
         changes.push(FieldChange {
             field_kind: FieldKind::HandleRef,
             field_name: "source_handle".into(),
-            old_value: Some(a.source_handle.clone()),
-            new_value: Some(b.source_handle.clone()),
+            old_value: Some(get_source_handle(&a.source_handle)),
+            new_value: Some(get_source_handle(&b.source_handle)),
             similarity: 0.0,
         });
     }
@@ -1631,10 +1636,12 @@ mod tests {
         let a = vec![EventRef {
             ref_field: "E001".into(),
             role: None,
+            ..Default::default()
         }];
         let b = vec![EventRef {
             ref_field: "E001".into(),
             role: None,
+            ..Default::default()
         }];
         assert!(compare_ref_array("event_ref_list", &a, &b, |_, _| vec![]).is_empty());
     }
@@ -1645,20 +1652,24 @@ mod tests {
             EventRef {
                 ref_field: "E001".into(),
                 role: None,
+                ..Default::default()
             },
             EventRef {
                 ref_field: "E002".into(),
                 role: None,
+                ..Default::default()
             },
         ];
         let b = vec![
             EventRef {
                 ref_field: "E002".into(),
                 role: None,
+                ..Default::default()
             },
             EventRef {
                 ref_field: "E001".into(),
                 role: None,
+                ..Default::default()
             },
         ];
         assert!(compare_ref_array("event_ref_list", &a, &b, |_, _| vec![]).is_empty());
@@ -1669,10 +1680,12 @@ mod tests {
         let a = vec![EventRef {
             ref_field: "E001".into(),
             role: None,
+            ..Default::default()
         }];
         let b = vec![EventRef {
             ref_field: "E002".into(),
             role: None,
+            ..Default::default()
         }];
         let changes = compare_ref_array("event_ref_list", &a, &b, |_, _| vec![]);
         assert_eq!(changes.len(), 1);
@@ -1684,10 +1697,12 @@ mod tests {
         let a = vec![EventRef {
             ref_field: "E001".into(),
             role: Some(typed_graph::EventRoleType::Primary),
+            ..Default::default()
         }];
         let b = vec![EventRef {
             ref_field: "E001".into(),
             role: Some(typed_graph::EventRoleType::Witness),
+            ..Default::default()
         }];
         let changes = compare_ref_array("event_ref_list", &a, &b, |x, y| {
             compare_enum_discriminant("event_ref_list.role", x.role, y.role)
@@ -1712,7 +1727,7 @@ mod tests {
         PersonData {
             handle: "H001".into(),
             gramps_id: Some("I0001".into()),
-            gender: 0,
+            gender: Some(0),
             primary_name: Name {
                 first_name: Some("John".into()),
                 surname_list: vec![Surname {
@@ -1734,6 +1749,7 @@ mod tests {
             address_list: vec![],
             url_list: vec![],
             lds_ord_list: vec![],
+            ..Default::default()
         }
     }
 
@@ -1764,7 +1780,7 @@ mod tests {
     fn person_change_gender() {
         let a = make_person();
         let mut b = make_person();
-        b.gender = 1;
+        b.gender = Some(1);
         let changes = compare_person(&a, &b);
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].field_name, "gender");
@@ -1819,10 +1835,12 @@ mod tests {
         a.event_ref_list = vec![EventRef {
             ref_field: "E001".into(),
             role: Some(EventRoleType::Primary),
+            ..Default::default()
         }];
         b.event_ref_list = vec![EventRef {
             ref_field: "E001".into(),
             role: Some(EventRoleType::Witness),
+            ..Default::default()
         }];
         let changes = compare_person(&a, &b);
         assert_eq!(changes.len(), 1);
@@ -1837,10 +1855,12 @@ mod tests {
         a.person_ref_list = vec![PersonRef {
             ref_field: "P001".into(),
             relation: Some(FamilyRelType::Married),
+            ..Default::default()
         }];
         b.person_ref_list = vec![PersonRef {
             ref_field: "P001".into(),
             relation: Some(FamilyRelType::Birth),
+            ..Default::default()
         }];
         let changes = compare_person(&a, &b);
         assert_eq!(changes.len(), 1);
@@ -1853,7 +1873,7 @@ mod tests {
         let a = make_person();
         let mut b = make_person();
         b.gramps_id = Some("I0009".into());
-        b.gender = 2;
+        b.gender = Some(2);
         b.note_list = vec!["N001".into()];
         let changes = compare_person(&a, &b);
         assert_eq!(changes.len(), 3);
@@ -1879,6 +1899,7 @@ mod tests {
             media_list: vec![],
             note_list: vec![],
             tag_list: vec![],
+            ..Default::default()
         }
     }
 
@@ -1908,20 +1929,24 @@ mod tests {
             ChildRef {
                 ref_field: "P003".into(),
                 relation: None,
+                ..Default::default()
             },
             ChildRef {
                 ref_field: "P004".into(),
                 relation: None,
+                ..Default::default()
             },
         ];
         b.child_ref_list = vec![
             ChildRef {
                 ref_field: "P004".into(),
                 relation: None,
+                ..Default::default()
             },
             ChildRef {
                 ref_field: "P003".into(),
                 relation: None,
+                ..Default::default()
             },
         ];
         assert!(compare_family(&a, &b).is_empty());
@@ -1952,7 +1977,7 @@ mod tests {
         EventData {
             handle: "E001".into(),
             gramps_id: Some("E0001".into()),
-            event_type: typed_graph::EventType::Birth,
+            event_type: Some(typed_graph::EventType::Birth),
             date: Some(DateValue::new_ymd(1870, 6, 15)),
             description: Some("Birth of John Smith".into()),
             place_handle: Some("PL001".into()),
@@ -1961,6 +1986,7 @@ mod tests {
             media_list: vec![],
             note_list: vec![],
             tag_list: vec![],
+            ..Default::default()
         }
     }
 
@@ -1975,7 +2001,7 @@ mod tests {
     fn event_change_event_type() {
         let a = make_event();
         let mut b = make_event();
-        b.event_type = typed_graph::EventType::Death;
+        b.event_type = Some(typed_graph::EventType::Death);
         let changes = compare_event(&a, &b);
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].field_name, "event_type");
@@ -2044,6 +2070,7 @@ mod tests {
             note_list: vec![],
             tag_list: vec![],
             attribute_list: vec![],
+            ..Default::default()
         }
     }
 
@@ -2088,6 +2115,7 @@ mod tests {
             media_list: vec![],
             note_list: vec![],
             tag_list: vec![],
+            ..Default::default()
         }
     }
 
@@ -2118,11 +2146,13 @@ mod tests {
                 ref_field: "R001".into(),
                 call_number: None,
                 media_type: None,
+                ..Default::default()
             },
             RepoRef {
                 ref_field: "R002".into(),
                 call_number: None,
                 media_type: None,
+                ..Default::default()
             },
         ];
         b.reporef_list = vec![
@@ -2130,11 +2160,13 @@ mod tests {
                 ref_field: "R002".into(),
                 call_number: None,
                 media_type: None,
+                ..Default::default()
             },
             RepoRef {
                 ref_field: "R001".into(),
                 call_number: None,
                 media_type: None,
+                ..Default::default()
             },
         ];
         assert!(compare_source(&a, &b).is_empty());
@@ -2155,12 +2187,13 @@ mod tests {
         CitationData {
             handle: "C001".into(),
             gramps_id: Some("C0001".into()),
-            source_handle: "S001".into(),
+            source_handle: Some("S001".to_string()),
             page: Some("45".into()),
             confidence: Some(2),
             media_list: vec![],
             note_list: vec![],
             tag_list: vec![],
+            ..Default::default()
         }
     }
 
@@ -2248,6 +2281,7 @@ mod tests {
             citation_list: vec![],
             note_list: vec![],
             tag_list: vec![],
+            ..Default::default()
         }
     }
 

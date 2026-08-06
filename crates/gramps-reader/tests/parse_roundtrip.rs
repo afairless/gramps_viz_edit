@@ -41,7 +41,9 @@ fn round_trip_nodes(config: RandomConfig, gramps_version: &str) -> (usize, usize
     // Serialize to XML.
     let writer = GraphXmlWriter::new(output::SerializationMap::new(), gramps_version);
     let mut buf = Vec::new();
-    writer.write(original_graph, &mut buf).expect("serialization should succeed");
+    writer
+        .write(original_graph, &mut buf)
+        .expect("serialization should succeed");
     let xml = String::from_utf8(buf).expect("output should be valid UTF-8");
 
     // Verify the XML is well-formed (contains expected elements).
@@ -214,14 +216,46 @@ fn mixed_type_fixture_node_counts() {
 
     // Verify all 10 types are present.
     let counts = count_nodes_by_kind(&graph);
-    assert_eq!(*counts.get(&NodeKind::Person).unwrap_or(&0), 1, "Person count");
-    assert_eq!(*counts.get(&NodeKind::Family).unwrap_or(&0), 1, "Family count");
-    assert_eq!(*counts.get(&NodeKind::Event).unwrap_or(&0), 1, "Event count");
-    assert_eq!(*counts.get(&NodeKind::Place).unwrap_or(&0), 1, "Place count");
-    assert_eq!(*counts.get(&NodeKind::Source).unwrap_or(&0), 1, "Source count");
-    assert_eq!(*counts.get(&NodeKind::Citation).unwrap_or(&0), 1, "Citation count");
-    assert_eq!(*counts.get(&NodeKind::Repository).unwrap_or(&0), 1, "Repository count");
-    assert_eq!(*counts.get(&NodeKind::Media).unwrap_or(&0), 1, "Media count");
+    assert_eq!(
+        *counts.get(&NodeKind::Person).unwrap_or(&0),
+        1,
+        "Person count"
+    );
+    assert_eq!(
+        *counts.get(&NodeKind::Family).unwrap_or(&0),
+        1,
+        "Family count"
+    );
+    assert_eq!(
+        *counts.get(&NodeKind::Event).unwrap_or(&0),
+        1,
+        "Event count"
+    );
+    assert_eq!(
+        *counts.get(&NodeKind::Place).unwrap_or(&0),
+        1,
+        "Place count"
+    );
+    assert_eq!(
+        *counts.get(&NodeKind::Source).unwrap_or(&0),
+        1,
+        "Source count"
+    );
+    assert_eq!(
+        *counts.get(&NodeKind::Citation).unwrap_or(&0),
+        1,
+        "Citation count"
+    );
+    assert_eq!(
+        *counts.get(&NodeKind::Repository).unwrap_or(&0),
+        1,
+        "Repository count"
+    );
+    assert_eq!(
+        *counts.get(&NodeKind::Media).unwrap_or(&0),
+        1,
+        "Media count"
+    );
     assert_eq!(*counts.get(&NodeKind::Note).unwrap_or(&0), 1, "Note count");
     assert_eq!(*counts.get(&NodeKind::Tag).unwrap_or(&0), 1, "Tag count");
 

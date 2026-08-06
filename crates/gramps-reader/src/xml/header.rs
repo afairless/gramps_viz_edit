@@ -40,9 +40,7 @@ pub fn detect_schema_version(content: &str) -> Result<String, Error> {
                         for attr in e.attributes().flatten() {
                             let key = attr.key.as_ref();
                             if key == b"version" || key.ends_with(b":version") {
-                                                version = Some(
-                                String::from_utf8_lossy(&attr.value).to_string(),
-                            );
+                                version = Some(String::from_utf8_lossy(&attr.value).to_string());
                             }
                         }
                         // <created> is self-closing (<created version="5.2"/>)
@@ -68,7 +66,7 @@ pub fn detect_schema_version(content: &str) -> Result<String, Error> {
         }
     }
 
-        match version {
+    match version {
         Some(v) => {
             // Extract the major.minor prefix (e.g., "5.2.0" → "5.2").
             let schema_version = v.split('.').take(2).collect::<Vec<_>>().join(".");
@@ -148,7 +146,10 @@ mod tests {
         let xml = with_database("  <header><created version=\"99.99\"/></header>");
         let result = detect_schema_version(&xml);
         match result {
-            Err(Error::UnsupportedSchema { version, schema_version }) => {
+            Err(Error::UnsupportedSchema {
+                version,
+                schema_version,
+            }) => {
                 assert_eq!(version, "99.99");
                 assert_eq!(schema_version, "99.99");
             }

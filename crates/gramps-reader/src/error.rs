@@ -45,7 +45,10 @@ impl fmt::Display for Error {
             Error::GzipError { path, source } => {
                 write!(f, "gzip decompression error for '{}': {}", path, source)
             }
-            Error::UnsupportedSchema { version, schema_version } => {
+            Error::UnsupportedSchema {
+                version,
+                schema_version,
+            } => {
                 write!(
                     f,
                     "unsupported schema version '{}' (file reports {}; not compiled in). \

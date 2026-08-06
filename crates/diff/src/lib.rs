@@ -88,11 +88,7 @@ impl Default for DiffConfig {
 /// Returns [`DiffError::EmptyGraph`] if both files are empty.
 /// Returns [`DiffError::SchemaMismatch`] if the two files use incompatible
 /// schema versions (only returned when a schema version is not compiled in).
-pub fn run_diff(
-    file_a: &str,
-    file_b: &str,
-    _config: &DiffConfig,
-) -> Result<DiffReport, DiffError> {
+pub fn run_diff(file_a: &str, file_b: &str, _config: &DiffConfig) -> Result<DiffReport, DiffError> {
     // Read both files
     let content_a = read_gramps_file(file_a).map_err(|e| DiffError::ParseError(e.to_string()))?;
     let content_b = read_gramps_file(file_b).map_err(|e| DiffError::ParseError(e.to_string()))?;

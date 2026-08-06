@@ -11,9 +11,9 @@
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ParsedEvent {
     pub handle: String,
-    pub event_type: Option<String>,  // "Birth", "Death", "Marriage", etc.
-    pub date_val: Option<String>,    // e.g. "1850-07-13"
-    pub date_year: Option<i32>,      // e.g. 1850
+    pub event_type: Option<String>, // "Birth", "Death", "Marriage", etc.
+    pub date_val: Option<String>,   // e.g. "1850-07-13"
+    pub date_year: Option<i32>,     // e.g. 1850
 }
 
 /// Raw extracted person data from streaming XML parse.

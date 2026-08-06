@@ -604,8 +604,14 @@ fn e2e_stats_nonexistent_file_fails() {
 #[test]
 fn extract_schema_not_in_help() {
     let (stdout, _stderr, _code) = gramps_gen(&["--help"]);
-    assert!(!stdout.contains("extract-schema"), "extract-schema should not appear in --help");
-    assert!(!stdout.contains("extract_schema"), "extract_schema should not appear in --help");
+    assert!(
+        !stdout.contains("extract-schema"),
+        "extract-schema should not appear in --help"
+    );
+    assert!(
+        !stdout.contains("extract_schema"),
+        "extract_schema should not appear in --help"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -751,12 +757,14 @@ fn e2e_diff_two_generated_files() {
     let output_b = temp_output_path("diff_b");
 
     // Generate two different files
-    let (_stdout, stderr, code) =
-        gramps_gen(&["generate", "--count", "5", "--seed", "42", "--output", &output_a]);
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "generate", "--count", "5", "--seed", "42", "--output", &output_a,
+    ]);
     assert_eq!(code, Some(0), "Generate A failed: {}", stderr);
 
-    let (_stdout, stderr, code) =
-        gramps_gen(&["generate", "--count", "5", "--seed", "99", "--output", &output_b]);
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "generate", "--count", "5", "--seed", "99", "--output", &output_b,
+    ]);
     assert_eq!(code, Some(0), "Generate B failed: {}", stderr);
 
     // Run diff
@@ -783,22 +791,23 @@ fn e2e_diff_json_output() {
     let output_b = temp_output_path("diff_json_b");
 
     // Generate two files with same seed (identical)
-    let (_stdout, stderr, code) =
-        gramps_gen(&["generate", "--count", "5", "--seed", "42", "--output", &output_a]);
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "generate", "--count", "5", "--seed", "42", "--output", &output_a,
+    ]);
     assert_eq!(code, Some(0), "Generate A failed: {}", stderr);
 
-    let (_stdout, stderr, code) =
-        gramps_gen(&["generate", "--count", "5", "--seed", "42", "--output", &output_b]);
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "generate", "--count", "5", "--seed", "42", "--output", &output_b,
+    ]);
     assert_eq!(code, Some(0), "Generate B failed: {}", stderr);
 
     // Run diff with JSON output
-    let (stdout, stderr, code) =
-        gramps_gen(&["diff", &output_a, &output_b, "--output", "json"]);
+    let (stdout, stderr, code) = gramps_gen(&["diff", &output_a, &output_b, "--output", "json"]);
     assert_eq!(code, Some(0), "Diff JSON failed: {}", stderr);
 
     // Verify JSON output parses
-    let report: serde_json::Value = serde_json::from_str(&stdout)
-        .expect("Diff JSON output should be valid JSON");
+    let report: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Diff JSON output should be valid JSON");
     assert!(
         report.get("summary").is_some(),
         "JSON should contain summary"
@@ -811,12 +820,12 @@ fn e2e_diff_json_output() {
 
 #[test]
 fn e2e_diff_missing_file_shows_error() {
-    let (_stdout, stderr, code) =
-        gramps_gen(&["diff", "/tmp/nonexistent_a.gramps", "/tmp/nonexistent_b.gramps"]);
-    assert!(
-        code != Some(0),
-        "Diff should fail when files don't exist"
-    );
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "diff",
+        "/tmp/nonexistent_a.gramps",
+        "/tmp/nonexistent_b.gramps",
+    ]);
+    assert!(code != Some(0), "Diff should fail when files don't exist");
     assert!(
         stderr.contains("parse error") || stderr.contains("error") || stderr.contains("failed"),
         "Should show error message, got: {}",

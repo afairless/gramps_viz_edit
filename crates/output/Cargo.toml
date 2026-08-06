@@ -4,10 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-schema-5-0 = ["typed-graph/schema-5-0"]
 schema-5-1 = ["typed-graph/schema-5-1"]
 schema-5-2 = ["typed-graph/schema-5-2"]
-schema-6-0 = ["typed-graph/schema-6-0"]
 
 [dependencies]
 typed-graph = { path = "../typed-graph" }
