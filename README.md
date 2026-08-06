@@ -177,6 +177,7 @@ See [Visualization](#visualization) for details on the force-directed graph.
 |---|---|
 | `schema list` | List local and available Gramps schemas |
 | `schema download` | Download a schema from Gramps GitHub |
+| `diff <file_a> <file_b>` | Compare two Gramps XML files and produce a structured diff report |
 
 The `visualize` subcommand opens a native desktop window with an interactive
 force-directed graph of the family tree. It uses **Tauri v2** for the desktop
@@ -301,6 +302,7 @@ Generate → Validate (Gate 1) → Adversarial Transform → Validate (Gate 2) �
 | `gramps-reader` | `crates/gramps-reader/` | Shared library for streaming `.gramps` XML parsing: `FamilyRecord`, `ParsedPerson`, `ParsedFamily`, `Dsu`, `compute_generations`, XML attribute helpers |
 | `cli` | `crates/cli/` | CLI binary (`clap`), YAML scenario parsing, pipeline wiring, progress reporting |
 | `visualize` | `crates/visualize/` | Tauri v2 desktop app with D3.js force-directed graph visualization (gated behind the `visualize` Cargo feature) |
+| `diff` | `crates/diff/` | Gramps XML diff analyzer: compare two `.gramps` files, produce structured diff report |
 
 ## Documentation
 

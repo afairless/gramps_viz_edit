@@ -50,6 +50,20 @@ gramps_viz_edit/
 │   │       └── xml/
 │   │           ├── count.rs      # Streaming element count
 │   │           └── extract.rs    # Streaming person/family extraction
+│   ├── diff/                     # Gramps XML diff analyzer (compare two .gramps files)
+│   │   ├── src/
+│   │   │   ├── lib.rs            # Crate root, re-exports
+│   │   │   ├── compare.rs        # Diff comparison engine
+│   │   │   ├── matcher.rs        # Entity matching across files
+│   │   │   ├── normalize.rs      # XML normalization for comparison
+│   │   │   ├── cascading.rs      # Cascading/extrinsic resolution
+│   │   │   ├── resolve.rs        # Interactive conflict resolution (feature-gated)
+│   │   │   ├── report.rs         # Diff report types and formatting
+│   │   │   ├── similarity.rs     # String similarity scoring
+│   │   │   ├── output.rs         # Text + JSON output formatters
+│   │   │   └── visualizer_index.rs # Index for the visualizer integration
+│   │   └── tests/
+│   │       └── integration.rs
 │   ├── visualize/                # Tauri v2 desktop app with D3.js force-directed graph
 │   │   ├── tauri.conf.json       # Tauri v2 configuration
 │   │   ├── src/
@@ -90,6 +104,7 @@ gramps_viz_edit/
 │       │       ├── stats/        # Streaming count & report (stats command)
 │       │       ├── validate.rs   # Minimal XML structure check
 │       │       ├── visualize.rs  # Spawns gramps-gen-visualize binary
+│       │       ├── diff.rs       # Compare two Gramps XML files
 │       └── tests/
 │           ├── e2e.rs              # Subprocess-based E2E tests
 │           └── integration.rs    # Integration tests

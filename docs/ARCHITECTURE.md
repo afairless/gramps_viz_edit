@@ -4,13 +4,14 @@
 
 **gramps-gen** generates valid, plausible [Gramps](https://gramps-project.org/) family tree datasets for testing and development. It models Gramps data as a **typed directed multigraph**, supports both random and scenario-driven generation, applies adversarial transforms for stress-testing, and outputs Gramps XML (`.gramps` format).
 
-The system is a **Rust workspace** with five crates:
+The system is a **Rust workspace** with six crates:
 
 | Crate | Purpose |
 |---|---|
 | `typed-graph` | Core graph model, schema codegen, validation, generation |
 | `output` | Gramps XML serialization |
 | `gramps-reader` | Shared library for streaming `.gramps` XML parsing, DSU, generation computation |
+| `diff` | Gramps XML diff analyzer — compare and match entities across two family trees |
 | `cli` | CLI binary (`gramps-gen`), scenario parsing, pipeline wiring |
 | `visualize` | Tauri v2 desktop app with D3.js force-directed graph visualization (optional, gated behind `--features visualize`) |
 
@@ -82,6 +83,14 @@ A **Python extractor** (`extract/extract_schema.py`) introspects Gramps Python c
 └──────────────────────────┬─────────────────────────────────────┘
                            │
 ┌──────────────────────────┼─────────────────────────────────────┐
+│  diff  (Rust crate)      │  gramps-reader for parsing          │
+│                          ▼                                     │
+│  Entity matching  ────────── matcher.rs, similarity.rs          │
+│  Diff comparison  ────────── compare.rs                        │
+│  Output  ─────────────────── output.rs (text + JSON)           │
+└──────────────────────────┬─────────────────────────────────────┘
+                           │
+┌──────────────────────────┼─────────────────────────────────────┐
 │  cli  (Rust binary)      │                                     │
 │                          ▼                                     │
 │  gramps-gen generate ──────── 5-stage pipeline                 │
@@ -89,6 +98,7 @@ A **Python extractor** (`extract/extract_schema.py`) introspects Gramps Python c
 │  gramps-gen stats ──────────── File summary                    │
 │  gramps-gen schema list/download ── Schema management          │
 │  gramps-gen visualize ──────── Spawns gramps-gen-visualize     │
+│  gramps-gen diff <file_a> <file_b> ── Diff analysis            │
 └────────────────────────────────────────────────────────────────┘
                            │
                            ▼
@@ -518,6 +528,7 @@ Future: plan describes extracting this from the Gramps RelaxNG schema at build t
 | `gramps-gen visualize <file>` | Open a Tauri desktop window with force-directed graph visualization |
 | `gramps-gen schema list` | List local and available Gramps schemas |
 | `gramps-gen schema download [VERSION]` | Download a schema from Gramps GitHub |
+| `gramps-gen diff <file_a> <file_b>` | Compare two Gramps XML files and produce a structured diff report |
 
 ### Generate flags
 
@@ -696,6 +707,41 @@ The generation gap is configurable (default: 25 years, validated range: 1-100).
 
 ---
 
+## Diff Analyzer
+
+The `diff` crate provides a structured comparison engine for Gramps XML files. It
+matches persons, families, and other entities across two `.gramps` files, identifies
+additions, deletions, and modifications, and produces a structured diff report in
+text or JSON format.
+
+### Architecture
+
+The diff analysis follows a multi-stage pipeline:
+
+1. **Parsing**: Uses `gramps-reader` to stream-parse both `.gramps` files into
+   `ParsedPerson` and `ParsedFamily` arrays.
+2. **Entity matching** (`matcher.rs`): Matches entities across the two files using
+   string similarity scoring from `similarity.rs`.
+3. **Comparison** (`compare.rs`): Compares matched entity pairs field-by-field to
+   identify differences.
+4. **Cascading resolution** (`cascading.rs`): Extrinsic resolution for indirectly
+   referenced entities (e.g., events, places) that become relevant after initial
+   matching.
+5. **Output** (`output.rs`): Formats the diff report as human-readable text or
+   machine-readable JSON.
+
+### Feature gate
+
+The `resolve` feature (default: off) enables interactive conflict resolution via
+`crossterm`. Enable with `--features diff/resolve`.
+
+### Integration
+
+The `gramps-gen diff <file_a> <file_b>` CLI subcommand wires the full pipeline:
+parse → match → compare → resolve (if enabled) → output.
+
+---
+
 ## Error Handling
 
 ### Error types across layers
@@ -758,6 +804,7 @@ cargo test -p cli --test e2e    # E2E tests
 | `serde_yaml` | cli | YAML scenario parsing |
 | `log` / `env_logger` | cli | Logging |
 | `ureq` | cli | HTTP requests for `schema download` |
+| `strsim` | diff | String similarity scoring for entity matching |
 
 ---
 
