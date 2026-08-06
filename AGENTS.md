@@ -47,6 +47,7 @@ gramps_viz_edit/
 │   │       ├── graph.rs          # DSU operations, compute_generations
 │   │       ├── xml.rs            # XML attribute helpers
 │   │       ├── error.rs          # Parser error types
+│   │       ├── io.rs             # Gzip detection and transparent decompression
 │   │       └── xml/
 │   │           ├── count.rs      # Streaming element count
 │   │           └── extract.rs    # Streaming person/family extraction

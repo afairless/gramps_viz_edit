@@ -10,10 +10,14 @@ The system is a **Rust workspace** with six crates:
 |---|---|
 | `typed-graph` | Core graph model, schema codegen, validation, generation |
 | `output` | Gramps XML serialization |
-| `gramps-reader` | Shared library for streaming `.gramps` XML parsing, DSU, generation computation |
+| `gramps-reader` | Shared library for streaming `.gramps` XML parsing, DSU, generation computation, `compute_generation_table` for FamilyGroupGenerationTable |
 | `diff` | Gramps XML diff analyzer — compare and match entities across two family trees |
 | `cli` | CLI binary (`gramps-gen`), scenario parsing, pipeline wiring |
 | `visualize` | Tauri v2 desktop app with D3.js force-directed graph visualization (optional, gated behind `--features visualize`) |
+
+The `gramps-reader` crate's `compute_generation_table` function uses the DSU (disjoint set union) structure
+and family/person relationships to assign every person a generation offset relative to their connected
+component root, producing a `FamilyGroupGenerationTable` for downstream consumers like the visualizer.
 
 A **Python extractor** (`extract/extract_schema.py`) introspects Gramps Python classes to produce `schemas/schema-5.2.json`, which drives compile-time Rust code generation.
 
@@ -73,13 +77,13 @@ A **Python extractor** (`extract/extract_schema.py`) introspects Gramps Python c
 │  │   streaming)     │  │  tions, compute_  │                    │
 │  │                  │  │  generation_table │                    │
 │  └──────────────────┘  └──────────────────┘                    │
-│  ┌──────────────────┐  ┌──────────────────┐                    │
-│  │  types.rs        │  │  xml.rs (helpers) │                    │
-│  │  FamilyRecord,   │  │  strip_prefix,    │                    │
-│  │  ParsedPerson,   │  │  read_handle_attr,│                    │
-│  │  ParsedFamily,   │  │  read_hlink_attr  │                    │
-│  │  ParsedEvent     │  │                    │                    │
-│  └──────────────────┘  └──────────────────┘                    │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────┐  │
+│  │  types.rs        │  │  xml.rs (helpers) │  │  io.rs       │  │
+│  │  FamilyRecord,   │  │  strip_prefix,    │  │  gzip detect │  │
+│  │  ParsedPerson,   │  │  read_handle_attr,│  │  transparent │  │
+│  │  ParsedFamily,   │  │  read_hlink_attr  │  │  decompress  │  │
+│  │  ParsedEvent     │  │                    │  │              │  │
+│  └──────────────────┘  └──────────────────┘  └──────────────┘  │
 └──────────────────────────┬─────────────────────────────────────┘
                            │
 ┌──────────────────────────┼─────────────────────────────────────┐
