@@ -245,6 +245,10 @@ mod tests {
         ItemDiff {
             handle_a: handle_a.map(|s| s.to_string()),
             handle_b: handle_b.map(|s| s.to_string()),
+            gramps_id_a: None,
+            gramps_id_b: None,
+            display_name_a: None,
+            display_name_b: None,
             item_type: "Citation".to_string(),
             classification,
             field_changes,

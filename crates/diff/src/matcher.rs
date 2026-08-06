@@ -604,6 +604,10 @@ pub fn match_graphs(graph_a: &Graph, graph_b: &Graph) -> MatchResult {
             item_diffs.push(ItemDiff {
                 handle_a: Some(handle_a.clone()),
                 handle_b: Some(handle_b),
+                gramps_id_a: None,
+                gramps_id_b: None,
+                display_name_a: None,
+                display_name_b: None,
                 item_type: item_type.to_string(),
                 classification,
                 field_changes,
@@ -677,6 +681,10 @@ pub fn match_graphs(graph_a: &Graph, graph_b: &Graph) -> MatchResult {
                 item_diffs.push(ItemDiff {
                     handle_a: Some(handle_a.clone()),
                     handle_b: Some(handle_b.clone()),
+                    gramps_id_a: None,
+                    gramps_id_b: None,
+                    display_name_a: None,
+                    display_name_b: None,
                     item_type: item_type.to_string(),
                     classification,
                     field_changes,
@@ -722,6 +730,10 @@ pub fn match_graphs(graph_a: &Graph, graph_b: &Graph) -> MatchResult {
             item_diffs.push(ItemDiff {
                 handle_a: Some(handle.clone()),
                 handle_b: None,
+                gramps_id_a: None,
+                gramps_id_b: None,
+                display_name_a: None,
+                display_name_b: None,
                 item_type: item_type.to_string(),
                 classification: Classification::Removed,
                 field_changes: vec![],
@@ -736,6 +748,10 @@ pub fn match_graphs(graph_a: &Graph, graph_b: &Graph) -> MatchResult {
             item_diffs.push(ItemDiff {
                 handle_a: None,
                 handle_b: Some(handle.clone()),
+                gramps_id_a: None,
+                gramps_id_b: None,
+                display_name_a: None,
+                display_name_b: None,
                 item_type: item_type.to_string(),
                 classification: Classification::Added,
                 field_changes: vec![],

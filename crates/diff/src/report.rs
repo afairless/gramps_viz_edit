@@ -63,6 +63,14 @@ pub struct ItemDiff {
     pub handle_a: Option<String>,
     /// Handle in the second graph (B). None for REMOVED items.
     pub handle_b: Option<String>,
+    /// Gramps database ID in the first graph (e.g. "I0002", "E0005").
+    pub gramps_id_a: Option<String>,
+    /// Gramps database ID in the second graph (e.g. "I0002", "E0005").
+    pub gramps_id_b: Option<String>,
+    /// Human-readable display name for the item in graph A (e.g. "John Smith").
+    pub display_name_a: Option<String>,
+    /// Human-readable display name for the item in graph B (e.g. "John Smith").
+    pub display_name_b: Option<String>,
     /// The type of primary item (e.g., "Person", "Family", "Event").
     pub item_type: String,
     /// Classification of this item.
@@ -179,6 +187,10 @@ mod tests {
         let item = ItemDiff {
             handle_a: None,
             handle_b: None,
+            gramps_id_a: None,
+            gramps_id_b: None,
+            display_name_a: None,
+            display_name_b: None,
             item_type: "Person".into(),
             classification: Classification::Same,
             field_changes: vec![],
@@ -272,6 +284,10 @@ mod tests {
                 ItemDiff {
                     handle_a: Some("H001".into()),
                     handle_b: Some("H001".into()),
+                    gramps_id_a: Some("I0001".into()),
+                    gramps_id_b: Some("I0001".into()),
+                    display_name_a: Some("John Smith".into()),
+                    display_name_b: Some("John Smith".into()),
                     item_type: "Person".into(),
                     classification: Classification::Same,
                     field_changes: vec![],
@@ -280,6 +296,10 @@ mod tests {
                 ItemDiff {
                     handle_a: Some("H002".into()),
                     handle_b: Some("H002".into()),
+                    gramps_id_a: Some("I0002".into()),
+                    gramps_id_b: Some("I0003".into()),
+                    display_name_a: Some("John Smith".into()),
+                    display_name_b: Some("John Jones".into()),
                     item_type: "Person".into(),
                     classification: Classification::Modified,
                     field_changes: vec![FieldChange {
@@ -294,6 +314,10 @@ mod tests {
                 ItemDiff {
                     handle_a: None,
                     handle_b: Some("H003".into()),
+                    gramps_id_a: None,
+                    gramps_id_b: Some("I0004".into()),
+                    display_name_a: None,
+                    display_name_b: Some("Jane Doe".into()),
                     item_type: "Person".into(),
                     classification: Classification::Added,
                     field_changes: vec![],
@@ -302,6 +326,10 @@ mod tests {
                 ItemDiff {
                     handle_a: Some("H004".into()),
                     handle_b: None,
+                    gramps_id_a: Some("I0005".into()),
+                    gramps_id_b: None,
+                    display_name_a: Some("Bob Brown".into()),
+                    display_name_b: None,
                     item_type: "Person".into(),
                     classification: Classification::Removed,
                     field_changes: vec![],

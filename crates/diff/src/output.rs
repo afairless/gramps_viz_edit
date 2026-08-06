@@ -218,6 +218,10 @@ mod tests {
         ItemDiff {
             handle_a: handle_a.map(String::from),
             handle_b: handle_b.map(String::from),
+            gramps_id_a: None,
+            gramps_id_b: None,
+            display_name_a: None,
+            display_name_b: None,
             item_type: item_type.to_string(),
             classification: class,
             field_changes: changes,
