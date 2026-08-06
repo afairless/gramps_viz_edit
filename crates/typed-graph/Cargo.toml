@@ -4,12 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["schema-5-2"]
-schema-5-0 = []
+default = ["schema-5-1", "schema-5-2"]  # Both schemas compiled by default for transparent auto-detection
 schema-5-1 = []
 schema-5-2 = []
-schema-6-0 = []
-all-schemas = ["schema-5-0", "schema-5-1", "schema-5-2", "schema-6-0"]
+all-schemas = ["schema-5-1", "schema-5-2"]
 
 [dependencies]
 serde = { workspace = true }

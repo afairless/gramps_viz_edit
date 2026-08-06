@@ -32,10 +32,8 @@ mod schema_convert;
 
 /// Feature name → version string (e.g., "schema-5-2" → "5.2")
 const FEATURE_VERSIONS: &[(&str, &str)] = &[
-    ("schema-5-0", "5.0"),
     ("schema-5-1", "5.1"),
     ("schema-5-2", "5.2"),
-    ("schema-6-0", "6.0"),
 ];
 
 /// Version string → feature env var name (e.g., "5.2" → "CARGO_FEATURE_SCHEMA_5_2")
@@ -148,20 +146,20 @@ fn load_schemas(
     enum_constants: &serde_json::Value,
 ) -> Vec<(String, serde_json::Value)> {
     let mut schemas: Vec<(String, serde_json::Value)> = Vec::new();
+    let strict_mode = env::var("GRAMPS_STRICT_SCHEMA").is_ok();
+    let mut loaded_count: usize = 0;
 
     for version in versions {
         let filename = version_to_filename(version);
         let schema_path = schemas_dir.join(&filename);
 
         if !schema_path.exists() {
-            eprintln!("error: {} not found.", schema_path.display());
-            eprintln!(
-                "  hint: Run `gramps-gen schema download {}` to download it,",
-                version
-            );
-            eprintln!("  or build with only the default schema: `cargo build`");
-            eprintln!("  (which uses --features schema-5-2).");
-            std::process::exit(1);
+            if strict_mode {
+                eprintln!("error: {} not found.", schema_path.display());
+                std::process::exit(1);
+            }
+            println!("cargo::warning=schema-{}.json not found; skipping schema {}", version, version);
+            continue;
         }
 
         let schema_json = match fs::read_to_string(&schema_path) {
@@ -206,6 +204,12 @@ fn load_schemas(
         };
 
         schemas.push((version.clone(), schema));
+        loaded_count += 1;
+    }
+
+    if loaded_count == 0 {
+        eprintln!("error: no schema files found. Run `gramps-gen schema download <version>` or place schema files in schemas/.");
+        std::process::exit(1);
     }
 
     schemas
