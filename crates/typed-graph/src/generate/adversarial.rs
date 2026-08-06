@@ -812,17 +812,10 @@ pub fn double_gender(fraction: f64) -> GraphTransform {
 
         for handle in person_handles.iter().take(swap_count) {
             if let Some(crate::Node::Person(ref mut person)) = graph.get_node_mut(handle) {
-                match crate::gender_cmp(&person.gender) {
-                    // Swap Male ↔ Female
-                    #[cfg(feature = "schema-5-1")]
-                    Some(0) => crate::set_gender(person, 1),
-                    #[cfg(feature = "schema-5-1")]
-                    Some(1) => crate::set_gender(person, 0),
-                    #[cfg(not(feature = "schema-5-1"))]
+                match crate::gender_value(crate::gender_cmp(&person.gender)) {
                     0 => crate::set_gender(person, 1),
-                    #[cfg(not(feature = "schema-5-1"))]
                     1 => crate::set_gender(person, 0),
-                    // Leave Unknown(2) and Other(3) unchanged
+                    // Leave Unknown(2), Other(3), and None unchanged
                     _ => {}
                 }
             }
@@ -836,8 +829,12 @@ pub fn double_gender(fraction: f64) -> GraphTransform {
 // Tests
 // ---------------------------------------------------------------------------
 
-#[cfg(all(test, not(feature = "schema-5-1")))]
+#[cfg(test)]
 mod tests {
+    /// Normalize gender to i32 for test assertions across schema versions.
+    fn gender_val(p: &crate::PersonData) -> i32 {
+        crate::gender_value(crate::gender_cmp(&p.gender))
+    }
     use super::*;
 
     // =======================================================================
@@ -1055,7 +1052,7 @@ mod tests {
                     (*h).clone(),
                     crate::Node::Person(crate::PersonData {
                         handle: (*h).clone(),
-                        gender: *g,
+                        gender: crate::into_gender_field(*g),
                         primary_name: crate::Name {
                             first_name: Some("Test".to_string()),
                             ..crate::Name::default()
@@ -1181,7 +1178,7 @@ mod tests {
                 evt1.clone(),
                 crate::Node::Event(crate::EventData {
                     handle: evt1.clone(),
-                    event_type: crate::EventType::Birth,
+                    event_type: crate::into_event_type_field(crate::EventType::Birth),
                     ..crate::EventData::default()
                 }),
             )
@@ -1264,7 +1261,7 @@ mod tests {
                 "p1".to_string(),
                 crate::Node::Person(crate::PersonData {
                     handle: "p1".to_string(),
-                    gender: 0,
+                    gender: crate::into_gender_field(0),
                     primary_name: crate::Name {
                         first_name: Some("Test".to_string()),
                         ..crate::Name::default()
@@ -1514,10 +1511,10 @@ mod tests {
             )
             .unwrap();
         graph
-            .add_edge(crate::Edge::PlacePlaceRef {
-                source: "pl1".to_string(),
-                target: existing_parent,
-            })
+            .add_edge(crate::edge_place_place_ref(
+                "pl1".to_string(),
+                existing_parent,
+            ))
             .unwrap();
 
         let transform = deep_nesting(3);
@@ -1526,7 +1523,7 @@ mod tests {
         // The existing PlacePlaceRef edge should still be present
         let existing_refs: Vec<_> = result
             .iter_edges()
-            .filter(|e| matches!(e, crate::Edge::PlacePlaceRef { source, target } if source == "pl1" && target == "existing_parent"))
+            .filter(|e| matches!(e, crate::Edge::PlacePlaceRef { source, target, .. } if source == "pl1" && target == "existing_parent"))
             .collect();
         assert_eq!(
             existing_refs.len(),
@@ -1565,7 +1562,7 @@ mod tests {
                 "evt1".to_string(),
                 crate::Node::Event(crate::EventData {
                     handle: "evt1".to_string(),
-                    event_type: crate::EventType::Birth,
+                    event_type: crate::into_event_type_field(crate::EventType::Birth),
                     ..crate::EventData::default()
                 }),
             )
@@ -1974,11 +1971,11 @@ mod tests {
         // Count genders before
         let males_before: usize = graph
             .iter_nodes()
-            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if p.gender == 0))
+            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if gender_val(p) == 0))
             .count();
         let females_before: usize = graph
             .iter_nodes()
-            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if p.gender == 1))
+            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if gender_val(p) == 1))
             .count();
 
         let transform = double_gender(1.0);
@@ -1987,11 +1984,11 @@ mod tests {
         // Count genders after
         let males_after: usize = result
             .iter_nodes()
-            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if p.gender == 0))
+            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if gender_val(p) == 0))
             .count();
         let females_after: usize = result
             .iter_nodes()
-            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if p.gender == 1))
+            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if gender_val(p) == 1))
             .count();
 
         // All males should become females and vice versa
@@ -2019,7 +2016,7 @@ mod tests {
         // Count swapped genders (should be ~50% of persons with binary gender)
         let _binary_persons_before: usize = result
             .iter_nodes()
-            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if p.gender == 0 || p.gender == 1))
+            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if gender_val(p) == 0 || gender_val(p) == 1))
             .count();
 
         // The fraction should be applied to all persons, including those with
@@ -2036,11 +2033,11 @@ mod tests {
         // the gender ratio changed.
         let males_after: usize = result
             .iter_nodes()
-            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if p.gender == 0))
+            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if gender_val(p) == 0))
             .count();
         let females_after: usize = result
             .iter_nodes()
-            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if p.gender == 1))
+            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if gender_val(p) == 1))
             .count();
 
         // At least some change should have occurred
@@ -2056,12 +2053,12 @@ mod tests {
         // Add persons with gender 2 (Unknown) and 3 (Other)
         let p1 = crate::PersonData {
             handle: "p1".to_string(),
-            gender: 2,
+            gender: crate::into_gender_field(2),
             ..crate::PersonData::default()
         };
         let p2 = crate::PersonData {
             handle: "p2".to_string(),
-            gender: 3,
+            gender: crate::into_gender_field(3),
             ..crate::PersonData::default()
         };
         graph
@@ -2078,9 +2075,9 @@ mod tests {
         for (handle, node) in result.iter_nodes() {
             if let crate::Node::Person(p) = node {
                 if handle == "p1" {
-                    assert_eq!(p.gender, 2, "Unknown gender should be unchanged");
+                    assert_eq!(gender_val(p), 2, "Unknown gender should be unchanged");
                 } else if handle == "p2" {
-                    assert_eq!(p.gender, 3, "Other gender should be unchanged");
+                    assert_eq!(gender_val(p), 3, "Other gender should be unchanged");
                 }
             }
         }
@@ -2106,7 +2103,7 @@ mod tests {
         let mut graph = Graph::new();
         let p = crate::PersonData {
             handle: "p1".to_string(),
-            gender: 0,
+            gender: crate::into_gender_field(0),
             ..crate::PersonData::default()
         };
         graph
@@ -2117,7 +2114,7 @@ mod tests {
         let result = transform(graph).unwrap();
 
         if let Some(crate::Node::Person(p)) = result.get_node(&"p1".to_string()) {
-            assert_eq!(p.gender, 0, "Gender should be unchanged with fraction=0.0");
+            assert_eq!(gender_val(p), 0, "Gender should be unchanged with fraction=0.0");
         } else {
             panic!("Person node should exist");
         }
@@ -2248,11 +2245,11 @@ mod tests {
         let graph = result.graph;
         let males: usize = graph
             .iter_nodes()
-            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if p.gender == 0))
+            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if gender_val(p) == 0))
             .count();
         let females: usize = graph
             .iter_nodes()
-            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if p.gender == 1))
+            .filter(|(_, n)| matches!(n, crate::Node::Person(p) if gender_val(p) == 1))
             .count();
 
         // At least some persons should have been swapped
