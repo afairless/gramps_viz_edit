@@ -66,7 +66,7 @@ pub struct SelectedPerson {
 }
 
 /// Export payload for selected persons.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SelectionExport {
     pub exported_at: String,
     pub file: String,
@@ -483,6 +483,16 @@ mod tests {
             .filter(|l| l.link_type == LinkType::Spouse)
             .collect();
         assert_eq!(spouse_links.len(), 2);
+    }
+
+    // -----------------------------------------------------------------------
+    // Compile-time: SelectionExport is Deserialize
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn selection_export_is_deserializable() {
+        fn assert_deserialize<'de, T: serde::Deserialize<'de>>() {}
+        assert_deserialize::<SelectionExport>();
     }
 
     // -----------------------------------------------------------------------
