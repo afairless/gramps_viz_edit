@@ -41,6 +41,16 @@ html, body {
   box-shadow: inset 0 0 0 3px #2266aa;
 }
 
+/* ---- Rectangle selection ---- */
+
+.selection-rect {
+  fill: rgba(68, 136, 204, 0.08);
+  stroke: #4488cc;
+  stroke-width: 2px;
+  stroke-dasharray: 6 3;
+  pointer-events: none;
+}
+
 #tooltip {
   position: absolute;
   pointer-events: none;

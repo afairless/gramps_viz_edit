@@ -44,6 +44,16 @@ export interface GraphController {
   setFrozen(frozen: boolean): void;
   /** Query whether freeze is currently active. */
   isFrozen(): boolean;
+  /** Enable or disable rectangle-selection toggle. */
+  setRectSelectActive(active: boolean): void;
+  /** Query whether rect-select toggle is on. */
+  isRectSelectActive(): boolean;
+  /** Clear the current selection rectangle (e.g., on Escape or unfreeze). */
+  clearRectangle(): void;
+  /** Get handles of nodes currently inside the drawn rectangle. */
+  getNodesInRectangle(): string[];
+  /** Query whether a rectangle is currently drawn. */
+  hasRectangle(): boolean;
 }
 
 // Internal node/link types for D3 simulation.
@@ -629,6 +639,14 @@ export function renderGraph(
   let simulation: d3.Simulation<SimNode, undefined>;
   let colorScale = buildColorScale([]);
 
+  // Rectangle selection state
+  let rectSelectActive = false;
+  let drawingRect = false;
+  let rectStartX = 0;
+  let rectStartY = 0;
+  let currentRect: { x: number; y: number; w: number; h: number } | null = null;
+  let rectOverlay: any;
+
   // --- SVG scaffold ---
   const width = containerElement.clientWidth || 960;
   const height = containerElement.clientHeight || 600;
@@ -642,14 +660,97 @@ export function renderGraph(
 
   const g = svg.append('g'); // zoom/pan container
 
+  // Rectangle overlay (raised above nodes after they render)
+  rectOverlay = g.append('g').attr('class', 'rect-overlay');
+
   // --- zoom ---
   const zoom = d3
     .zoom<SVGSVGElement, unknown>()
     .scaleExtent([0.1, 8])
+    .filter((event: any) => {
+      // Block zoom when rect-draw mode is active during freeze
+      if (frozen && (rectSelectActive || event?.shiftKey)) return false;
+      return true;
+    })
     .on('zoom', (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
       g.attr('transform', event.transform.toString());
     });
   svg.call(zoom);
+
+  // --- helper: convert pointer event to g-local coordinates ---
+  // D3's pointer() relies on getScreenCTM/inverse which is not available
+  // in all environments (e.g., happy-dom test runner). We compute the
+  // coordinates manually using the SVG bounding rect and zoom transform.
+  function getPointerCoords(event: PointerEvent): [number, number] {
+    const svgEl = svg.node()!;
+    const rect = svgEl.getBoundingClientRect();
+    const t = d3.zoomTransform(svgEl);
+    return [
+      (event.clientX - rect.left - t.x) / t.k,
+      (event.clientY - rect.top - t.y) / t.k,
+    ];
+  }
+
+  // --- rectangle pointer handlers ---
+  svg.on('pointerdown.rect', (event: PointerEvent) => {
+    // Only active during freeze + (toggle ON or Shift held)
+    if (!frozen) return;
+    if (!rectSelectActive && !event.shiftKey) return;
+    // Don't start rectangle on node clicks
+    const target = event.target as Element;
+    if (target.closest('.nodes')) return;
+
+    drawingRect = true;
+    const coords = getPointerCoords(event);
+    rectStartX = coords[0];
+    rectStartY = coords[1];
+
+    // Clear previous rect
+    rectOverlay.selectAll('*').remove();
+    rectOverlay.append('rect')
+      .attr('class', 'selection-rect')
+      .attr('x', rectStartX)
+      .attr('y', rectStartY)
+      .attr('width', 0)
+      .attr('height', 0);
+  });
+
+  svg.on('pointermove.rect', (event: PointerEvent) => {
+    if (!drawingRect) return;
+    const coords = getPointerCoords(event);
+    const x = Math.min(rectStartX, coords[0]);
+    const y = Math.min(rectStartY, coords[1]);
+    const w = Math.abs(coords[0] - rectStartX);
+    const h = Math.abs(coords[1] - rectStartY);
+
+    rectOverlay.select('.selection-rect')
+      .attr('x', x)
+      .attr('y', y)
+      .attr('width', w)
+      .attr('height', h);
+  });
+
+  svg.on('pointerup.rect', (_event: PointerEvent) => {
+    if (!drawingRect) return;
+    drawingRect = false;
+
+    const rect = rectOverlay.select('.selection-rect');
+    if (rect.empty()) return;
+
+    const x = parseFloat(rect.attr('x'));
+    const y = parseFloat(rect.attr('y'));
+    const w = parseFloat(rect.attr('width'));
+    const h = parseFloat(rect.attr('height'));
+
+    // Ignore tiny drags (< 5px) — treat as a click to dismiss
+    if (w < 5 && h < 5) {
+      clearRectangle();
+      return;
+    }
+
+    currentRect = { x, y, w, h };
+    applyRectNodeHighlight();
+  });
 
   // --- resize observer ---
   const ro = new ResizeObserver(() => {
@@ -809,12 +910,56 @@ export function renderGraph(
     // ---- drag behavior (re-bind all visible nodes with current simulation) ----
     nodeGroup.call(createDragBehavior(simulation, () => frozen));
 
+    // Keep rectangle overlay on top of node layer
+    rectOverlay.raise();
+
     // Apply highlighting
+    applyHighlight();
+  }
+
+  /** Return handles of visible nodes whose centers fall within the current rectangle. */
+  function getNodesInRectangle(): string[] {
+    if (!currentRect) return [];
+    const filtered =
+      currentFilter === null
+        ? simNodes
+        : simNodes.filter((n) => n.family_group === currentFilter);
+    return filtered
+      .filter((n) => {
+        const nx = n.x ?? 0;
+        const ny = n.y ?? 0;
+        return (
+          nx >= currentRect!.x &&
+          nx <= currentRect!.x + currentRect!.w &&
+          ny >= currentRect!.y &&
+          ny <= currentRect!.y + currentRect!.h
+        );
+      })
+      .map((n) => n.handle);
+  }
+
+  /** Highlight nodes inside the current rectangle with a blue ring. */
+  function applyRectNodeHighlight(): void {
+    if (!nodeGroup) return;
+    const inRect = new Set(getNodesInRectangle());
+    nodeGroup.each(function (d: SimNode) {
+      const inRectangle = inRect.has(d.handle) && !highlighted.has(d.handle);
+      d3.select(this).select('circle')
+        .attr('stroke', inRectangle ? '#4488cc' : highlighted.has(d.handle) ? '#ff6b6b' : '#fff')
+        .attr('stroke-width', inRectangle ? 2 : highlighted.has(d.handle) ? SELECTED_STROKE_WIDTH : 1.5);
+    });
+  }
+
+  /** Clear the drawn rectangle and restore normal highlighting. */
+  function clearRectangle(): void {
+    currentRect = null;
+    rectOverlay.selectAll('*').remove();
     applyHighlight();
   }
 
   function applyHighlight() {
     if (!nodeGroup) return;
+    applyRectNodeHighlight();
     nodeGroup.each(function (d: SimNode) {
       const el = d3.select(this);
       const isSelected = highlighted.has(d.handle);
@@ -926,6 +1071,9 @@ export function renderGraph(
       if (frozen) {
         simulation.stop();
       } else {
+        // Clear rectangle when unfreezing
+        rectSelectActive = false;
+        clearRectangle();
         // alpha(1) because the simulation was completely stopped — needs a
         // strong kick, matching resetLayout's behavior.
         simulation.alpha(1).restart();
@@ -936,6 +1084,27 @@ export function renderGraph(
 
     isFrozen() {
       return frozen;
+    },
+
+    setRectSelectActive(active: boolean) {
+      rectSelectActive = active;
+      if (!active) clearRectangle();
+    },
+
+    isRectSelectActive() {
+      return rectSelectActive;
+    },
+
+    clearRectangle() {
+      clearRectangle();
+    },
+
+    getNodesInRectangle() {
+      return getNodesInRectangle();
+    },
+
+    hasRectangle() {
+      return currentRect !== null;
     },
   };
 
