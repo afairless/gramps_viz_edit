@@ -45,6 +45,8 @@ pub enum CliError {
     },
     /// Diff analysis failed.
     DiffFailed(String),
+    /// Diff-viz integration failed.
+    IntegrateFailed(String),
 }
 
 impl fmt::Display for CliError {
@@ -94,6 +96,9 @@ impl fmt::Display for CliError {
             }
             CliError::DiffFailed(msg) => {
                 write!(f, "diff failed: {}", msg)
+            }
+            CliError::IntegrateFailed(msg) => {
+                write!(f, "integration failed: {}", msg)
             }
         }
     }
@@ -157,6 +162,12 @@ impl From<gramps_reader::Error> for CliError {
                 schema_version, version, schema_version
             )),
         }
+    }
+}
+
+impl From<integrate::IntegrateError> for CliError {
+    fn from(err: integrate::IntegrateError) -> Self {
+        CliError::IntegrateFailed(err.to_string())
     }
 }
 
@@ -312,6 +323,24 @@ mod tests {
         match cli_err {
             CliError::XmlParseError { message } => assert_eq!(message, "parse error"),
             other => panic!("Expected XmlParseError variant, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cli_error_integrate_failed_display() {
+        let err = CliError::IntegrateFailed("bad csv".to_string());
+        let display = format!("{}", err);
+        assert!(display.contains("integration failed"));
+        assert!(display.contains("bad csv"));
+    }
+
+    #[test]
+    fn cli_error_from_integrate_error() {
+        let integrate_err = integrate::IntegrateError::DiffReadError("bad file".to_string());
+        let cli_err: CliError = integrate_err.into();
+        match cli_err {
+            CliError::IntegrateFailed(msg) => assert!(msg.contains("bad file")),
+            other => panic!("Expected IntegrateFailed variant, got: {:?}", other),
         }
     }
 }

@@ -12,6 +12,7 @@ typed-graph = { path = "../typed-graph" }
 output = { path = "../output" }
 gramps-reader = { path = "../gramps-reader" }
 diff = { path = "../diff" }
+integrate = { path = "../integrate" }
 clap = { version = "4", features = ["derive"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

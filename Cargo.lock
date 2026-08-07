@@ -420,6 +420,7 @@ dependencies = [
  "env_logger",
  "flate2",
  "gramps-reader",
+ "integrate",
  "log",
  "output",
  "quick-xml 0.36.2",

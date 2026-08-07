@@ -891,3 +891,93 @@ fn e2e_diff_missing_file_shows_error() {
         stderr
     );
 }
+
+/// Smoke test: `integrate diff-viz --help` works.
+#[test]
+fn e2e_integrate_diff_viz_help() {
+    let (stdout, _stderr, code) = gramps_gen(&["integrate", "diff-viz", "--help"]);
+    assert_eq!(code, Some(0), "integrate diff-viz --help should succeed");
+    assert!(stdout.contains("diff-viz"));
+    assert!(stdout.contains("--diff"));
+    assert!(stdout.contains("--selections"));
+    assert!(stdout.contains("--format"));
+}
+
+/// Integration test: run `integrate diff-viz` with fixture files and verify CSV output.
+#[test]
+fn e2e_integrate_diff_viz_csv_output() {
+    // Create fixture diff CSV
+    let diff_csv = "\"classification\",\"item_type\",\"handle_a\",\"gramps_id_a\",\"display_name_a\",\"handle_b\",\"gramps_id_b\",\"display_name_b\",\"confidence\",\"field_name\",\"field_kind\",\"old_value\",\"new_value\",\"similarity\"
+\"MODIFIED\",\"Person\",\"H001\",\"I0001\",\"John Smith\",\"H001\",\"I0001\",\"John Smith\",\"1.00\",\"surname\",\"Text\",\"Smith\",\"Jones\",\"0.50\"
+\"SAME\",\"Person\",\"H002\",\"I0002\",\"Jane Doe\",\"H002\",\"I0002\",\"Jane Doe\",\"1.00\",\"\",\"\",\"\",\"\",\"0.00\"
+";
+
+    let selections_json = r#"{
+  "selections": [
+    {"handle": "H001", "name": "John Smith", "birth_date": "1840-07-13", "death_date": "1910-03-22", "gender": "male", "family_group": 3},
+    {"handle": "H002", "name": "Jane Doe", "birth_date": null, "death_date": null, "gender": "female", "family_group": 3}
+  ]
+}"#;
+
+    let diff_path = format!("/tmp/gramps_gen_e2e_diff_{}.csv", std::process::id());
+    let sel_path = format!("/tmp/gramps_gen_e2e_sel_{}.json", std::process::id());
+    let out_path = format!("/tmp/gramps_gen_e2e_out_{}.csv", std::process::id());
+
+    std::fs::write(&diff_path, diff_csv).unwrap_or(());
+    std::fs::write(&sel_path, selections_json).unwrap_or(());
+
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "integrate",
+        "diff-viz",
+        "--diff",
+        &diff_path,
+        "--selections",
+        &sel_path,
+        "--output",
+        &out_path,
+    ]);
+    assert_eq!(
+        code, Some(0),
+        "integrate diff-viz should succeed, stderr: {}",
+        stderr
+    );
+
+    // Verify output file exists and has expected content
+    let content = std::fs::read_to_string(&out_path).unwrap_or_default();
+    assert!(!content.is_empty(), "Output file should not be empty");
+    assert!(content.contains("viz_name"));
+    assert!(content.contains("John Smith"));
+    assert!(content.contains("Jane Doe"));
+    assert!(content.contains("male"));
+
+    // Verify integrated columns header
+    assert!(content.contains("side"));
+    assert!(content.contains("viz_family_group"));
+
+    // Clean up
+    let _ = std::fs::remove_file(&diff_path);
+    let _ = std::fs::remove_file(&sel_path);
+    let _ = std::fs::remove_file(&out_path);
+}
+
+/// Integration test: missing diff file shows error.
+#[test]
+fn e2e_integrate_diff_viz_missing_diff() {
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "integrate",
+        "diff-viz",
+        "--diff",
+        "/tmp/nonexistent_diff.csv",
+        "--selections",
+        "/tmp/nonexistent_sel.json",
+    ]);
+    assert!(
+        code != Some(0),
+        "integrate diff-viz should fail when diff file is missing"
+    );
+    assert!(
+        stderr.contains("error") || stderr.contains("failed"),
+        "Should show error message, got: {}",
+        stderr
+    );
+}

@@ -7,6 +7,7 @@ use clap::Parser;
 use clap::Subcommand;
 use cli::commands::diff::DiffArgs;
 use cli::commands::generate::GenerateArgs;
+use cli::commands::integrate::IntegrateArgs;
 use cli::commands::schema::SchemaCommand;
 use cli::commands::stats::StatsArgs;
 use cli::commands::validate::ValidateArgs;
@@ -33,6 +34,8 @@ enum Command {
     Visualize(VisualizeArgs),
     /// Compare two Gramps XML files
     Diff(DiffArgs),
+    /// Integrate diff results with visualizer selections
+    Integrate(IntegrateArgs),
     /// List and download Gramps schemas
     #[command(subcommand)]
     Schema(SchemaCommand),
@@ -44,6 +47,7 @@ fn main() -> Result<(), CliError> {
     match cli.command {
         Command::Generate(args) => cli::commands::generate::run(args)?,
         Command::Diff(args) => cli::commands::diff::run(args)?,
+        Command::Integrate(args) => cli::commands::integrate::run(args)?,
         Command::Stats(args) => cli::commands::stats::run(args)?,
         Command::Validate(args) => cli::commands::validate::run(args)?,
         Command::Visualize(args) => cli::commands::visualize::run(args)?,
