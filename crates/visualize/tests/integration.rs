@@ -337,3 +337,109 @@ fn exp01_fixture_counts() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// SelectionExport serialization (envelope format)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn selection_export_serialization_has_envelope() {
+    let export = visualize::SelectionExport {
+        exported_at: "2025-01-15T10:30:00.000Z".to_string(),
+        file: "selections.json".to_string(),
+        selections: vec![
+            visualize::SelectedPerson {
+                handle: "abc-1".to_string(),
+                name: "John Smith".to_string(),
+                birth_date: Some("1840-07-13".to_string()),
+                death_date: Some("1910-03-22".to_string()),
+                gender: "male".to_string(),
+                family_group: 3,
+            },
+            visualize::SelectedPerson {
+                handle: "abc-2".to_string(),
+                name: "Jane Doe".to_string(),
+                birth_date: None,
+                death_date: None,
+                gender: "female".to_string(),
+                family_group: 3,
+            },
+        ],
+    };
+
+    let json_str = serde_json::to_string_pretty(&export).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+    // Must be an object, not an array
+    assert!(parsed.is_object(), "envelope should be an object");
+
+    // Must have envelope keys
+    assert!(
+        parsed.get("exported_at").is_some(),
+        "missing exported_at"
+    );
+    assert!(parsed.get("file").is_some(), "missing file");
+    assert!(parsed.get("selections").is_some(), "missing selections");
+    assert!(parsed["selections"].is_array(), "selections should be an array");
+
+    // Round-trip: deserialize back
+    let round_trip: visualize::SelectionExport =
+        serde_json::from_str(&json_str).expect("should round-trip");
+    assert_eq!(round_trip.exported_at, "2025-01-15T10:30:00.000Z");
+    assert_eq!(round_trip.file, "selections.json");
+    assert_eq!(round_trip.selections.len(), 2);
+    assert_eq!(round_trip.selections[0].handle, "abc-1");
+    assert_eq!(round_trip.selections[1].handle, "abc-2");
+}
+
+#[test]
+fn selection_export_roundtrip_via_integrate() {
+    // Build a SelectionExport, serialize it, write to temp file, then
+    // parse with integrate::parse_selections_json and verify handles match.
+    let export = visualize::SelectionExport {
+        exported_at: "2025-06-01T12:00:00.000Z".to_string(),
+        file: "test_selections.json".to_string(),
+        selections: vec![
+            visualize::SelectedPerson {
+                handle: "h001".to_string(),
+                name: "Alice Wonderland".to_string(),
+                birth_date: Some("1850-01-01".to_string()),
+                death_date: None,
+                gender: "female".to_string(),
+                family_group: 1,
+            },
+            visualize::SelectedPerson {
+                handle: "h002".to_string(),
+                name: "Bob Builder".to_string(),
+                birth_date: None,
+                death_date: Some("1910-12-31".to_string()),
+                gender: "male".to_string(),
+                family_group: 1,
+            },
+        ],
+    };
+
+    let json_str = serde_json::to_string_pretty(&export).unwrap();
+
+    // Write to temp file
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    use std::io::Write;
+    write!(tmp, "{}", json_str).unwrap();
+    let sel_path = tmp.path().with_extension("json");
+    std::fs::rename(tmp.path(), &sel_path).unwrap();
+
+    // Parse with integrate
+    let selections = integrate::json_reader::parse_selections_json(
+        sel_path.to_str().unwrap(),
+    )
+    .expect("integrate should parse the wrapped format");
+
+    assert_eq!(selections.len(), 2);
+    assert_eq!(selections[0].handle, "h001");
+    assert_eq!(selections[0].name, "Alice Wonderland");
+    assert_eq!(selections[1].handle, "h002");
+    assert_eq!(selections[1].name, "Bob Builder");
+
+    // Clean up
+    let _ = std::fs::remove_file(&sel_path);
+}

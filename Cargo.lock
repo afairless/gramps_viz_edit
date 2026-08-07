@@ -4404,6 +4404,7 @@ version = "0.1.0"
 dependencies = [
  "flate2",
  "gramps-reader",
+ "integrate",
  "serde",
  "serde_json",
  "tauri",

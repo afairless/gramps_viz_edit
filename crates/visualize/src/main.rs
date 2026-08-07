@@ -57,16 +57,26 @@ fn load_graph(
 }
 
 /// Tauri IPC command: export selected persons to a JSON file.
-/// Writes the serialized selection to `path` and returns the path on success.
+///
+/// Writes the full `SelectionExport` envelope — including `exported_at`,
+/// `file`, and `selections` — so the output is compatible with the
+/// `integrate diff-viz` JSON parser (which expects the wrapped format).
 #[cfg(feature = "visualize")]
 #[tauri::command]
 fn export_selections(
     path: String,
+    exported_at: String,
+    file: String,
     selections: Vec<visualize::SelectedPerson>,
 ) -> Result<String, String> {
-    let export = serde_json::to_string_pretty(&selections)
+    let export = visualize::SelectionExport {
+        exported_at,
+        file,
+        selections,
+    };
+    let json = serde_json::to_string_pretty(&export)
         .map_err(|e| format!("Serialization error: {}", e))?;
-    std::fs::write(&path, &export).map_err(|e| format!("Cannot write to '{}': {}", path, e))?;
+    std::fs::write(&path, &json).map_err(|e| format!("Cannot write to '{}': {}", path, e))?;
     Ok(path)
 }
 

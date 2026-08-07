@@ -26,4 +26,5 @@ required-features = ["visualize"]
 
 [dev-dependencies]
 flate2 = "1"
+integrate = { path = "../integrate" }
 tempfile = "3"
