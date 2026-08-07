@@ -12,3 +12,5 @@ log = { workspace = true }
 [dev-dependencies]
 diff = { path = "../diff" }
 rand = { workspace = true }
+proptest = "1"
+proptest-derive = "0.5"
