@@ -5,6 +5,7 @@
 //! handle and producing a unified output table.
 
 pub mod csv_reader;
+pub mod json_reader;
 
 use std::fmt;
 
