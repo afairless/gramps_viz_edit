@@ -1,8 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["crates/typed-graph", "crates/output", "crates/cli", "crates/gramps-reader", "crates/visualize", "crates/diff"]
+members = ["crates/typed-graph", "crates/output", "crates/cli", "crates/gramps-reader", "crates/visualize", "crates/diff", "crates/integrate"]
 
-default-members = ["crates/typed-graph", "crates/output", "crates/cli", "crates/gramps-reader"]
+default-members = ["crates/typed-graph", "crates/output", "crates/cli", "crates/gramps-reader", "crates/integrate"]
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -11,3 +11,5 @@ uuid = { version = "1", features = ["v4"] }
 rand = "0.8"
 quick-xml = "0.36"
 strsim = "0.11"
+csv = "1"
+log = "0.4"
