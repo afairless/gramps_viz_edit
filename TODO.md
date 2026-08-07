@@ -1,20 +1,38 @@
-# Implementation Plan: Integrate Diff Results with Visualizer Selections
+# Implementation Plan: Fix Selections Export Format Inconsistency
 
-Source: `docs/research/diff-viz-integration.md`
-
-## Design Notes
-
-- The `integrate` crate is a new library crate under `crates/integrate/`.
-- New workspace deps: `csv`. Also `log` added to workspace deps (currently a per-crate dep).
-- The `crates/cli/src/error.rs` gains an `IntegrateFailed(String)` variant + `From` impl.
-- `crates/integrate` added to `default-members` in root `Cargo.toml`.
-- Step 4 uses `proptest` for property-based CSV↔JSON round-trip tests (dev-dep in integrate crate).
+Source: `docs/research/fix-selections-export-format-inconsistency.md`
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `feat: scaffold integrate crate with diff CSV parser` | Scaffold + CSV reader | `crates/integrate/Cargo.toml`, `crates/integrate/src/lib.rs` (IntegrateError, parse_diff_csv), `crates/integrate/src/csv_reader.rs` (DiffRow, parse_diff_csv), root `Cargo.toml` (workspace dep `csv`, default-members) | Unit: valid CSV (3 Person rows → 4 diff rows), empty CSV, no-Person CSV, special characters, invalid CSV → DiffReadError. Integration: round-trip via `diff::output::format_csv()` |
-| 2 | `feat: add visualizer selections JSON parser` | JSON reader | `crates/integrate/src/json_reader.rs` (Selection, SelectionExport, parse_selections_json) | Unit: valid selections (3 people), empty array, invalid JSON → SelectionsReadError, missing field |
-| 3 | `feat: implement diff-viz handle matching and row merging` | Merge logic | `crates/integrate/src/merge.rs` (MergedRow, merge_diff_viz) | Unit: match handle_a → side="a", match handle_b → side="b", Added/Removed matching, no match → excluded, same-handle-both-sides → side="a", empty selections, empty diff Person rows, zero Person rows |
-| 4 | `feat: add CSV and JSON output for merged results` | Output formatters | `crates/integrate/src/output.rs` (format_csv, format_json) | Unit (CSV): header, one row, empty input, special chars, None fields. Unit (JSON): valid JSON, matches count, empty matches. Property-based: random MergedRow round-trip via proptest |
-| 5 | `feat: add public integrate_diff_viz orchestrator function` | Orchestrator | `crates/integrate/src/lib.rs` (integrate_diff_viz, IntegrateReport) | Integration: temp files with known CSV+JSON, verify matched count and rows; mismatch → 0 matches |
-| 6 | `feat: add gramps-gen integrate diff-viz CLI subcommand` | CLI wiring | `crates/cli/src/commands/integrate.rs` (IntegrateArgs, IntegrateMode, DiffVizArgs, run), `crates/cli/src/error.rs` (IntegrateFailed variant, From impl), `crates/cli/src/commands/mod.rs`, `crates/cli/src/main.rs` | Smoke: `--help` works. Integration: subprocess test with fixture files, verify CSV output columns/rows |
+| 1 | `chore: add Deserialize derive to visualizer SelectionExport` | Deserialize derive + compile test | `crates/visualize/src/graph_data.rs` | Unit (compile-time assertion) |
+| 2 | `fix: wrap selections in envelope when writing via Tauri export command` | Rust export_selections fix + integration tests | `crates/visualize/src/main.rs`, `crates/visualize/Cargo.toml`, `crates/visualize/tests/integration.rs` | Unit (serialization shape), Integration (round-trip via integrate parser) |
+| 3 | `fix: send full SelectionExport envelope to Tauri IPC export command` | Frontend IPC payload fix | `crates/visualize/frontend/src/selection.ts` | — (existing buildSelectionExport tests already cover envelope construction) |
+| 4 | `test: add e2e test for selections export → integrate diff-viz roundtrip` | E2E integration test | `crates/cli/tests/e2e.rs` | Integration (subprocess-based E2E) |
+
+## Step details
+
+### Step 1 — Add `Deserialize` to `SelectionExport`
+
+- In `crates/visualize/src/graph_data.rs`, add `Deserialize` to the derive list for `SelectionExport`.
+- Add a compile-time test inside `graph_data.rs` that asserts `SelectionExport: Deserialize`.
+
+### Step 2 — Update Rust `export_selections` to accept `SelectionExport` and write wrapped format
+
+- In `crates/visualize/src/main.rs`, change `export_selections` to accept `path: String` and a single `export: visualize::SelectionExport` parameter (with `#[serde(flatten)]` for Tauri IPC compatibility).
+- Serialize the full `SelectionExport` (the envelope) instead of the bare array.
+- Add tests to `crates/visualize/tests/integration.rs`:
+  - (a) Serialize a `SelectionExport` and verify the JSON has the expected envelope keys (`exported_at`, `file`, `selections`) and `selections` is an array.
+  - (b) Cross-crate round-trip: serialize a `SelectionExport`, write to temp file, parse with `integrate::parse_selections_json`, verify handles match.
+- Add `integrate = { path = "../integrate" }` as a dev-dependency of the `visualize` crate (needed for the round-trip test).
+
+### Step 3 — Update frontend `exportToFile` to send full envelope
+
+- In `crates/visualize/frontend/src/selection.ts`, change the `tauri.invoke('export_selections', ...)` call to include `exported_at` and `file` from `exportData` alongside `selections`.
+
+### Step 4 — Add cross-crate E2E test
+
+- Add a test to `crates/cli/tests/e2e.rs` that:
+  1. Creates a temp diff CSV with 3 Person rows.
+  2. Creates a matching selections JSON (wrapped envelope format) with 2 selections.
+  3. Runs `gramps-gen integrate diff-viz --diff <csv> --selections <json>` as a subprocess.
+  4. Verifies exit code 0 and stdout/CSV output contains merged rows with correct fields.
