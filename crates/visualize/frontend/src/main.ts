@@ -631,7 +631,10 @@ export function renderToolbar(
 }
 
 /** Render the graph UI from already-loaded GraphData. */
-function renderGraphFromData(
+// Track the previous Escape handler for cleanup on re-render.
+let _escapeKeyDown: ((e: KeyboardEvent) => void) | null = null;
+
+export function renderGraphFromData(
   container: HTMLElement,
   appEl: HTMLElement,
   graphData: GraphData,
@@ -640,6 +643,11 @@ function renderGraphFromData(
 ): void {
   // Clear any previous content (e.g. the open-file prompt)
   container.textContent = '';
+
+  // Remove previous Escape listener before registering a new one
+  if (_escapeKeyDown) {
+    document.removeEventListener('keydown', _escapeKeyDown);
+  }
 
   if (graphData.nodes.length === 0) {
     showEmpty(container);
@@ -672,7 +680,7 @@ function renderGraphFromData(
   }
 
   // Wire up toolbar (filter dropdown + reset button + force panel + selection controls)
-  const { toolbar } = renderToolbar(
+  const { toolbar, syncRectSelectUI } = renderToolbar(
     graphData,
     controller,
     forceConfig,
@@ -705,11 +713,58 @@ function renderGraphFromData(
     });
   }
 
+  // --- Escape keydown handler ---
+  _escapeKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      if (controller.hasRectangle()) {
+        controller.clearRectangle();
+      } else if (controller.isRectSelectActive()) {
+        controller.setRectSelectActive(false);
+        syncRectSelectUI(false);
+      }
+    }
+  };
+  document.addEventListener('keydown', _escapeKeyDown);
+
   // Route graph node clicks to selection manager (with indirect-set support)
   if (selectionManager) {
     controller.onNodeClick((handle: string) => {
-      const indirect = getIndirectSet(adjacency, handle, currentMode);
-      selectionManager!.clickWithIndirect(handle, indirect);
+      if (controller.hasRectangle()) {
+        const nodesInRect = controller.getNodesInRectangle();
+        if (nodesInRect.includes(handle)) {
+          // Clicked node is inside the rectangle → batch operation
+          const selecting = !selectionManager!.has(handle);
+
+          let targets: Set<string>;
+          if (currentMode === 'single') {
+            targets = new Set(nodesInRect);
+          } else {
+            // Union of indirect sets for all nodes in the rectangle
+            targets = new Set<string>();
+            for (const h of nodesInRect) {
+              targets.add(h);
+              for (const ih of getIndirectSet(adjacency, h, currentMode)) {
+                targets.add(ih);
+              }
+            }
+          }
+
+          if (selecting) {
+            selectionManager!.addAll(targets);
+          } else {
+            selectionManager!.removeAll(targets);
+          }
+        } else {
+          // Clicked node is outside the rectangle → normal behavior
+          const indirect = getIndirectSet(adjacency, handle, currentMode);
+          selectionManager!.clickWithIndirect(handle, indirect);
+        }
+      } else {
+        // No rectangle → normal single-node behavior
+        const indirect = getIndirectSet(adjacency, handle, currentMode);
+        selectionManager!.clickWithIndirect(handle, indirect);
+      }
+
       controller.setHighlighted(new Set(selectionManager!.handles));
     });
   }
@@ -790,7 +845,6 @@ async function main(): Promise<void> {
   }
 
   // Create the stats panel and append to #app
-  const appEl = document.getElementById('app');
   statsPanel = new StatsPanel();
   const statsPanelEl = statsPanel.create();
   const mainRow = document.getElementById('main-row');

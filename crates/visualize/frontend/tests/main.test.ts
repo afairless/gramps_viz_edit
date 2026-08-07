@@ -2,7 +2,7 @@
 // Tests for the main.ts module — toolbar rendering and UI wiring.
 
 import { describe, it, expect, vi } from 'vitest';
-import { GRAMPS_FILE_FILTER, renderToolbar, renderForcePanel, renderModeSelector, renderSelectAllButtons, showWelcomeScreen } from '../src/main';
+import { GRAMPS_FILE_FILTER, renderToolbar, renderForcePanel, showWelcomeScreen, renderGraphFromData } from '../src/main';
 import type { GraphController } from '../src/graph';
 import type { GraphData, PersonNode, FamilyLink } from '../src/types';
 import { DEFAULT_FORCE_CONFIG, type ForceConfig } from '../src/types';
@@ -579,6 +579,274 @@ describe('Rect Select toggle button', () => {
     }
 
     document.body.removeChild(gc);
+  });
+});
+
+describe('rectangle batch selection and Escape handler', () => {
+  function setupGraphEnv(data: GraphData): {
+    container: HTMLElement;
+    controller: import('../src/graph').GraphController;
+    cleanup: () => void;
+  } {
+    const container = document.createElement('div');
+    container.id = 'graph-container';
+    container.style.width = '800px';
+    container.style.height = '600px';
+    document.body.appendChild(container);
+
+    const appEl = document.createElement('div');
+    appEl.id = 'app';
+    document.body.appendChild(appEl);
+
+    const panelEl = document.createElement('div');
+    panelEl.id = 'selection-panel';
+    document.body.appendChild(panelEl);
+
+    renderGraphFromData(container, appEl, data);
+
+    const controller = (window as unknown as Record<string, import('../src/graph').GraphController>).__GRAPH_CONTROLLER__;
+
+    return {
+      container,
+      controller,
+      cleanup: () => {
+        controller.destroy();
+        document.body.removeChild(container);
+        document.body.removeChild(appEl);
+        document.body.removeChild(panelEl);
+      },
+    };
+  }
+
+  function clickNodeByHandle(container: HTMLElement, handle: string): void {
+    const nodeGs = container.querySelectorAll('.nodes g');
+    for (const g of Array.from(nodeGs)) {
+      const d = (g as any).__data__;
+      if (d && d.handle === handle) {
+        g.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        return;
+      }
+    }
+  }
+
+  function getSelectedHandles(container: HTMLElement): string[] {
+    const handles: string[] = [];
+    const nodeGs = container.querySelectorAll('.nodes g');
+    for (const g of Array.from(nodeGs)) {
+      const circle = g.querySelector('circle');
+      if (circle && circle.getAttribute('r') === '16') {
+        const d = (g as any).__data__;
+        if (d) handles.push(d.handle);
+      }
+    }
+    return handles;
+  }
+
+  it('click inside rectangle in single mode selects all nodes in rectangle', () => {
+    const data = makeGraph(
+      [
+        makeNode('p1', { family_group: 0, generation: 0, name: 'Alice', birth_year: 1900 }),
+        makeNode('p2', { family_group: 0, generation: 0, name: 'Bob', birth_year: 1900 }),
+      ],
+      [],
+    );
+
+    const { container, controller, cleanup } = setupGraphEnv(data);
+
+    // Freeze immediately to stop simulation ticks and fix node positions
+    controller.setFrozen(true);
+    controller.setRectSelectActive(true);
+
+    // Draw a rectangle that covers everything (large coordinates)
+    const svg = container.querySelector('svg')!;
+    svg.dispatchEvent(new PointerEvent('pointerdown', {
+      clientX: -10000, clientY: -10000, bubbles: true, cancelable: true,
+    }));
+    svg.dispatchEvent(new PointerEvent('pointermove', {
+      clientX: 10000, clientY: 10000, bubbles: true, cancelable: true,
+    }));
+    svg.dispatchEvent(new PointerEvent('pointerup', {
+      clientX: 10000, clientY: 10000, bubbles: true, cancelable: true,
+    }));
+
+    expect(controller.hasRectangle()).toBe(true);
+
+    // Click node p1 (inside rectangle, unselected) → should select all in rect
+    clickNodeByHandle(container, 'p1');
+
+    const selected = getSelectedHandles(container);
+    expect(selected).toContain('p1');
+    // p2 is also in rectangle (both at (0,0) or close) → should be selected
+    expect(selected).toContain('p2');
+
+    cleanup();
+  });
+
+  it('click inside rectangle in single mode deselects all when clicked node is selected', () => {
+    const data = makeGraph(
+      [
+        makeNode('p1', { family_group: 0, generation: 0, name: 'Alice', birth_year: 1900 }),
+        makeNode('p2', { family_group: 0, generation: 0, name: 'Bob', birth_year: 1900 }),
+      ],
+      [],
+    );
+
+    const { container, controller, cleanup } = setupGraphEnv(data);
+
+    // First select both nodes via normal clicks (no rectangle yet)
+    clickNodeByHandle(container, 'p1'); // toggles p1 ON
+    clickNodeByHandle(container, 'p2'); // toggles p2 ON
+    expect(getSelectedHandles(container)).toEqual(['p1', 'p2']);
+
+    // Now freeze and draw rectangle covering everything
+    controller.setFrozen(true);
+    controller.setRectSelectActive(true);
+
+    const svg = container.querySelector('svg')!;
+    svg.dispatchEvent(new PointerEvent('pointerdown', {
+      clientX: -10000, clientY: -10000, bubbles: true, cancelable: true,
+    }));
+    svg.dispatchEvent(new PointerEvent('pointermove', {
+      clientX: 10000, clientY: 10000, bubbles: true, cancelable: true,
+    }));
+    svg.dispatchEvent(new PointerEvent('pointerup', {
+      clientX: 10000, clientY: 10000, bubbles: true, cancelable: true,
+    }));
+
+    // Click p1 (selected) inside rectangle → should deselect all
+    clickNodeByHandle(container, 'p1');
+
+    const selected = getSelectedHandles(container);
+    expect(selected).not.toContain('p1');
+    expect(selected).not.toContain('p2');
+
+    cleanup();
+  });
+
+  it('click outside rectangle falls through to normal single-node behavior', () => {
+    const data = makeGraph(
+      [
+        makeNode('p1', { family_group: 0, generation: 0, name: 'Alice', birth_year: 1900 }),
+        makeNode('p2', { family_group: 0, generation: 0, name: 'Bob', birth_year: 1900 }),
+      ],
+      [],
+    );
+
+    const { container, controller, cleanup } = setupGraphEnv(data);
+
+    controller.setFrozen(true);
+    controller.setRectSelectActive(true);
+
+    // Draw small rectangle at corner (doesn't contain any node at ~0,0)
+    const svg = container.querySelector('svg')!;
+    svg.dispatchEvent(new PointerEvent('pointerdown', {
+      clientX: 700, clientY: 500, bubbles: true, cancelable: true,
+    }));
+    svg.dispatchEvent(new PointerEvent('pointermove', {
+      clientX: 750, clientY: 550, bubbles: true, cancelable: true,
+    }));
+    svg.dispatchEvent(new PointerEvent('pointerup', {
+      clientX: 750, clientY: 550, bubbles: true, cancelable: true,
+    }));
+
+    expect(controller.hasRectangle()).toBe(true);
+
+    // Click p1 (outside the small rectangle) → normal toggle
+    clickNodeByHandle(container, 'p1');
+
+    const selected = getSelectedHandles(container);
+    expect(selected).toContain('p1');
+    // p2 should NOT be selected (normal single-node behavior)
+    expect(selected).not.toContain('p2');
+
+    cleanup();
+  });
+
+  it('Escape key clears rectangle when one exists', () => {
+    const data = makeGraph(
+      [makeNode('p1', { family_group: 0, generation: 0, name: 'Alice', birth_year: 1900 })],
+      [],
+    );
+
+    const { container, controller, cleanup } = setupGraphEnv(data);
+
+    controller.setFrozen(true);
+    controller.setRectSelectActive(true);
+
+    // Draw rectangle
+    const svg = container.querySelector('svg')!;
+    svg.dispatchEvent(new PointerEvent('pointerdown', {
+      clientX: 0, clientY: 0, bubbles: true, cancelable: true,
+    }));
+    svg.dispatchEvent(new PointerEvent('pointermove', {
+      clientX: 100, clientY: 100, bubbles: true, cancelable: true,
+    }));
+    svg.dispatchEvent(new PointerEvent('pointerup', {
+      clientX: 100, clientY: 100, bubbles: true, cancelable: true,
+    }));
+
+    expect(controller.hasRectangle()).toBe(true);
+
+    // Press Escape
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+
+    expect(controller.hasRectangle()).toBe(false);
+
+    cleanup();
+  });
+
+  it('Escape deactivates rect-select toggle when no rectangle exists', () => {
+    const data = makeGraph(
+      [makeNode('p1', { family_group: 0, generation: 0, name: 'Alice', birth_year: 1900 })],
+      [],
+    );
+
+    const { controller, cleanup } = setupGraphEnv(data);
+
+    controller.setFrozen(true);
+    controller.setRectSelectActive(true);
+    expect(controller.isRectSelectActive()).toBe(true);
+
+    // Press Escape — should deactivate the toggle (no rectangle to clear)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+
+    expect(controller.isRectSelectActive()).toBe(false);
+
+    cleanup();
+  });
+
+  it('Escape handler does not interfere with non-Escape keys', () => {
+    const data = makeGraph(
+      [makeNode('p1', { family_group: 0, generation: 0, name: 'Alice', birth_year: 1900 })],
+      [],
+    );
+
+    const { container, controller, cleanup } = setupGraphEnv(data);
+
+    controller.setFrozen(true);
+    controller.setRectSelectActive(true);
+
+    // Draw rectangle
+    const svg = container.querySelector('svg')!;
+    svg.dispatchEvent(new PointerEvent('pointerdown', {
+      clientX: 0, clientY: 0, bubbles: true, cancelable: true,
+    }));
+    svg.dispatchEvent(new PointerEvent('pointermove', {
+      clientX: 100, clientY: 100, bubbles: true, cancelable: true,
+    }));
+    svg.dispatchEvent(new PointerEvent('pointerup', {
+      clientX: 100, clientY: 100, bubbles: true, cancelable: true,
+    }));
+
+    expect(controller.hasRectangle()).toBe(true);
+
+    // Press a non-Escape key
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+
+    // Rectangle should still exist
+    expect(controller.hasRectangle()).toBe(true);
+
+    cleanup();
   });
 });
 
