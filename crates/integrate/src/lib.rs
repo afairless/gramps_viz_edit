@@ -34,6 +34,61 @@ impl fmt::Display for IntegrateError {
 
 impl std::error::Error for IntegrateError {}
 
+use crate::csv_reader::parse_diff_csv;
+use crate::json_reader::parse_selections_json;
+use crate::merge::{merge_diff_viz, MergedRow};
+
+/// Report from the [`integrate_diff_viz`] orchestrator.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IntegrateReport {
+    /// Number of matched rows.
+    pub matched_count: usize,
+    /// Path of the source diff CSV file.
+    pub diff_path: String,
+    /// Path of the source selections JSON file.
+    pub sel_path: String,
+    /// The merged rows.
+    pub rows: Vec<MergedRow>,
+}
+
+/// Orchestrate the full diff-viz integration pipeline.
+///
+/// 1. Parse the diff CSV file into [`DiffRow`]s
+/// 2. Parse the selections JSON file into [`Selection`]s
+/// 3. Merge by handle matching (inner join on Person rows)
+/// 4. Return an [`IntegrateReport`] with the results
+///
+/// Logs warnings (via `log::warn!`) when:
+/// - The diff CSV contains no Person rows
+/// - The selections JSON contains no selections
+/// - No matches are found (all Person rows excluded)
+///
+/// # Errors
+///
+/// Returns [`IntegrateError::DiffReadError`] if the diff CSV cannot be read
+/// or parsed. Returns [`IntegrateError::SelectionsReadError`] if the
+/// selections JSON cannot be read or parsed.
+pub fn integrate_diff_viz(
+    diff_path: &str,
+    selections_path: &str,
+) -> Result<IntegrateReport, IntegrateError> {
+    let diff_rows = parse_diff_csv(diff_path)?;
+    let selections = parse_selections_json(selections_path)?;
+
+    let rows = merge_diff_viz(diff_rows, selections);
+
+    if rows.is_empty() {
+        log::warn!("no matches found between diff and selections");
+    }
+
+    Ok(IntegrateReport {
+        matched_count: rows.len(),
+        diff_path: diff_path.to_string(),
+        sel_path: selections_path.to_string(),
+        rows,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
