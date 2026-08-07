@@ -418,7 +418,7 @@ export function renderToolbar(
     handles: string[];
   },
   onModeChange?: (mode: SelectionMode) => void,
-): HTMLElement {
+): { toolbar: HTMLElement; syncRectSelectUI: (active: boolean) => void } {
   const toolbar = document.createElement('div');
   toolbar.id = 'toolbar';
   toolbar.style.display = 'flex';
@@ -548,6 +548,12 @@ export function renderToolbar(
     freezeBtn.style.borderColor = frozen ? '#2266aa' : '#ccc';
     const gc = document.getElementById('graph-container');
     if (gc) gc.classList.toggle('force-frozen', frozen);
+    // Show/hide rect-select toggle
+    rectSelectBtn.style.display = frozen ? '' : 'none';
+    if (!frozen) {
+      controller.setRectSelectActive(false);
+      syncRectSelectUI(false);
+    }
   }
 
   freezeBtn.addEventListener('click', () => {
@@ -557,6 +563,33 @@ export function renderToolbar(
   });
 
   toolbar.appendChild(freezeBtn);
+
+  // ---- rect-select toggle button (only visible during freeze) ----
+  const rectSelectBtn = document.createElement('button');
+  rectSelectBtn.textContent = '📦 Rect Select';
+  rectSelectBtn.title = 'Toggle rectangle selection mode (or hold Shift while dragging)';
+  rectSelectBtn.style.padding = '4px 10px';
+  rectSelectBtn.style.fontSize = '12px';
+  rectSelectBtn.style.borderRadius = '4px';
+  rectSelectBtn.style.border = '1px solid #ccc';
+  rectSelectBtn.style.background = '#fff';
+  rectSelectBtn.style.cursor = 'pointer';
+  rectSelectBtn.style.color = '#333';
+  rectSelectBtn.style.display = 'none'; // hidden until frozen
+
+  function syncRectSelectUI(active: boolean): void {
+    rectSelectBtn.textContent = active ? '📦 Rect Select (ON)' : '📦 Rect Select';
+    rectSelectBtn.style.background = active ? '#e8f0fe' : '#fff';
+    rectSelectBtn.style.borderColor = active ? '#2266aa' : '#ccc';
+  }
+
+  rectSelectBtn.addEventListener('click', () => {
+    const next = !controller.isRectSelectActive();
+    controller.setRectSelectActive(next);
+    syncRectSelectUI(next);
+  });
+
+  toolbar.appendChild(rectSelectBtn);
 
   // ---- Reset layout button ----
   const resetBtn = document.createElement('button');
@@ -594,7 +627,7 @@ export function renderToolbar(
     toolbar.appendChild(forcePanel);
   }
 
-  return toolbar;
+  return { toolbar, syncRectSelectUI };
 }
 
 /** Render the graph UI from already-loaded GraphData. */
@@ -639,7 +672,7 @@ function renderGraphFromData(
   }
 
   // Wire up toolbar (filter dropdown + reset button + force panel + selection controls)
-  const toolbar = renderToolbar(
+  const { toolbar } = renderToolbar(
     graphData,
     controller,
     forceConfig,
