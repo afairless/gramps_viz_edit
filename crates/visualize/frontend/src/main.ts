@@ -414,6 +414,7 @@ export function renderToolbar(
   selectionManager?: {
     addAll: (handles: Iterable<string>) => void;
     removeAll: (handles: Iterable<string>) => void;
+    invertSelection: (handles: Iterable<string>) => void;
     clear: () => void;
     handles: string[];
   },
@@ -445,6 +446,29 @@ export function renderToolbar(
       },
     );
     toolbar.appendChild(selectAllEl);
+
+    // Invert selection button
+    const invertBtn = document.createElement('button');
+    invertBtn.textContent = 'Invert';
+    invertBtn.title = 'Invert selection on visible nodes';
+    invertBtn.style.padding = '4px 10px';
+    invertBtn.style.fontSize = '12px';
+    invertBtn.style.borderRadius = '4px';
+    invertBtn.style.border = '1px solid #ccc';
+    invertBtn.style.background = '#fff';
+    invertBtn.style.cursor = 'pointer';
+    invertBtn.style.color = '#333';
+    invertBtn.addEventListener('mouseenter', () => {
+      invertBtn.style.background = '#eee';
+    });
+    invertBtn.addEventListener('mouseleave', () => {
+      invertBtn.style.background = '#fff';
+    });
+    invertBtn.addEventListener('click', () => {
+      selectionManager!.invertSelection(controller.getVisibleNodes());
+      controller.setHighlighted(new Set(selectionManager!.handles));
+    });
+    toolbar.appendChild(invertBtn);
   }
 
   // Visual separator
