@@ -848,6 +848,89 @@ describe('rectangle batch selection and Escape handler', () => {
 
     cleanup();
   });
+
+  it('Select All still works regardless of rectangle state', () => {
+    const data = makeGraph(
+      [
+        makeNode('p1', { family_group: 0, generation: 0, name: 'Alice', birth_year: 1900 }),
+        makeNode('p2', { family_group: 0, generation: 0, name: 'Bob', birth_year: 1900 }),
+      ],
+      [],
+    );
+
+    const { container, controller, cleanup } = setupGraphEnv(data);
+
+    controller.setFrozen(true);
+    controller.setRectSelectActive(true);
+
+    // Draw rectangle covering everything
+    const svg = container.querySelector('svg')!;
+    svg.dispatchEvent(new PointerEvent('pointerdown', {
+      clientX: -10000, clientY: -10000, bubbles: true, cancelable: true,
+    }));
+    svg.dispatchEvent(new PointerEvent('pointermove', {
+      clientX: 10000, clientY: 10000, bubbles: true, cancelable: true,
+    }));
+    svg.dispatchEvent(new PointerEvent('pointerup', {
+      clientX: 10000, clientY: 10000, bubbles: true, cancelable: true,
+    }));
+
+    expect(controller.hasRectangle()).toBe(true);
+
+    // Click Select All button
+    const selectAllBtn = document.querySelector('#select-all-container button');
+    expect(selectAllBtn).toBeTruthy();
+    if (selectAllBtn) {
+      (selectAllBtn as HTMLButtonElement).click();
+    }
+
+    const selected = getSelectedHandles(container);
+    expect(selected).toContain('p1');
+    expect(selected).toContain('p2');
+
+    cleanup();
+  });
+
+  it('rectangle membership respects family group filter', () => {
+    const data = makeGraph(
+      [
+        makeNode('g1p1', { family_group: 1, generation: 0, name: 'Group1A', birth_year: 1900 }),
+        makeNode('g1p2', { family_group: 1, generation: 1, name: 'Group1B', birth_year: 1900 }),
+        makeNode('g2p1', { family_group: 2, generation: 0, name: 'Group2A', birth_year: 1900 }),
+        makeNode('g2p2', { family_group: 2, generation: 0, name: 'Group2B', birth_year: 1900 }),
+      ],
+      [],
+    );
+
+    const { container, controller, cleanup } = setupGraphEnv(data);
+
+    controller.setFrozen(true);
+    controller.setRectSelectActive(true);
+
+    // Draw rectangle covering everything
+    const svg = container.querySelector('svg')!;
+    svg.dispatchEvent(new PointerEvent('pointerdown', {
+      clientX: -10000, clientY: -10000, bubbles: true, cancelable: true,
+    }));
+    svg.dispatchEvent(new PointerEvent('pointermove', {
+      clientX: 10000, clientY: 10000, bubbles: true, cancelable: true,
+    }));
+    svg.dispatchEvent(new PointerEvent('pointerup', {
+      clientX: 10000, clientY: 10000, bubbles: true, cancelable: true,
+    }));
+
+    // Filter to group 1 only
+    controller.setFamilyGroupFilter(1);
+
+    // getNodesInRectangle should only return group 1 nodes
+    const inRect = controller.getNodesInRectangle();
+    expect(inRect).toContain('g1p1');
+    expect(inRect).toContain('g1p2');
+    expect(inRect).not.toContain('g2p1');
+    expect(inRect).not.toContain('g2p2');
+
+    cleanup();
+  });
 });
 
 describe('renderForcePanel', () => {
