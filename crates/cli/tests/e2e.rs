@@ -981,3 +981,115 @@ fn e2e_integrate_diff_viz_missing_diff() {
         stderr
     );
 }
+
+/// E2E test: full visualizer-style selection envelope with 3 diff rows and 2 matching
+/// selections verifies the wrapped format produced by the fixed export_selections
+/// command is correctly consumed by integrate diff-viz.
+#[test]
+fn e2e_integrate_diff_viz_wrapped_envelope() {
+    // Create a diff CSV with 3 Person rows (one will be filtered out)
+    let diff_csv = "\"classification\",\"item_type\",\"handle_a\",\"gramps_id_a\",\"display_name_a\",\"handle_b\",\"gramps_id_b\",\"display_name_b\",\"confidence\",\"field_name\",\"field_kind\",\"old_value\",\"new_value\",\"similarity\"
+\"MODIFIED\",\"Person\",\"abc-1\",\"I0001\",\"John Smith\",\"abc-1\",\"I0001\",\"John Smith\",\"1.00\",\"name\",\"Text\",\"John\",\"John Smith\",\"0.80\"
+\"SAME\",\"Person\",\"abc-2\",\"I0002\",\"Jane Doe\",\"abc-2\",\"I0002\",\"Jane Doe\",\"1.00\",\"\",\"\",\"\",\"\",\"0.00\"
+\"ADDED\",\"Person\",\"abc-3\",\"I0003\",\"Bob Brown\",\"abc-3\",\"I0003\",\"Bob Brown\",\"1.00\",\"\",\"\",\"\",\"\",\"0.00\"
+";
+
+    // Create a selections JSON in the wrapped envelope format (as produced by
+    // the fixed export_selections Tauri command). Only abc-1 and abc-2 are
+    // selected; abc-3 is not, so it should be filtered out.
+    let selections_json = r#"{
+  "exported_at": "2025-01-15T10:30:00.000Z",
+  "file": "selections.json",
+  "selections": [
+    {"handle":"abc-1","name":"John Smith","birth_date":"1840-07-13","death_date":"1910-03-22","gender":"male","family_group":3},
+    {"handle":"abc-2","name":"Jane Doe","birth_date":null,"death_date":null,"gender":"female","family_group":3}
+  ]
+}"#;
+
+    let diff_path = format!("/tmp/gramps_gen_e2e_wrapped_diff_{}.csv", std::process::id());
+    let sel_path = format!("/tmp/gramps_gen_e2e_wrapped_sel_{}.json", std::process::id());
+    let out_path = format!("/tmp/gramps_gen_e2e_wrapped_out_{}.csv", std::process::id());
+
+    std::fs::write(&diff_path, diff_csv).unwrap();
+    std::fs::write(&sel_path, selections_json).unwrap();
+
+    // Run integrate diff-viz with CSV output
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "integrate",
+        "diff-viz",
+        "--diff",
+        &diff_path,
+        "--selections",
+        &sel_path,
+        "--output",
+        &out_path,
+    ]);
+    assert_eq!(
+        code, Some(0),
+        "integrate diff-viz with wrapped envelope should succeed, stderr: {}",
+        stderr
+    );
+
+    // Verify output file exists and has merged rows
+    let content = std::fs::read_to_string(&out_path).expect("output file should exist");
+    assert!(
+        content.contains("abc-1"),
+        "output should contain abc-1 (matched)"
+    );
+    assert!(
+        content.contains("abc-2"),
+        "output should contain abc-2 (matched)"
+    );
+    assert!(
+        !content.contains("abc-3"),
+        "output should NOT contain abc-3 (no matching selection)"
+    );
+    assert!(content.contains("John Smith"));
+    assert!(content.contains("Jane Doe"));
+    assert!(content.contains("male"));
+    assert!(content.contains("female"));
+    assert!(content.contains("viz_name"));
+    assert!(content.contains("viz_family_group"));
+
+    // Also test --format json output to verify structured output
+    let (json_stdout, json_stderr, json_code) = gramps_gen(&[
+        "integrate",
+        "diff-viz",
+        "--diff",
+        &diff_path,
+        "--selections",
+        &sel_path,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(
+        json_code, Some(0),
+        "integrate diff-viz JSON format should succeed, stderr: {}",
+        json_stderr
+    );
+
+    // Verify JSON output
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json_stdout).expect("should be valid JSON");
+    let matches = parsed["matches"].as_array().expect("should have matches array");
+    assert_eq!(matches.len(), 2, "should have exactly 2 matched rows");
+    assert_eq!(
+        parsed["matched_count"].as_i64(),
+        Some(2),
+        "matched_count should be 2"
+    );
+
+    // Verify both handles appear
+    let handles: Vec<&str> = matches
+        .iter()
+        .filter_map(|m| m["diff"]["handle_a"].as_str())
+        .collect();
+    assert!(handles.contains(&"abc-1"), "missing abc-1");
+    assert!(handles.contains(&"abc-2"), "missing abc-2");
+    assert_eq!(handles.len(), 2, "should have exactly 2 handles");
+
+    // Clean up
+    let _ = std::fs::remove_file(&diff_path);
+    let _ = std::fs::remove_file(&sel_path);
+    let _ = std::fs::remove_file(&out_path);
+}
