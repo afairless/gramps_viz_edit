@@ -62,7 +62,7 @@ pub fn parse_diff_csv(path: &str) -> Result<Vec<DiffRow>, IntegrateError> {
 }
 
 /// Deserialize an f64, treating an empty string as 0.0.
-fn deserialize_f64_empty_as_zero<'de, D>(deserializer: D) -> Result<f64, D::Error>
+pub(crate) fn deserialize_f64_empty_as_zero<'de, D>(deserializer: D) -> Result<f64, D::Error>
 where
     D: Deserializer<'de>,
 {

@@ -6,6 +6,7 @@
 
 pub mod csv_reader;
 pub mod json_reader;
+pub mod merge;
 
 use std::fmt;
 
