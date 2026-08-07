@@ -73,6 +73,21 @@ export class SelectionManager {
     }
   }
 
+  /**
+   * Invert selection for the given set of handles.
+   * Selected handles become deselected; unselected handles become selected.
+   * Handles not in the provided iterable are left unchanged.
+   */
+  invertSelection(handles: Iterable<string>): void {
+    for (const h of handles) {
+      if (this.selected.has(h)) {
+        this.selected.delete(h);
+      } else {
+        this.selected.add(h);
+      }
+    }
+  }
+
   has(handle: string): boolean {
     return this.selected.has(handle);
   }
@@ -223,6 +238,12 @@ export function createSelectionPanel(
   const origRemoveAll = manager.removeAll.bind(manager);
   manager.removeAll = (handles: Iterable<string>) => {
     origRemoveAll(handles);
+    render();
+  };
+
+  const origInvert = manager.invertSelection.bind(manager);
+  manager.invertSelection = (handles: Iterable<string>) => {
+    origInvert(handles);
     render();
   };
 

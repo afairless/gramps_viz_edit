@@ -183,6 +183,63 @@ describe('SelectionManager', () => {
     sm.removeAll([]);
     expect(sm.size).toBe(2);
   });
+
+  describe('invertSelection', () => {
+    it('selects all when none selected', () => {
+      const sm = new SelectionManager();
+      sm.invertSelection(['p1', 'p2']);
+      expect(sm.has('p1')).toBe(true);
+      expect(sm.has('p2')).toBe(true);
+      expect(sm.size).toBe(2);
+    });
+
+    it('deselects all when all selected', () => {
+      const sm = new SelectionManager();
+      sm.addAll(['p1', 'p2']);
+      sm.invertSelection(['p1', 'p2']);
+      expect(sm.has('p1')).toBe(false);
+      expect(sm.has('p2')).toBe(false);
+      expect(sm.size).toBe(0);
+    });
+
+    it('flips mixed state correctly', () => {
+      const sm = new SelectionManager();
+      sm.add('p1');
+      sm.invertSelection(['p1', 'p2', 'p3']);
+      expect(sm.has('p1')).toBe(false); // was selected, now deselected
+      expect(sm.has('p2')).toBe(true);  // was unselected, now selected
+      expect(sm.has('p3')).toBe(true);  // was unselected, now selected
+      expect(sm.size).toBe(2);
+    });
+
+    it('is a no-op with empty iterable', () => {
+      const sm = new SelectionManager();
+      sm.add('p1');
+      sm.invertSelection([]);
+      expect(sm.size).toBe(1);
+      expect(sm.has('p1')).toBe(true);
+    });
+
+    it('leaves handles outside iterable untouched', () => {
+      const sm = new SelectionManager();
+      sm.add('p1');
+      sm.add('p2');
+      sm.invertSelection(['p1']);
+      expect(sm.has('p1')).toBe(false); // toggled
+      expect(sm.has('p2')).toBe(true);  // untouched
+      expect(sm.size).toBe(1);
+    });
+
+    it('is idempotent on double-invert (back to original state)', () => {
+      const sm = new SelectionManager();
+      sm.add('p1');
+      sm.invertSelection(['p1', 'p2']);
+      sm.invertSelection(['p1', 'p2']);
+      expect(sm.has('p1')).toBe(true);  // back to original
+      expect(sm.has('p2')).toBe(false); // back to original
+      expect(sm.size).toBe(1);
+    });
+  });
 });
 
 describe('buildSelectedPeople', () => {
