@@ -1,53 +1,23 @@
-# Implementation Plan: Fix Save Button in Visualizer
+# Implementation Plan: Integrate — Inner Join to Full Outer Join
 
-Source: `docs/research/fix-selections-export-save-button.md`
+Source: `docs/research/integrate-outer-join.md`
+
+## Branch
+
+Create a new branch `agent/integrate-outer-join` from `main`.
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `fix: correct IPC camelCase key and delay blob URL revocation in exportToFile` | Selection export IPC + blob fallback fix | `crates/visualize/frontend/src/selection.ts` | — (cannot unit-test Tauri IPC or blob download timing; manual verification) |
-| 2 | `test: add Rust integration test for export_selections JSON output` | Rust export_selections integration test | `crates/visualize/tests/integration.rs` | Integration |
+| 1 | `refactor: make viz fields optional in MergedRow, add RowKind, add Default for DiffRow` | Type changes | `crates/integrate/src/merge.rs`: `MergedRow` — `viz_name: Option<String>`, `viz_gender: Option<String>`, `viz_family_group: Option<usize>`; add `RowKind` enum (`Matched`, `DiffOnly`, `VizOnly`) with `#[serde(rename_all = "snake_case")]`; add `row_kind: RowKind` field. `crates/integrate/src/csv_reader.rs`: add `#[derive(Default)]` to `DiffRow`. `crates/integrate/src/output.rs`: update `PropRow` struct and `MergedRow::from(PropRow)` impl to match new fields. | Unit, proptest |
+| 2 | `feat: change diff-viz merge from inner join to full outer join` | Merge logic rewrite | `crates/integrate/src/merge.rs`: rewrite `merge_diff_viz()` — emit `DiffOnly` rows for unmatched diff rows, track matched selection handles in `HashSet<String>`, emit `VizOnly` rows for unmatched selections. Remove early returns when selections are empty or diff Person rows are empty. Update unit tests: `no_match_excluded` → asserts `DiffOnly` row; `empty_selections` → asserts `VizOnly` rows (or empty if no selections at all); `person_rows_no_match` → asserts `DiffOnly` rows. Add new tests: `emits_diff_only_row`, `emits_viz_only_row`, `full_outer_join_4_rows`. | Unit |
+| 3 | `feat: update format_json for outer join semantics` | JSON output | `crates/integrate/src/output.rs`: add `row_kind: RowKind` to `MatchEntry`; make `selection` field `Option<SelectionView>` with `skip_serializing_if`; rename `JsonOutput.matched_count` → `JsonOutput.row_count`; add `JsonOutput.matched_count` as separate field; update `From<&MergedRow> for DiffRow` (already works — Default used for VizOnly). Update unit tests. | Unit, proptest |
+| 4 | `feat: add row_kind column to CSV output` | CSV output | `crates/integrate/src/output.rs`: add `"row_kind"` to `CSV_HEADER` immediately after `"side"` (header becomes 21 columns). `crates/integrate/src/merge.rs`: `MergedRow` already has `row_kind` and the CSV serializer picks it up via `Serialize`. Update unit tests for header length. | Unit, proptest |
+| 5 | `test: update integration and E2E tests for full outer join including viz-only rows` | Integration & E2E tests | `crates/integrate/tests/integration.rs`: update `integrate_diff_viz_matches` — 3 matched rows + potential diff-only/viz-only; rename `integrate_diff_viz_no_matches` to `integrate_diff_viz_data_all_unmatched` — now asserts rows > 0; add `integrate_diff_viz_selections_only` — viz-only rows emitted. `crates/cli/tests/e2e.rs`: update `e2e_integrate_diff_viz_csv_output` — check for `row_kind` column; update `e2e_integrate_diff_viz_wrapped_envelope` — abc-3 now appears as diff-only row, update assertion; add `e2e_integrate_diff_viz_unmatched` — test that unmatched diff row still appears. | Integration, E2E |
 
-## Step details
+## Known issues addressed during implementation
 
-### Step 1 — Fix IPC key casing and blob URL revocation
-
-**Primary bug** (camelCase/snake_case mismatch): The frontend `exportToFile` sends `exported_at` (snake_case) as a Tauri IPC payload key, but Tauri v2's `#[tauri::command]` macro expects **camelCase** JavaScript parameter names (`exportedAt`), which it then maps to the Rust snake_case parameter name `exported_at`. Sending `exported_at` directly causes Tauri to reject the `invoke()` call with an error such as `"unknown field exported_at, expected exportedAt"`, so no file is saved.
-
-**Fix**: Change the key from `exported_at` to `exportedAt` in the `tauri.invoke()` call.
-
-**Secondary bug** (premature blob URL revocation): When the Tauri IPC path fails (the catch block runs), `URL.revokeObjectURL(url)` is called **synchronously** right after `a.click()`. Browsers start the download asynchronously, so the blob URL is revoked before the download begins, and no file is saved.
-
-**Fix**: Wrap `URL.revokeObjectURL(url)` in a `setTimeout(..., 100)` to give the browser time to start the download.
-
-Both changes in `crates/visualize/frontend/src/selection.ts`:
-
-```typescript
-// Primary fix: exported_at → exportedAt (camelCase for Tauri IPC)
-await tauri.invoke('export_selections', {
-    path,
-    exportedAt: exportData.exported_at,  // ← was: exported_at
-    file: exportData.file,
-    selections: exportData.selections,
-});
-```
-
-```typescript
-// Secondary fix: delay URL revocation
-a.click();
-setTimeout(() => URL.revokeObjectURL(url), 100);  // ← was: URL.revokeObjectURL(url);
-```
-
-### Step 2 — Add Rust integration test (optional)
-
-The `export_selections` Tauri command is pure file I/O — it writes a `SelectionExport` JSON to a given path. Add a test to `crates/visualize/tests/integration.rs` that:
-
-1. Constructs a `SelectionExport` with known values
-2. Writes it to a temp file (directly, without going through Tauri IPC)
-3. Reads the file back and parses the JSON
-4. Asserts:
-   - Top-level is an object (not an array)
-   - Keys `exported_at`, `file`, `selections` exist
-   - `selections` is an array
-   - Round-trip: `serde_json::from_str::<SelectionExport>(&json)` succeeds
-
-This provides regression coverage for the Rust side independent of Tauri IPC.
+- **Old unit tests asserting empty for no-matches** (`no_match_excluded`, `empty_selections`, `person_rows_no_match`) — updated in Step 2 to assert `DiffOnly`/`VizOnly` rows instead.
+- **E2E test `e2e_integrate_diff_viz_wrapped_envelope` asserting abc-3 not in output** — updated in Step 5 since abc-3 now appears as a `DiffOnly` row.
+- **PropRow in output.rs** — updated in Step 1 to match new `MergedRow` fields, keeping the build compilable after type changes.
+- **`IntegrateReport.matched_count`** — renamed to `row_count`; a separate `matched_count` field counts only `RowKind::Matched` rows. Update in Step 3 (JSON) and Step 5 (integration tests checking the report).
+- **CLI command** — does not display count in its output message, so no CLI changes needed beyond the struct rename.

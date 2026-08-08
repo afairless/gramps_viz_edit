@@ -273,7 +273,7 @@ export async function exportToFile(
     const tauri = await import('@tauri-apps/api/core');
     await tauri.invoke('export_selections', {
       path,
-      exported_at: exportData.exported_at,
+      exportedAt: exportData.exported_at,
       file: exportData.file,
       selections: exportData.selections,
     });
@@ -288,7 +288,7 @@ export async function exportToFile(
     a.href = url;
     a.download = exportData.file;
     a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 100);
     return exportData.file;
   }
 }
