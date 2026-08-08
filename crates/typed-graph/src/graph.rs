@@ -267,6 +267,23 @@ impl Graph {
             .unwrap_or_default()
     }
 
+    /// Return all edges incident to a node (both as source and target).
+    ///
+    /// Combines [`edges_from`](Graph::edges_from) and
+    /// [`edges_to`](Graph::edges_to) results. Uses the existing forward
+    /// and reverse edge indexes for O(1) lookup per direction.
+    pub fn edges_incident_to(&self, handle: &Handle) -> Vec<&Edge> {
+        let mut incident: Vec<&Edge> = self
+            .forward_edges
+            .get(handle)
+            .map(|indices| indices.iter().filter_map(|&i| self.edges.get(i)).collect())
+            .unwrap_or_default();
+        if let Some(indices) = self.reverse_edges.get(handle) {
+            incident.extend(indices.iter().filter_map(|&i| self.edges.get(i)));
+        }
+        incident
+    }
+
     // -----------------------------------------------------------------------
     // Validation state
     // -----------------------------------------------------------------------
@@ -1094,6 +1111,150 @@ mod tests {
         let graph = Graph::new();
         let edges = graph.edges_to(&"nonexistent".to_string());
         assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn edges_incident_to_empty_node() {
+        let graph = Graph::new();
+        let edges = graph.edges_incident_to(&"nonexistent".to_string());
+        assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn edges_incident_to_edges_from_only() {
+        let mut graph = Graph::new();
+        graph
+            .add_node("p1".into(), Node::Person(PersonData::default()))
+            .unwrap();
+        graph
+            .add_node("f1".into(), Node::Family(FamilyData::default()))
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonFamily {
+                source: "p1".into(),
+                target: "f1".into(),
+            })
+            .unwrap();
+
+        // p1 has one outgoing edge
+        let incident = graph.edges_incident_to(&"p1".to_string());
+        assert_eq!(incident.len(), 1);
+    }
+
+    #[test]
+    fn edges_incident_to_edges_to_only() {
+        let mut graph = Graph::new();
+        graph
+            .add_node("p1".into(), Node::Person(PersonData::default()))
+            .unwrap();
+        graph
+            .add_node("p2".into(), Node::Person(PersonData::default()))
+            .unwrap();
+        graph
+            .add_node("f1".into(), Node::Family(FamilyData::default()))
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonFamily {
+                source: "p1".into(),
+                target: "f1".into(),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonFamily {
+                source: "p2".into(),
+                target: "f1".into(),
+            })
+            .unwrap();
+
+        // f1 has two incoming edges
+        let incident = graph.edges_incident_to(&"f1".to_string());
+        assert_eq!(incident.len(), 2);
+    }
+
+    #[test]
+    fn edges_incident_to_both_directions() {
+        let mut graph = Graph::new();
+        graph
+            .add_node("p1".into(), Node::Person(PersonData::default()))
+            .unwrap();
+        graph
+            .add_node("f1".into(), Node::Family(FamilyData::default()))
+            .unwrap();
+        graph
+            .add_node("f2".into(), Node::Family(FamilyData::default()))
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonFamily {
+                source: "p1".into(),
+                target: "f1".into(),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonFamily {
+                source: "p1".into(),
+                target: "f2".into(),
+            })
+            .unwrap();
+        // Add an edge where p1 is target
+        graph
+            .add_edge(Edge::PersonParentFamily {
+                source: "p1".into(),
+                target: "f1".into(),
+            })
+            .unwrap();
+
+        // p1 has 2 outgoing (PersonFamily) + 1 incoming (PersonParentFamily) = 3
+        let incident = graph.edges_incident_to(&"p1".to_string());
+        assert_eq!(incident.len(), 3);
+    }
+
+    #[test]
+    fn edges_incident_to_missing_handle() {
+        let graph = Graph::new();
+        let edges = graph.edges_incident_to(&"nonexistent".to_string());
+        assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn edges_incident_to_returns_all_variants() {
+        let mut graph = Graph::new();
+        graph
+            .add_node("p1".into(), Node::Person(PersonData::default()))
+            .unwrap();
+        graph
+            .add_node("p2".into(), Node::Person(PersonData::default()))
+            .unwrap();
+        graph
+            .add_node("f1".into(), Node::Family(FamilyData::default()))
+            .unwrap();
+        graph
+            .add_node("e1".into(), Node::Event(EventData::default()))
+            .unwrap();
+
+        graph
+            .add_edge(Edge::PersonFamily {
+                source: "p1".into(),
+                target: "f1".into(),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonEventRef {
+                source: "p1".into(),
+                target: "e1".into(),
+                metadata: Box::new(EventRef {
+                    ref_field: "e1".into(),
+                    role: EventRoleType::Primary,
+                }),
+            })
+            .unwrap();
+
+        // p1 has 2 incident edges (outgoing to f1, outgoing to e1)
+        let incident = graph.edges_incident_to(&"p1".to_string());
+        assert_eq!(incident.len(), 2);
+        assert!(incident.iter().any(|e| matches!(e, Edge::PersonFamily { .. })));
+        assert!(incident
+            .iter()
+            .any(|e| matches!(e, Edge::PersonEventRef { .. })));
     }
 
     #[test]
