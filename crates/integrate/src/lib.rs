@@ -43,7 +43,9 @@ use crate::merge::{merge_diff_viz, MergedRow};
 /// Report from the [`integrate_diff_viz`] orchestrator.
 #[derive(Debug, Clone, PartialEq)]
 pub struct IntegrateReport {
-    /// Number of matched rows.
+    /// Total number of rows (Matched + DiffOnly + VizOnly).
+    pub row_count: usize,
+    /// Number of rows with RowKind::Matched.
     pub matched_count: usize,
     /// Path of the source diff CSV file.
     pub diff_path: String,
@@ -57,12 +59,11 @@ pub struct IntegrateReport {
 ///
 /// 1. Parse the diff CSV file into [`DiffRow`]s
 /// 2. Parse the selections JSON file into [`Selection`]s
-/// 3. Merge by handle matching (inner join on Person rows)
+/// 3. Merge by handle matching (full outer join on Person rows)
 /// 4. Return an [`IntegrateReport`] with the results
 ///
-/// Logs warnings (via `log::warn!`) when:
-/// - The diff CSV contains no Person rows
-/// - The selections JSON contains no selections
+/// Logs a warning (via `log::warn!`) when:
+/// - The diff CSV contains no Person rows and selections are empty
 /// - No matches are found (all Person rows excluded)
 ///
 /// # Errors
@@ -80,11 +81,19 @@ pub fn integrate_diff_viz(
     let rows = merge_diff_viz(diff_rows, selections);
 
     if rows.is_empty() {
-        log::warn!("no matches found between diff and selections");
+        log::warn!(
+            "no data to integrate: diff CSV contains no Person rows and selections are empty"
+        );
     }
 
+    let matched_count = rows
+        .iter()
+        .filter(|r| r.row_kind == crate::merge::RowKind::Matched)
+        .count();
+
     Ok(IntegrateReport {
-        matched_count: rows.len(),
+        row_count: rows.len(),
+        matched_count,
         diff_path: diff_path.to_string(),
         sel_path: selections_path.to_string(),
         rows,
