@@ -1,23 +1,105 @@
-# Implementation Plan: Integrate — Inner Join to Full Outer Join
+# Implementation Plan: Bulk Delete Tool (`gramps-gen delete`)
 
-Source: `docs/research/integrate-outer-join.md`
-
-## Branch
-
-Create a new branch `agent/integrate-outer-join` from `main`.
+Source: `docs/research/bulk-delete-tool.md`
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `refactor: make viz fields optional in MergedRow, add RowKind, add Default for DiffRow` | Type changes | `crates/integrate/src/merge.rs`: `MergedRow` — `viz_name: Option<String>`, `viz_gender: Option<String>`, `viz_family_group: Option<usize>`; add `RowKind` enum (`Matched`, `DiffOnly`, `VizOnly`) with `#[serde(rename_all = "snake_case")]`; add `row_kind: RowKind` field. `crates/integrate/src/csv_reader.rs`: add `#[derive(Default)]` to `DiffRow`. `crates/integrate/src/output.rs`: update `PropRow` struct and `MergedRow::from(PropRow)` impl to match new fields. | Unit, proptest |
-| 2 | `feat: change diff-viz merge from inner join to full outer join` | Merge logic rewrite | `crates/integrate/src/merge.rs`: rewrite `merge_diff_viz()` — emit `DiffOnly` rows for unmatched diff rows, track matched selection handles in `HashSet<String>`, emit `VizOnly` rows for unmatched selections. Remove early returns when selections are empty or diff Person rows are empty. Update unit tests: `no_match_excluded` → asserts `DiffOnly` row; `empty_selections` → asserts `VizOnly` rows (or empty if no selections at all); `person_rows_no_match` → asserts `DiffOnly` rows. Add new tests: `emits_diff_only_row`, `emits_viz_only_row`, `full_outer_join_4_rows`. | Unit |
-| 3 | `feat: update format_json for outer join semantics` | JSON output | `crates/integrate/src/output.rs`: add `row_kind: RowKind` to `MatchEntry`; make `selection` field `Option<SelectionView>` with `skip_serializing_if`; rename `JsonOutput.matched_count` → `JsonOutput.row_count`; add `JsonOutput.matched_count` as separate field; update `From<&MergedRow> for DiffRow` (already works — Default used for VizOnly). Update unit tests. | Unit, proptest |
-| 4 | `feat: add row_kind column to CSV output` | CSV output | `crates/integrate/src/output.rs`: add `"row_kind"` to `CSV_HEADER` immediately after `"side"` (header becomes 21 columns). `crates/integrate/src/merge.rs`: `MergedRow` already has `row_kind` and the CSV serializer picks it up via `Serialize`. Update unit tests for header length. | Unit, proptest |
-| 5 | `test: update integration and E2E tests for full outer join including viz-only rows` | Integration & E2E tests | `crates/integrate/tests/integration.rs`: update `integrate_diff_viz_matches` — 3 matched rows + potential diff-only/viz-only; rename `integrate_diff_viz_no_matches` to `integrate_diff_viz_data_all_unmatched` — now asserts rows > 0; add `integrate_diff_viz_selections_only` — viz-only rows emitted. `crates/cli/tests/e2e.rs`: update `e2e_integrate_diff_viz_csv_output` — check for `row_kind` column; update `e2e_integrate_diff_viz_wrapped_envelope` — abc-3 now appears as diff-only row, update assertion; add `e2e_integrate_diff_viz_unmatched` — test that unmatched diff row still appears. | Integration, E2E |
+| 1 | `docs: add Gramps deletion logic research summary` | Research Gramps deletion logic | `docs/research/gramps-deletion-logic.md` | — |
+| 2 | `feat(typed-graph): add edges_incident_to query method` | Graph query API addition | `crates/typed-graph/src/graph.rs` | Unit: empty node, edges_from only, edges_to only, both directions, missing handle |
+| 3 | `feat(gramps-reader): build full-graph XML parser` | Full-graph streaming parser | `crates/gramps-reader/src/xml/graph.rs` | Round-trip: parse → write → re-parse, semantic equivalence (same node/edge counts) |
+| 4 | `feat(delete): create deletion cascade engine and types` | Deletion cascade engine | `crates/delete/Cargo.toml`, `crates/delete/src/lib.rs`, `crates/delete/src/types.rs`, `crates/delete/src/cascade.rs` | Unit: all per-type orphan rules, edge cases (§3.4), property-based idempotency/monotonicity/already-orphaned-exclusion invariants |
+| 5 | `feat(delete): add manifest types and serialization` | Deletion manifest | `crates/delete/src/manifest.rs` | Unit: manifest round-trip, validation (bad handles, mismatched source_file) |
+| 6 | `feat(delete): add interactive review CLI` | Interactive review loop | `crates/delete/src/review.rs` | Unit: state machine (y/n/r/l/s/q), handle removal, abort, all-skip, `--yes` flag |
+| 7 | `feat(output): add filter-during-serialization, namespace preservation, and gzip output` | Output writer enhancements | `crates/output/src/xml.rs` | Unit: filter removes specified handles, namespace override round-trip, gzip input → gzip output |
+| 8 | `feat(cli): wire delete command with all options` | CLI command wiring | `crates/cli/src/commands/delete.rs`, `crates/delete/src/lib.rs` (update) | Integration: generate tree → select → delete → verify output |
+| 9 | `test: add end-to-end integration tests for bulk delete` | End-to-end validation | `crates/cli/tests/e2e_delete.rs` or extend `crates/cli/tests/e2e.rs` | Integration: subprocess-based, verify output loads in round-trip, already-orphaned objects preserved |
 
-## Known issues addressed during implementation
+## Step Details
 
-- **Old unit tests asserting empty for no-matches** (`no_match_excluded`, `empty_selections`, `person_rows_no_match`) — updated in Step 2 to assert `DiffOnly`/`VizOnly` rows instead.
-- **E2E test `e2e_integrate_diff_viz_wrapped_envelope` asserting abc-3 not in output** — updated in Step 5 since abc-3 now appears as a `DiffOnly` row.
-- **PropRow in output.rs** — updated in Step 1 to match new `MergedRow` fields, keeping the build compilable after type changes.
-- **`IntegrateReport.matched_count`** — renamed to `row_count`; a separate `matched_count` field counts only `RowKind::Matched` rows. Update in Step 3 (JSON) and Step 5 (integration tests checking the report).
-- **CLI command** — does not display count in its output message, so no CLI changes needed beyond the struct rename.
+### Step 1 — Research Gramps deletion logic
+
+- Investigate Gramps source: `gramps/gen/db/base.py`, `gramps/gen/db/upgrade.py`, `gramps/gen/utils/`
+- Focus on: reference counting, back-reference tracking, deletion callbacks (`DbDeletePrimary`, `delete_primary_from_referring`), cascading rules, signals
+- Write findings to `docs/research/gramps-deletion-logic.md` with pseudocode, deletion order, edge cases
+- Decide: wrap Gramps Python, reimplement in Rust, or use Gramps as validation oracle
+
+### Step 2 — Add `edges_incident_to` to `typed-graph::Graph`
+
+```rust
+impl Graph {
+    /// Return all edges incident to a node (both as source and target).
+    pub fn edges_incident_to(&self, handle: &Handle) -> Vec<&Edge>;
+}
+```
+
+- Combines `edges_from` + `edges_to` results
+- O(1) via existing indexes
+- Add unit tests: empty node, edges_from only, edges_to only, both directions, missing handle
+
+### Step 3 — Full-graph XML parser (`crates/gramps-reader/src/xml/graph.rs`)
+
+- Streaming parser that reads entire `.gramps` XML and populates `typed_graph::Graph`
+- Parse all 10 primary types: Person, Family, Event, Place, Source, Citation, Repository, Media, Note, Tag
+- Handle-ref fields become Edge variants; hlink attributes become Edge variants
+- Graph population order: (1) all nodes first, (2) handle-ref edges from data structs, (3) hlink element edges
+- Reuse existing helpers: `read_handle_attr`, `read_hlink_attr`, `strip_prefix`
+- Detect Gramps version from `<header>` version attribute (fall back to xmlns heuristic)
+- Handle both 5.1 (flat `<type>`) and 5.2 (nested `<eventtype>`) using existing `#[cfg(feature = "schema-5-1")]` patterns
+- Capture `xmlns` attribute from `<database>` root for output namespace preservation
+- Gzip-compressed input transparently decompressed (reuse `io.rs`)
+- Self-closing elements and mixed content handled per existing `extract.rs` patterns
+
+### Step 4 — Deletion cascade engine
+
+**New crate**: `crates/delete/`
+
+- `types.rs`: `DeleteCandidate`, `DeletePlan`, `ReviewState` enums/types
+- `cascade.rs`: Core fixed-point algorithm with pre-existing connectivity recording
+  - Phase A: Record pre_connectivity[n] = count of incident edges for every node
+  - Phase B: Fixed-point loop — seeds → orphan detection → repeat until stable
+  - Phase C: Post-condition invariant (no dangling refs to live nodes)
+- `type_specific_orphan_rule` per §3.2
+- All edge cases from §3.4: multi-family people, shared events, place hierarchy, self-referencing edges, already-orphaned, PersonRef, dangling refs, inferred nodes
+- Property-based tests: idempotency, monotonicity, no dangling refs, already-orphaned exclusion
+
+### Step 5 — Manifest types and serialization
+
+- `manifest.rs`: Serialize/deserialize `DeleteManifest` to/from JSON
+- Format per §4.4: version, source_file, selections_file, created_at, seed_people, plan (per-type to_delete/kept)
+- Validation: cross-reference handles against graph; reject invalid handles; warn on source_file mismatch
+- Deterministic serialization (sorted handles)
+
+### Step 6 — Interactive review CLI
+
+- `review.rs`: Interactive terminal loop
+- Per-type prompt in dependency order (people → families → events → places → citations → sources → repositories → media → notes → tags)
+- Commands: y (confirm), n (skip), r (remove handles), l (list all), s (summary), q (abort)
+- `--yes` flag: skip all prompts
+- Sample candidates display with handle + description
+
+### Step 7 — Output writer enhancements
+
+- **Filter-during-serialization**: `GraphXmlWriter::new` or new constructor accepts optional `&to_delete: HashSet<Handle>` — skips nodes/edges in the set during serialization
+- **Namespace preservation**: New constructor/setter to accept explicit namespace override (captured by parser in Step 3)
+- **Gzip output**: When input path ends with `.gz`, write through `GzEncoder`
+- **Header updates**: New `created` timestamp, `<researcher>` note indicating cleanup
+- **Pre-write validation**: Verify every handle in `to_delete` exists; sanity-check that no live node's sole reference is a `to_delete` handle
+
+### Step 8 — Wire CLI delete command
+
+- `crates/cli/src/commands/delete.rs`: Clap subcommand for `gramps-gen delete`
+- Arguments: `<INPUT.gramps>`, `--selections`, `--output`, `--yes`, `--dry-run`, `--save-manifest`, `--load-manifest`
+- Pipeline: parse input file → load selections → run cascade engine → (optional review) → validate → write output
+- Wire into CLI dispatch in `crates/cli/src/commands/mod.rs` and `crates/cli/src/main.rs`
+- Update `crates/delete/Cargo.toml` dependencies as needed (cli, output, gramps-reader)
+
+### Step 9 — End-to-end integration tests
+
+- Generate a random family tree via `gramps-gen generate`
+- Run `gramps-gen delete` on the generated file
+- Verify output loads in round-trip (parse → re-parse)
+- Verify selected people are gone
+- Verify orphaned events/families are gone
+- Verify pre-existing unreferenced objects remain
+- Test `--yes`, `--dry-run`, `--save-manifest`/`--load-manifest` flags
+- Test selections file validation (0% match → error, 50%+ match → proceed)
