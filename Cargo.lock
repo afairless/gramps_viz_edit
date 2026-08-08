@@ -703,6 +703,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "delete"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "proptest",
+ "serde",
+ "serde_json",
+ "typed-graph",
+]
+
+[[package]]
 name = "deranged"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,13 @@
+[package]
+name = "delete"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+typed-graph = { path = "../typed-graph" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+
+[dev-dependencies]
+proptest = "1"
