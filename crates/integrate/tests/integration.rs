@@ -17,8 +17,7 @@ fn create_temp_file(content: &str) -> String {
     path.push(format!("test_{}.tmp", rand::random::<u64>()));
 
     let mut file = std::fs::File::create(&path).expect("create temp file");
-    file.write_all(content.as_bytes())
-        .expect("write temp file");
+    file.write_all(content.as_bytes()).expect("write temp file");
     path.to_string_lossy().to_string()
 }
 
@@ -59,21 +58,21 @@ fn integrate_diff_viz_matches() {
     // Row 0: H001 matched via handle_a → side "a"
     assert_eq!(report.rows[0].side, "a");
     assert_eq!(report.rows[0].handle_a.as_deref(), Some("H001"));
-    assert_eq!(report.rows[0].viz_name, "John Smith");
+    assert_eq!(report.rows[0].viz_name.as_deref(), Some("John Smith"));
     assert_eq!(report.rows[0].viz_birth_date.as_deref(), Some("1840-07-13"));
-    assert_eq!(report.rows[0].viz_family_group, 3);
+    assert_eq!(report.rows[0].viz_family_group, Some(3));
 
     // Row 1: H002 matched via handle_a → side "a"
     assert_eq!(report.rows[1].side, "a");
-    assert_eq!(report.rows[1].viz_name, "Jane Doe");
+    assert_eq!(report.rows[1].viz_name.as_deref(), Some("Jane Doe"));
     assert_eq!(report.rows[1].viz_birth_date, None);
 
     // Row 2: H004 matched via handle_b → side "b"
     assert_eq!(report.rows[2].side, "b");
     assert_eq!(report.rows[2].handle_a.as_deref(), Some("H003"));
     assert_eq!(report.rows[2].handle_b.as_deref(), Some("H004"));
-    assert_eq!(report.rows[2].viz_name, "Bob Brown");
-    assert_eq!(report.rows[2].viz_family_group, 1);
+    assert_eq!(report.rows[2].viz_name.as_deref(), Some("Bob Brown"));
+    assert_eq!(report.rows[2].viz_family_group, Some(1));
 
     cleanup_temp_file(&diff_path);
     cleanup_temp_file(&sel_path);

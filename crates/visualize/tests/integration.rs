@@ -374,13 +374,13 @@ fn selection_export_serialization_has_envelope() {
     assert!(parsed.is_object(), "envelope should be an object");
 
     // Must have envelope keys
-    assert!(
-        parsed.get("exported_at").is_some(),
-        "missing exported_at"
-    );
+    assert!(parsed.get("exported_at").is_some(), "missing exported_at");
     assert!(parsed.get("file").is_some(), "missing file");
     assert!(parsed.get("selections").is_some(), "missing selections");
-    assert!(parsed["selections"].is_array(), "selections should be an array");
+    assert!(
+        parsed["selections"].is_array(),
+        "selections should be an array"
+    );
 
     // Round-trip: deserialize back
     let round_trip: visualize::SelectionExport =
@@ -429,10 +429,8 @@ fn selection_export_roundtrip_via_integrate() {
     std::fs::rename(tmp.path(), &sel_path).unwrap();
 
     // Parse with integrate
-    let selections = integrate::json_reader::parse_selections_json(
-        sel_path.to_str().unwrap(),
-    )
-    .expect("integrate should parse the wrapped format");
+    let selections = integrate::json_reader::parse_selections_json(sel_path.to_str().unwrap())
+        .expect("integrate should parse the wrapped format");
 
     assert_eq!(selections.len(), 2);
     assert_eq!(selections[0].handle, "h001");

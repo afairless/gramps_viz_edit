@@ -12,7 +12,7 @@ use crate::IntegrateError;
 /// Matches the column layout of `gramps-gen diff --output csv`.
 /// All fields are `pub` and match the CSV header names for
 /// header-driven deserialization.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct DiffRow {
     /// Classification: Same, Modified, Added, Removed, NeedsReview, ExtrinsicOnly
     pub classification: String,
@@ -84,8 +84,7 @@ fn parse_diff_csv_str(content: &str) -> Result<Vec<DiffRow>, IntegrateError> {
 
     let mut rows = Vec::new();
     for result in reader.deserialize() {
-        let row: DiffRow = result
-            .map_err(|e| IntegrateError::DiffReadError(e.to_string()))?;
+        let row: DiffRow = result.map_err(|e| IntegrateError::DiffReadError(e.to_string()))?;
         rows.push(row);
     }
 
@@ -122,7 +121,11 @@ mod tests {
             "\"Added\",\"Person\",\"\",\"\",\"\",\"B003\",\"I0003\",\"Jane Doe\",\"1.00\",\"\",\"\",\"\",\"\",\"0.00\"",
         ]);
         let rows = parse_diff_csv_str(&csv).expect("parse valid CSV");
-        assert_eq!(rows.len(), 4, "expected 4 rows: 1 Same + 2 Modified + 1 Added");
+        assert_eq!(
+            rows.len(),
+            4,
+            "expected 4 rows: 1 Same + 2 Modified + 1 Added"
+        );
 
         // Row 0: Same
         assert_eq!(rows[0].classification, "Same");
@@ -200,10 +203,7 @@ mod tests {
         // Missing a column (only 3 columns instead of 14)
         let csv = "\"classification\",\"item_type\",\"handle_a\"\n\"Same\",\"Person\",\"A001\"\n";
         let result = parse_diff_csv_str(csv);
-        assert!(
-            result.is_err(),
-            "malformed CSV should return DiffReadError"
-        );
+        assert!(result.is_err(), "malformed CSV should return DiffReadError");
         match result {
             Err(IntegrateError::DiffReadError(msg)) => {
                 assert!(!msg.is_empty(), "error message should not be empty");

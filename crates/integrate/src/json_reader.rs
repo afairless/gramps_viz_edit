@@ -56,8 +56,9 @@ struct SelectionExport {
 /// - The JSON is not valid
 /// - A `selections` entry is missing a required field (e.g. `handle`)
 pub fn parse_selections_json(path: &str) -> Result<Vec<Selection>, IntegrateError> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| IntegrateError::SelectionsReadError(format!("cannot read '{}': {}", path, e)))?;
+    let content = std::fs::read_to_string(path).map_err(|e| {
+        IntegrateError::SelectionsReadError(format!("cannot read '{}': {}", path, e))
+    })?;
     parse_selections_json_str(&content)
 }
 

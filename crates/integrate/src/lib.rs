@@ -26,7 +26,9 @@ impl fmt::Display for IntegrateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             IntegrateError::DiffReadError(msg) => write!(f, "diff CSV read error: {msg}"),
-            IntegrateError::SelectionsReadError(msg) => write!(f, "selections JSON read error: {msg}"),
+            IntegrateError::SelectionsReadError(msg) => {
+                write!(f, "selections JSON read error: {msg}")
+            }
             IntegrateError::OutputError(msg) => write!(f, "output error: {msg}"),
         }
     }

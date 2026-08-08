@@ -8,6 +8,18 @@ use serde::{Deserialize, Serialize};
 use crate::csv_reader::DiffRow;
 use crate::json_reader::Selection;
 
+/// The provenance of a merged row — which data sources contributed to it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RowKind {
+    /// Person appears in both diff and selections — full merge.
+    Matched,
+    /// Person appears only in the diff CSV — viz fields are empty.
+    DiffOnly,
+    /// Person appears only in the visualizer selections — diff fields are empty.
+    VizOnly,
+}
+
 /// A combined row from merging a diff CSV row with a visualizer selection.
 ///
 /// Contains all original diff fields plus the matching side and visualizer
@@ -34,17 +46,19 @@ pub struct MergedRow {
     // --- Merge metadata ---
     /// Which side matched: "a" (match via handle_a) or "b" (match via handle_b).
     pub side: String,
+    /// Whether this row is matched, diff-only, or viz-only.
+    pub row_kind: RowKind,
     // --- Visualizer selection fields ---
     /// Person's full name from the visualizer.
-    pub viz_name: String,
+    pub viz_name: Option<String>,
     /// Birth date from the visualizer.
     pub viz_birth_date: Option<String>,
     /// Death date from the visualizer.
     pub viz_death_date: Option<String>,
     /// Gender from the visualizer.
-    pub viz_gender: String,
+    pub viz_gender: Option<String>,
     /// DSU family group ID from the visualizer.
-    pub viz_family_group: usize,
+    pub viz_family_group: Option<usize>,
 }
 
 /// Merge diff CSV rows with visualizer selections by handle.
@@ -79,10 +93,8 @@ pub fn merge_diff_viz(diff_rows: Vec<DiffRow>, selections: Vec<Selection>) -> Ve
         return vec![];
     }
 
-    let selection_map: std::collections::HashMap<&str, &Selection> = selections
-        .iter()
-        .map(|s| (s.handle.as_str(), s))
-        .collect();
+    let selection_map: std::collections::HashMap<&str, &Selection> =
+        selections.iter().map(|s| (s.handle.as_str(), s)).collect();
 
     let mut merged = Vec::new();
 
@@ -128,12 +140,13 @@ pub fn merge_diff_viz(diff_rows: Vec<DiffRow>, selections: Vec<Selection>) -> Ve
             similarity: row.similarity,
             // Merge metadata
             side: side.to_string(),
+            row_kind: RowKind::Matched,
             // Selection fields
-            viz_name: sel.name.clone(),
+            viz_name: Some(sel.name.clone()),
             viz_birth_date: sel.birth_date.clone(),
             viz_death_date: sel.death_date.clone(),
-            viz_gender: sel.gender.clone(),
-            viz_family_group: sel.family_group,
+            viz_gender: Some(sel.gender.clone()),
+            viz_family_group: Some(sel.family_group),
         });
     }
 
@@ -170,11 +183,7 @@ mod tests {
     }
 
     /// Helper: build a non-Person diff row (Family).
-    fn family_row(
-        classification: &str,
-        handle_a: Option<&str>,
-        handle_b: Option<&str>,
-    ) -> DiffRow {
+    fn family_row(classification: &str, handle_a: Option<&str>, handle_b: Option<&str>) -> DiffRow {
         DiffRow {
             classification: classification.to_string(),
             item_type: "Family".to_string(),
@@ -213,8 +222,9 @@ mod tests {
         let result = merge_diff_viz(rows, selections);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].side, "a");
-        assert_eq!(result[0].viz_name, "John Smith");
-        assert_eq!(result[0].viz_family_group, 1);
+        assert_eq!(result[0].row_kind, RowKind::Matched);
+        assert_eq!(result[0].viz_name.as_deref(), Some("John Smith"));
+        assert_eq!(result[0].viz_family_group, Some(1));
     }
 
     /// Match via handle_b → side = "b".
@@ -225,8 +235,9 @@ mod tests {
         let result = merge_diff_viz(rows, selections);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].side, "b");
-        assert_eq!(result[0].viz_name, "Jane Doe");
-        assert_eq!(result[0].viz_family_group, 2);
+        assert_eq!(result[0].row_kind, RowKind::Matched);
+        assert_eq!(result[0].viz_name.as_deref(), Some("Jane Doe"));
+        assert_eq!(result[0].viz_family_group, Some(2));
     }
 
     /// Added person (handle_a=None) matching handle_b → side = "b".
@@ -237,7 +248,8 @@ mod tests {
         let result = merge_diff_viz(rows, selections);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].side, "b");
-        assert_eq!(result[0].viz_name, "Added Person");
+        assert_eq!(result[0].row_kind, RowKind::Matched);
+        assert_eq!(result[0].viz_name.as_deref(), Some("Added Person"));
     }
 
     /// Removed person (handle_b=None) matching handle_a → side = "a".
@@ -248,7 +260,8 @@ mod tests {
         let result = merge_diff_viz(rows, selections);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].side, "a");
-        assert_eq!(result[0].viz_name, "Removed Person");
+        assert_eq!(result[0].row_kind, RowKind::Matched);
+        assert_eq!(result[0].viz_name.as_deref(), Some("Removed Person"));
     }
 
     /// Person not in selections (neither handle matches) → excluded.
@@ -268,6 +281,7 @@ mod tests {
         let result = merge_diff_viz(rows, selections);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].side, "a");
+        assert_eq!(result[0].row_kind, RowKind::Matched);
     }
 
     /// Empty selections → empty result.
@@ -313,11 +327,13 @@ mod tests {
 
         // H001 matched via handle_a
         assert_eq!(result[0].side, "a");
-        assert_eq!(result[0].viz_name, "Matched A");
+        assert_eq!(result[0].row_kind, RowKind::Matched);
+        assert_eq!(result[0].viz_name.as_deref(), Some("Matched A"));
 
         // H003 NOT matched via handle_a, but H004 matched via handle_b
         assert_eq!(result[1].side, "b");
-        assert_eq!(result[1].viz_name, "Matched B");
+        assert_eq!(result[1].row_kind, RowKind::Matched);
+        assert_eq!(result[1].viz_name.as_deref(), Some("Matched B"));
     }
 
     /// MergedRow preserves all diff fields from the original row.

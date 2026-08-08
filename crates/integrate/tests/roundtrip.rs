@@ -6,9 +6,7 @@
 use std::io::Write;
 
 use diff::output::format_csv;
-use diff::report::{
-    Classification, DiffReport, DiffSummary, FieldChange, FieldKind, ItemDiff,
-};
+use diff::report::{Classification, DiffReport, DiffSummary, FieldChange, FieldKind, ItemDiff};
 use integrate::csv_reader::parse_diff_csv;
 
 /// Create a temporary file with the given content and return its path.
@@ -21,8 +19,7 @@ fn create_temp_csv(content: &str) -> String {
     path.push(format!("test_{}.csv", rand::random::<u64>()));
 
     let mut file = std::fs::File::create(&path).expect("create temp file");
-    file.write_all(content.as_bytes())
-        .expect("write temp file");
+    file.write_all(content.as_bytes()).expect("write temp file");
     path.to_string_lossy().to_string()
 }
 
@@ -112,11 +109,7 @@ fn roundtrip_diff_csv() {
     let path = create_temp_csv(&csv);
 
     let result = parse_diff_csv(&path);
-    assert!(
-        result.is_ok(),
-        "parse_diff_csv failed: {:?}",
-        result.err()
-    );
+    assert!(result.is_ok(), "parse_diff_csv failed: {:?}", result.err());
     let rows = result.unwrap();
 
     // 4 items: Same (1) + Modified (1 field change → 1 row) + Added (1) + Removed (1) = 4 rows
@@ -156,23 +149,21 @@ fn roundtrip_diff_csv() {
 fn roundtrip_special_characters() {
     let report = DiffReport {
         summary: DiffSummary::default(),
-        items: vec![
-            item_with_meta(
-                Some("A001"),
-                Some("B001"),
-                Some("Smith, John \"The Great\""),
-                Some("Jones, Jane"),
-                "Person",
-                Classification::Modified,
-                vec![field_change(
-                    FieldKind::Text,
-                    "surname",
-                    Some("Smith, O'Brien"),
-                    Some("Jones\nDoe"),
-                    0.5,
-                )],
-            ),
-        ],
+        items: vec![item_with_meta(
+            Some("A001"),
+            Some("B001"),
+            Some("Smith, John \"The Great\""),
+            Some("Jones, Jane"),
+            "Person",
+            Classification::Modified,
+            vec![field_change(
+                FieldKind::Text,
+                "surname",
+                Some("Smith, O'Brien"),
+                Some("Jones\nDoe"),
+                0.5,
+            )],
+        )],
         ambiguous_cases: vec![],
     };
 

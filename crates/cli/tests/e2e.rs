@@ -937,7 +937,8 @@ fn e2e_integrate_diff_viz_csv_output() {
         &out_path,
     ]);
     assert_eq!(
-        code, Some(0),
+        code,
+        Some(0),
         "integrate diff-viz should succeed, stderr: {}",
         stderr
     );
@@ -1006,8 +1007,14 @@ fn e2e_integrate_diff_viz_wrapped_envelope() {
   ]
 }"#;
 
-    let diff_path = format!("/tmp/gramps_gen_e2e_wrapped_diff_{}.csv", std::process::id());
-    let sel_path = format!("/tmp/gramps_gen_e2e_wrapped_sel_{}.json", std::process::id());
+    let diff_path = format!(
+        "/tmp/gramps_gen_e2e_wrapped_diff_{}.csv",
+        std::process::id()
+    );
+    let sel_path = format!(
+        "/tmp/gramps_gen_e2e_wrapped_sel_{}.json",
+        std::process::id()
+    );
     let out_path = format!("/tmp/gramps_gen_e2e_wrapped_out_{}.csv", std::process::id());
 
     std::fs::write(&diff_path, diff_csv).unwrap();
@@ -1025,7 +1032,8 @@ fn e2e_integrate_diff_viz_wrapped_envelope() {
         &out_path,
     ]);
     assert_eq!(
-        code, Some(0),
+        code,
+        Some(0),
         "integrate diff-viz with wrapped envelope should succeed, stderr: {}",
         stderr
     );
@@ -1063,7 +1071,8 @@ fn e2e_integrate_diff_viz_wrapped_envelope() {
         "json",
     ]);
     assert_eq!(
-        json_code, Some(0),
+        json_code,
+        Some(0),
         "integrate diff-viz JSON format should succeed, stderr: {}",
         json_stderr
     );
@@ -1071,7 +1080,9 @@ fn e2e_integrate_diff_viz_wrapped_envelope() {
     // Verify JSON output
     let parsed: serde_json::Value =
         serde_json::from_str(&json_stdout).expect("should be valid JSON");
-    let matches = parsed["matches"].as_array().expect("should have matches array");
+    let matches = parsed["matches"]
+        .as_array()
+        .expect("should have matches array");
     assert_eq!(matches.len(), 2, "should have exactly 2 matched rows");
     assert_eq!(
         parsed["matched_count"].as_i64(),

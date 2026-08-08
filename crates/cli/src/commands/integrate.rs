@@ -54,8 +54,7 @@ pub fn run(args: IntegrateArgs) -> Result<(), crate::CliError> {
 
 /// Run the diff-viz integration mode.
 fn run_diff_viz(args: DiffVizArgs) -> Result<(), crate::CliError> {
-    let report: IntegrateReport =
-        integrate::integrate_diff_viz(&args.diff, &args.selections)?;
+    let report: IntegrateReport = integrate::integrate_diff_viz(&args.diff, &args.selections)?;
 
     let output = match args.format.as_str() {
         "json" => format_json(&report.rows, &args.diff, &args.selections),

@@ -74,8 +74,8 @@ fn export_selections(
         file,
         selections,
     };
-    let json = serde_json::to_string_pretty(&export)
-        .map_err(|e| format!("Serialization error: {}", e))?;
+    let json =
+        serde_json::to_string_pretty(&export).map_err(|e| format!("Serialization error: {}", e))?;
     std::fs::write(&path, &json).map_err(|e| format!("Cannot write to '{}': {}", path, e))?;
     Ok(path)
 }

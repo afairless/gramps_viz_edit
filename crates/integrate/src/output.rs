@@ -26,6 +26,7 @@ const CSV_HEADER: &[&str] = &[
     "new_value",
     "similarity",
     "side",
+    "row_kind",
     "viz_name",
     "viz_birth_date",
     "viz_death_date",
@@ -50,9 +51,7 @@ pub fn format_csv(rows: &[MergedRow]) -> String {
         .expect("write CSV header to Vec");
 
     for row in rows {
-        writer
-            .serialize(row)
-            .expect("serialize merged row to CSV");
+        writer.serialize(row).expect("serialize merged row to CSV");
     }
 
     // Flush and extract the string
@@ -109,11 +108,11 @@ pub fn format_json(rows: &[MergedRow], diff_path: &str, sel_path: &str) -> Strin
                 side: row.side.clone(),
                 diff,
                 selection: SelectionView {
-                    name: row.viz_name.clone(),
+                    name: row.viz_name.clone().unwrap_or_default(),
                     birth_date: row.viz_birth_date.clone(),
                     death_date: row.viz_death_date.clone(),
-                    gender: row.viz_gender.clone(),
-                    family_group: row.viz_family_group,
+                    gender: row.viz_gender.clone().unwrap_or_default(),
+                    family_group: row.viz_family_group.unwrap_or(0),
                 },
             }
         })
@@ -153,7 +152,7 @@ impl From<&MergedRow> for DiffRow {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::merge::MergedRow;
+    use crate::merge::{MergedRow, RowKind};
 
     /// Helper: build a fully-populated MergedRow.
     fn full_row() -> MergedRow {
@@ -173,11 +172,12 @@ mod tests {
             new_value: "Jones".to_string(),
             similarity: 0.5,
             side: "a".to_string(),
-            viz_name: "John Smith".to_string(),
+            row_kind: RowKind::Matched,
+            viz_name: Some("John Smith".to_string()),
             viz_birth_date: Some("1840-07-13".to_string()),
             viz_death_date: Some("1910-03-22".to_string()),
-            viz_gender: "male".to_string(),
-            viz_family_group: 3,
+            viz_gender: Some("male".to_string()),
+            viz_family_group: Some(3),
         }
     }
 
@@ -199,11 +199,12 @@ mod tests {
             new_value: String::new(),
             similarity: 0.0,
             side: "b".to_string(),
-            viz_name: "Jane Doe".to_string(),
+            row_kind: RowKind::Matched,
+            viz_name: Some("Jane Doe".to_string()),
             viz_birth_date: None,
             viz_death_date: None,
-            viz_gender: "female".to_string(),
-            viz_family_group: 0,
+            viz_gender: Some("female".to_string()),
+            viz_family_group: Some(0),
         }
     }
 
@@ -232,7 +233,7 @@ mod tests {
         }
         // Header should have exactly 20 columns
         let cols: Vec<&str> = header.split(',').collect();
-        assert_eq!(cols.len(), 20);
+        assert_eq!(cols.len(), 21);
     }
 
     /// CSV: one row with all fields populated round-trips.
@@ -259,7 +260,7 @@ mod tests {
     #[test]
     fn csv_special_characters() {
         let mut row = full_row();
-        row.viz_name = "Smith, John \"The Great\"".to_string();
+        row.viz_name = Some("Smith, John \"The Great\"".to_string());
         row.viz_birth_date = Some("1840-07-13 / note, with comma".to_string());
         row.old_value = "Smith, O'Brien".to_string();
 
@@ -375,19 +376,33 @@ mod tests {
         #[proptest(strategy = "(0..=10000u32).prop_map(|n| n as f64 / 100.0)")]
         similarity: f64,
         side: String,
-        viz_name: String,
+        #[proptest(strategy = "row_kind_strategy()")]
+        row_kind: RowKind,
+        #[proptest(strategy = "opt_nonempty_str()")]
+        viz_name: Option<String>,
         #[proptest(strategy = "opt_nonempty_str()")]
         viz_birth_date: Option<String>,
         #[proptest(strategy = "opt_nonempty_str()")]
         viz_death_date: Option<String>,
-        viz_gender: String,
-        #[proptest(strategy = "0..=1000usize")]
-        viz_family_group: usize,
+        #[proptest(strategy = "opt_nonempty_str()")]
+        viz_gender: Option<String>,
+        #[proptest(strategy = "opt_usize()")]
+        viz_family_group: Option<usize>,
     }
 
     /// Strategy for optional strings that never produces Some("").
     fn opt_nonempty_str() -> impl Strategy<Value = Option<String>> {
         prop::option::weighted(0.8, "[a-zA-Z0-9 ._,!?@/-]+")
+    }
+
+    /// Strategy for optional usize values.
+    fn opt_usize() -> impl Strategy<Value = Option<usize>> {
+        prop::option::weighted(0.8, 0..=1000usize)
+    }
+
+    /// Strategy for generating any RowKind variant.
+    fn row_kind_strategy() -> impl Strategy<Value = RowKind> {
+        prop::sample::select(vec![RowKind::Matched, RowKind::DiffOnly, RowKind::VizOnly])
     }
 
     impl From<PropRow> for MergedRow {
@@ -408,6 +423,7 @@ mod tests {
                 new_value: p.new_value,
                 similarity: p.similarity,
                 side: p.side,
+                row_kind: p.row_kind,
                 viz_name: p.viz_name,
                 viz_birth_date: p.viz_birth_date,
                 viz_death_date: p.viz_death_date,
