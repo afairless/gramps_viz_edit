@@ -1,5 +1,6 @@
 //! Command modules for the CLI.
 
+pub mod delete;
 pub mod diff;
 pub mod generate;
 pub mod integrate;

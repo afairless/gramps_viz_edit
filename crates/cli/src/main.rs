@@ -5,6 +5,7 @@
 
 use clap::Parser;
 use clap::Subcommand;
+use cli::commands::delete::DeleteArgs;
 use cli::commands::diff::DiffArgs;
 use cli::commands::generate::GenerateArgs;
 use cli::commands::integrate::IntegrateArgs;
@@ -39,6 +40,8 @@ enum Command {
     /// List and download Gramps schemas
     #[command(subcommand)]
     Schema(SchemaCommand),
+    /// Delete selected people and orphaned dependencies from a Gramps file
+    Delete(DeleteArgs),
 }
 
 fn main() -> Result<(), CliError> {
@@ -46,6 +49,7 @@ fn main() -> Result<(), CliError> {
     let cli = Cli::parse();
     match cli.command {
         Command::Generate(args) => cli::commands::generate::run(args)?,
+        Command::Delete(args) => cli::commands::delete::run(args)?,
         Command::Diff(args) => cli::commands::diff::run(args)?,
         Command::Integrate(args) => cli::commands::integrate::run(args)?,
         Command::Stats(args) => cli::commands::stats::run(args)?,
