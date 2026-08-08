@@ -4,7 +4,7 @@ Source: `docs/research/bulk-delete-tool.md`
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `docs: add Gramps deletion logic research summary` | Research Gramps deletion logic | `docs/research/gramps-deletion-logic.md` | — |
+| 1 | skip Step 1 | skip Step 1 | skip Step 1 | — |
 | 2 | `feat(typed-graph): add edges_incident_to query method` | Graph query API addition | `crates/typed-graph/src/graph.rs` | Unit: empty node, edges_from only, edges_to only, both directions, missing handle |
 | 3 | `feat(gramps-reader): build full-graph XML parser` | Full-graph streaming parser | `crates/gramps-reader/src/xml/graph.rs` | Round-trip: parse → write → re-parse, semantic equivalence (same node/edge counts) |
 | 4 | `feat(delete): create deletion cascade engine and types` | Deletion cascade engine | `crates/delete/Cargo.toml`, `crates/delete/src/lib.rs`, `crates/delete/src/types.rs`, `crates/delete/src/cascade.rs` | Unit: all per-type orphan rules, edge cases (§3.4), property-based idempotency/monotonicity/already-orphaned-exclusion invariants |
@@ -18,10 +18,7 @@ Source: `docs/research/bulk-delete-tool.md`
 
 ### Step 1 — Research Gramps deletion logic
 
-- Investigate Gramps source: `gramps/gen/db/base.py`, `gramps/gen/db/upgrade.py`, `gramps/gen/utils/`
-- Focus on: reference counting, back-reference tracking, deletion callbacks (`DbDeletePrimary`, `delete_primary_from_referring`), cascading rules, signals
-- Write findings to `docs/research/gramps-deletion-logic.md` with pseudocode, deletion order, edge cases
-- Decide: wrap Gramps Python, reimplement in Rust, or use Gramps as validation oracle
+- skip Step 1
 
 ### Step 2 — Add `edges_incident_to` to `typed-graph::Graph`
 

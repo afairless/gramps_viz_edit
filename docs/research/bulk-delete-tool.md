@@ -16,36 +16,7 @@ before the operation are left alone.
 
 ## Phase 1 — Research Gramps Internal Deletion Logic
 
-Before designing our own cascade algorithm, research how Gramps itself handles
-safe deletion to avoid reinventing edge cases.
-
-### 1.1 Research Scope
-
-| Area | What to investigate |
-|---|---|
-| Gramps source | `gramps/gen/db/upgrade.py`, `gramps/gen/db/base.py`, `gramps/gen/utils/` |
-| Reference counting | How Gramps checks whether an object can be safely removed |
-| Back-reference tracking | Whether Gramps maintains reverse indexes for referential integrity |
-| Deletion callbacks | `DbDeletePrimary`, `delete_primary_from_referring`, update callbacks |
-| Cascading rules | Which object types cascade and in what order |
-| Signals / hooks | `db-delete`, `db-undelete` signals and their consumers |
-
-### 1.2 Deliverables
-
-- A summary markdown note (`docs/research/gramps-deletion-logic.md`) describing:
-  - Gramps's deletion algorithm in pseudocode
-  - Object-type deletion dependency order
-  - Edge cases Gramps handles (self-referencing, circular refs, shared objects)
-  - Whether Gramps has a concept of "orphan-after-delete" vs "already-orphaned"
-- A decision on whether to wrap Gramps Python, reimplement in Rust, or use
-  Gramps as a validation oracle for our Rust implementation
-
-### 1.3 Risks
-
-- Gramps's deletion logic may be spread across many files and hard to extract
-- Python-level logic may use SQLite/BSDDB queries that don't translate to XML
-- Gramps may not even have a dedicated "bulk safe delete" — the user's
-  recollection may be of Gramps's interactive delete-in-editor behavior
+Skip Phase 1
 
 ---
 
