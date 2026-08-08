@@ -6,6 +6,7 @@
 
 pub mod count;
 pub mod extract;
+pub mod graph;
 pub mod header;
 pub mod parse;
 

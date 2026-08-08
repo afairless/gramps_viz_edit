@@ -1251,7 +1251,9 @@ mod tests {
         // p1 has 2 incident edges (outgoing to f1, outgoing to e1)
         let incident = graph.edges_incident_to(&"p1".to_string());
         assert_eq!(incident.len(), 2);
-        assert!(incident.iter().any(|e| matches!(e, Edge::PersonFamily { .. })));
+        assert!(incident
+            .iter()
+            .any(|e| matches!(e, Edge::PersonFamily { .. })));
         assert!(incident
             .iter()
             .any(|e| matches!(e, Edge::PersonEventRef { .. })));

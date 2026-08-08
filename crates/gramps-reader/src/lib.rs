@@ -31,4 +31,5 @@ pub use io::read_gramps_file;
 pub use types::{FamilyRecord, ParsedEvent, ParsedFamily, ParsedPerson};
 pub use xml::count::{count_gramps_xml, PrimaryTypeCounts, StatsReport};
 pub use xml::extract::{extract_events, extract_families, extract_persons, resolve_event_refs};
+pub use xml::graph::parse_gramps_xml;
 pub use xml::{read_handle_attr, read_hlink_attr, strip_prefix};
