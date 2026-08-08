@@ -61,20 +61,22 @@ pub struct MergedRow {
     pub viz_family_group: Option<usize>,
 }
 
-/// Merge diff CSV rows with visualizer selections by handle.
+/// Merge diff CSV rows with visualizer selections by handle (full outer join).
 ///
 /// The function:
 /// 1. Filters diff rows to `item_type == "Person"` (logs a warning if zero remain)
 /// 2. Builds a `HashMap` of selections keyed by handle
-/// 3. For each Person diff row, tries `handle_a` first, then `handle_b`
-/// 4. If matched, emits a [`MergedRow`] with the side label
-/// 5. Persons not found in selections are excluded (inner join semantics)
+/// 3. Phase 1 — For each Person diff row, tries `handle_a` first, then `handle_b`:
+///    - If matched, emits a [`MergedRow`] with the side label and [`RowKind::Matched`]
+///    - If unmatched, emits a [`MergedRow`] with [`RowKind::DiffOnly`] (viz fields are `None`)
+/// 4. Phase 2 — Emits [`RowKind::VizOnly`] rows for unmatched selections
+/// 5. Returns all rows combined
 ///
-/// Logs a warning (via `log::warn!`) if the selections index is empty.
+/// Logs a warning (via `log::warn!`) when both inputs are empty or contain no Person rows.
 ///
 /// # Panics
 ///
-/// Does not panic — returns an empty vec if no matches are found.
+/// Does not panic — returns an empty vec if both inputs are empty.
 pub fn merge_diff_viz(diff_rows: Vec<DiffRow>, selections: Vec<Selection>) -> Vec<MergedRow> {
     // Filter to Person rows only
     let person_rows: Vec<DiffRow> = diff_rows
@@ -82,72 +84,121 @@ pub fn merge_diff_viz(diff_rows: Vec<DiffRow>, selections: Vec<Selection>) -> Ve
         .filter(|r| r.item_type == "Person")
         .collect();
 
-    if person_rows.is_empty() {
-        log::warn!("diff CSV contains no Person rows — nothing to merge");
+    if person_rows.is_empty() && selections.is_empty() {
+        log::warn!(
+            "no data to integrate: diff CSV contains no Person rows and selections are empty"
+        );
         return vec![];
     }
 
     // Build selection index
-    if selections.is_empty() {
-        log::warn!("selections index is empty — no matches possible");
-        return vec![];
-    }
-
     let selection_map: std::collections::HashMap<&str, &Selection> =
         selections.iter().map(|s| (s.handle.as_str(), s)).collect();
 
+    let mut matched_handles: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut merged = Vec::new();
 
+    // Phase 1: Process diff rows — matched become Matched, unmatched become DiffOnly
     for row in person_rows {
         // Try handle_a first, then handle_b
-        let (side, sel) = if let Some(ref h) = row.handle_a {
-            if let Some(sel) = selection_map.get(h.as_str()) {
-                ("a", sel)
-            } else if let Some(ref h) = row.handle_b {
-                if let Some(sel) = selection_map.get(h.as_str()) {
-                    ("b", sel)
-                } else {
-                    continue;
-                }
-            } else {
-                continue;
-            }
-        } else if let Some(ref h) = row.handle_b {
-            if let Some(sel) = selection_map.get(h.as_str()) {
-                ("b", sel)
-            } else {
-                continue;
-            }
-        } else {
-            continue;
-        };
+        let matched = row
+            .handle_a
+            .as_ref()
+            .and_then(|h| selection_map.get(h.as_str()))
+            .or_else(|| {
+                row.handle_b
+                    .as_ref()
+                    .and_then(|h| selection_map.get(h.as_str()))
+            });
 
-        merged.push(MergedRow {
-            // Diff fields
-            classification: row.classification,
-            item_type: row.item_type,
-            handle_a: row.handle_a,
-            gramps_id_a: row.gramps_id_a,
-            display_name_a: row.display_name_a,
-            handle_b: row.handle_b,
-            gramps_id_b: row.gramps_id_b,
-            display_name_b: row.display_name_b,
-            confidence: row.confidence,
-            field_name: row.field_name,
-            field_kind: row.field_kind,
-            old_value: row.old_value,
-            new_value: row.new_value,
-            similarity: row.similarity,
-            // Merge metadata
-            side: side.to_string(),
-            row_kind: RowKind::Matched,
-            // Selection fields
-            viz_name: Some(sel.name.clone()),
-            viz_birth_date: sel.birth_date.clone(),
-            viz_death_date: sel.death_date.clone(),
-            viz_gender: Some(sel.gender.clone()),
-            viz_family_group: Some(sel.family_group),
-        });
+        if let Some(sel) = matched {
+            matched_handles.insert(sel.handle.clone());
+            let side = if selection_map.contains_key(row.handle_a.as_deref().unwrap_or("")) {
+                "a"
+            } else {
+                "b"
+            };
+            merged.push(MergedRow {
+                // Diff fields
+                classification: row.classification,
+                item_type: row.item_type,
+                handle_a: row.handle_a,
+                gramps_id_a: row.gramps_id_a,
+                display_name_a: row.display_name_a,
+                handle_b: row.handle_b,
+                gramps_id_b: row.gramps_id_b,
+                display_name_b: row.display_name_b,
+                confidence: row.confidence,
+                field_name: row.field_name,
+                field_kind: row.field_kind,
+                old_value: row.old_value,
+                new_value: row.new_value,
+                similarity: row.similarity,
+                // Merge metadata
+                side: side.to_string(),
+                row_kind: RowKind::Matched,
+                // Selection fields
+                viz_name: Some(sel.name.clone()),
+                viz_birth_date: sel.birth_date.clone(),
+                viz_death_date: sel.death_date.clone(),
+                viz_gender: Some(sel.gender.clone()),
+                viz_family_group: Some(sel.family_group),
+            });
+        } else {
+            // DiffOnly: diff fields populated, viz fields None
+            merged.push(MergedRow {
+                classification: row.classification,
+                item_type: row.item_type,
+                handle_a: row.handle_a,
+                gramps_id_a: row.gramps_id_a,
+                display_name_a: row.display_name_a,
+                handle_b: row.handle_b,
+                gramps_id_b: row.gramps_id_b,
+                display_name_b: row.display_name_b,
+                confidence: row.confidence,
+                field_name: row.field_name,
+                field_kind: row.field_kind,
+                old_value: row.old_value,
+                new_value: row.new_value,
+                similarity: row.similarity,
+                side: String::new(),
+                row_kind: RowKind::DiffOnly,
+                viz_name: None,
+                viz_birth_date: None,
+                viz_death_date: None,
+                viz_gender: None,
+                viz_family_group: None,
+            });
+        }
+    }
+
+    // Phase 2: Emit VizOnly rows for unmatched selections
+    for sel in &selections {
+        if !matched_handles.contains(&sel.handle) {
+            merged.push(MergedRow {
+                classification: String::new(),
+                item_type: "Person".to_string(),
+                handle_a: None,
+                gramps_id_a: None,
+                display_name_a: None,
+                handle_b: None,
+                gramps_id_b: None,
+                display_name_b: None,
+                confidence: 0.0,
+                field_name: String::new(),
+                field_kind: String::new(),
+                old_value: String::new(),
+                new_value: String::new(),
+                similarity: 0.0,
+                side: String::new(),
+                row_kind: RowKind::VizOnly,
+                viz_name: Some(sel.name.clone()),
+                viz_birth_date: sel.birth_date.clone(),
+                viz_death_date: sel.death_date.clone(),
+                viz_gender: Some(sel.gender.clone()),
+                viz_family_group: Some(sel.family_group),
+            });
+        }
     }
 
     merged
@@ -264,13 +315,24 @@ mod tests {
         assert_eq!(result[0].viz_name.as_deref(), Some("Removed Person"));
     }
 
-    /// Person not in selections (neither handle matches) → excluded.
+    /// Person not in selections (neither handle matches) → DiffOnly row + VizOnly row.
     #[test]
-    fn no_match_excluded() {
+    fn no_match_diff_only() {
         let rows = vec![diff_row("Modified", Some("H001"), Some("H002"), "surname")];
         let selections = vec![sel("H999", "Other Person", 0)];
         let result = merge_diff_viz(rows, selections);
-        assert!(result.is_empty());
+        // 1 DiffOnly row + 1 VizOnly row = 2 rows
+        assert_eq!(result.len(), 2);
+        // Row 0: DiffOnly — diff fields populated, viz fields None
+        assert_eq!(result[0].row_kind, RowKind::DiffOnly);
+        assert_eq!(result[0].side, "");
+        assert_eq!(result[0].handle_a.as_deref(), Some("H001"));
+        assert_eq!(result[0].viz_name, None);
+        // Row 1: VizOnly — diff fields empty, viz fields populated
+        assert_eq!(result[1].row_kind, RowKind::VizOnly);
+        assert_eq!(result[1].side, "");
+        assert_eq!(result[1].handle_a, None);
+        assert_eq!(result[1].viz_name.as_deref(), Some("Other Person"));
     }
 
     /// Same handle on both sides → side = "a" (first match wins).
@@ -284,30 +346,38 @@ mod tests {
         assert_eq!(result[0].row_kind, RowKind::Matched);
     }
 
-    /// Empty selections → empty result.
+    /// Empty selections → all diff rows emitted as DiffOnly.
     #[test]
-    fn empty_selections() {
+    fn empty_selections_diff_only() {
         let rows = vec![diff_row("Modified", Some("H001"), Some("H002"), "surname")];
         let result = merge_diff_viz(rows, vec![]);
-        assert!(result.is_empty());
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].row_kind, RowKind::DiffOnly);
+        assert_eq!(result[0].side, "");
+        assert_eq!(result[0].viz_name, None);
     }
 
-    /// Person rows but none match selections → empty.
+    /// Person rows but none match selections → DiffOnly + VizOnly rows.
     #[test]
-    fn person_rows_no_match() {
+    fn person_rows_no_match_diff_only() {
         let rows = vec![diff_row("Modified", Some("H001"), Some("H002"), "surname")];
         let selections = vec![sel("H003", "Unrelated", 0)];
         let result = merge_diff_viz(rows, selections);
-        assert!(result.is_empty());
+        // 1 DiffOnly + 1 VizOnly = 2 rows
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].row_kind, RowKind::DiffOnly);
+        assert_eq!(result[1].row_kind, RowKind::VizOnly);
     }
 
-    /// No Person rows in diff → empty result (Family rows filtered out).
+    /// No Person rows in diff → VizOnly rows for selections.
     #[test]
-    fn no_person_rows() {
+    fn no_person_rows_viz_only() {
         let rows = vec![family_row("Same", Some("F001"), Some("F001"))];
         let selections = vec![sel("F001", "Family Name", 0)];
         let result = merge_diff_viz(rows, selections);
-        assert!(result.is_empty());
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].row_kind, RowKind::VizOnly);
+        assert_eq!(result[0].viz_name.as_deref(), Some("Family Name"));
     }
 
     /// Multiple rows, mixed matches and non-matches.
@@ -321,9 +391,11 @@ mod tests {
         let selections = vec![
             sel("H001", "Matched A", 1),
             sel("H004", "Matched B", 2), // H003 not in index, but H004 is
+            sel("H007", "VizOnly C", 3), // no matching diff row
         ];
         let result = merge_diff_viz(rows, selections);
-        assert_eq!(result.len(), 2);
+        // 2 matched + 1 diff-only (H005/H006) + 1 viz-only (H007) = 4
+        assert_eq!(result.len(), 4);
 
         // H001 matched via handle_a
         assert_eq!(result[0].side, "a");
@@ -334,6 +406,97 @@ mod tests {
         assert_eq!(result[1].side, "b");
         assert_eq!(result[1].row_kind, RowKind::Matched);
         assert_eq!(result[1].viz_name.as_deref(), Some("Matched B"));
+
+        // H005/H006: DiffOnly (no matching selection)
+        assert_eq!(result[2].row_kind, RowKind::DiffOnly);
+        assert_eq!(result[2].side, "");
+        assert_eq!(result[2].handle_a.as_deref(), Some("H005"));
+        assert_eq!(result[2].viz_name, None);
+
+        // H007: VizOnly (no matching diff row)
+        assert_eq!(result[3].row_kind, RowKind::VizOnly);
+        assert_eq!(result[3].side, "");
+        assert_eq!(result[3].handle_a, None);
+        assert_eq!(result[3].viz_name.as_deref(), Some("VizOnly C"));
+    }
+
+    /// A diff-only row is emitted with RowKind::DiffOnly and None viz fields.
+    #[test]
+    fn emits_diff_only_row() {
+        let rows = vec![diff_row("Added", Some("H001"), None, "")];
+        let selections = vec![sel("H002", "Other Person", 0)]; // no match
+        let result = merge_diff_viz(rows, selections);
+        // Should contain at least one DiffOnly row
+        let diff_only: Vec<_> = result
+            .iter()
+            .filter(|r| r.row_kind == RowKind::DiffOnly)
+            .collect();
+        assert_eq!(diff_only.len(), 1);
+        assert_eq!(diff_only[0].handle_a.as_deref(), Some("H001"));
+        assert_eq!(diff_only[0].viz_name, None);
+        assert_eq!(diff_only[0].viz_gender, None);
+        assert_eq!(diff_only[0].viz_family_group, None);
+        assert_eq!(diff_only[0].side, "");
+    }
+
+    /// A viz-only row is emitted with RowKind::VizOnly and empty diff fields.
+    #[test]
+    fn emits_viz_only_row() {
+        let rows = vec![diff_row("Modified", Some("H001"), None, "surname")];
+        let selections = vec![sel("H999", "Viz Person", 5)]; // no match
+        let result = merge_diff_viz(rows, selections);
+        let viz_only: Vec<_> = result
+            .iter()
+            .filter(|r| r.row_kind == RowKind::VizOnly)
+            .collect();
+        assert_eq!(viz_only.len(), 1);
+        assert_eq!(viz_only[0].handle_a, None);
+        assert_eq!(viz_only[0].classification, "");
+        assert_eq!(viz_only[0].confidence, 0.0);
+        assert_eq!(viz_only[0].viz_name.as_deref(), Some("Viz Person"));
+        assert_eq!(viz_only[0].viz_family_group, Some(5));
+        assert_eq!(viz_only[0].side, "");
+    }
+
+    /// Full outer join: 2 diff rows + 3 selections → 1 Matched + 1 DiffOnly + 2 VizOnly
+    /// = 4 rows total.
+    #[test]
+    fn full_outer_join_4_rows() {
+        let rows = vec![
+            diff_row("Modified", Some("H001"), None, "surname"),
+            diff_row("Added", None, Some("H003"), ""),
+        ];
+        let selections = vec![
+            sel("H001", "Matched Person", 1),
+            sel("H999", "Viz Only A", 2),
+            sel("H888", "Viz Only B", 3),
+        ];
+        let result = merge_diff_viz(rows, selections);
+        // 1 Matched + 1 DiffOnly + 2 VizOnly = 4
+        assert_eq!(result.len(), 4);
+
+        // Row 0: H001 matched (Matched)
+        assert_eq!(result[0].row_kind, RowKind::Matched);
+        assert_eq!(result[0].side, "a");
+        assert_eq!(result[0].viz_name.as_deref(), Some("Matched Person"));
+
+        // Row 1: H003 not in selections (DiffOnly)
+        assert_eq!(result[1].row_kind, RowKind::DiffOnly);
+        assert_eq!(result[1].side, "");
+        assert_eq!(result[1].handle_b.as_deref(), Some("H003"));
+        assert_eq!(result[1].viz_name, None);
+
+        // Row 2: H999 (VizOnly)
+        assert_eq!(result[2].row_kind, RowKind::VizOnly);
+        assert_eq!(result[2].side, "");
+        assert_eq!(result[2].handle_a, None);
+        assert_eq!(result[2].viz_name.as_deref(), Some("Viz Only A"));
+
+        // Row 3: H888 (VizOnly)
+        assert_eq!(result[3].row_kind, RowKind::VizOnly);
+        assert_eq!(result[3].side, "");
+        assert_eq!(result[3].handle_a, None);
+        assert_eq!(result[3].viz_name.as_deref(), Some("Viz Only B"));
     }
 
     /// MergedRow preserves all diff fields from the original row.
@@ -358,6 +521,7 @@ mod tests {
         let selections = vec![sel("H001", "John Smith", 3)];
         let result = merge_diff_viz(rows, selections);
         assert_eq!(result.len(), 1);
+        assert_eq!(result[0].row_kind, RowKind::Matched);
         assert_eq!(result[0].classification, "Modified");
         assert_eq!(result[0].gramps_id_a.as_deref(), Some("I0001"));
         assert_eq!(result[0].display_name_a.as_deref(), Some("Old Name"));
