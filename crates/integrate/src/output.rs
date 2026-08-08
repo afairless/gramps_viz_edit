@@ -7,7 +7,7 @@
 use serde::Serialize;
 
 use crate::csv_reader::DiffRow;
-use crate::merge::MergedRow;
+use crate::merge::{MergedRow, RowKind};
 
 /// CSV column headers for merged output.
 const CSV_HEADER: &[&str] = &[
@@ -63,12 +63,15 @@ pub fn format_csv(rows: &[MergedRow]) -> String {
 /// A single match entry in the JSON output.
 #[derive(Serialize)]
 struct MatchEntry {
-    /// Which side matched: "a" or "b".
+    /// The row kind: "matched", "diff_only", or "viz_only".
+    row_kind: RowKind,
+    /// Which side matched: "a" or "b" (empty for DiffOnly/VizOnly).
     side: String,
     /// The original diff row data.
     diff: DiffRow,
-    /// The matching visualizer selection data.
-    selection: SelectionView,
+    /// The matching visualizer selection data (absent for DiffOnly rows).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    selection: Option<SelectionView>,
 }
 
 /// The selection portion of a JSON match entry.
@@ -88,32 +91,45 @@ struct JsonOutput {
     diff_file: String,
     /// Path of the source selections JSON file.
     selection_file: String,
-    /// Number of matched rows.
+    /// Total number of rows (Matched + DiffOnly + VizOnly).
+    row_count: usize,
+    /// Number of rows with RowKind::Matched.
     matched_count: usize,
-    /// The matched rows.
+    /// The merged rows.
     matches: Vec<MatchEntry>,
 }
 
 /// Format merged rows as JSON.
 ///
 /// Produces a pretty-printed JSON object with the input file paths, the
-/// matched count, and an array of match entries. Each entry contains the
-/// side, the diff row data, and the selection data.
+/// row count, matched count, and an array of match entries. Each entry
+/// contains the row_kind, side, diff row data, and optionally the
+/// selection data (absent for DiffOnly rows).
 pub fn format_json(rows: &[MergedRow], diff_path: &str, sel_path: &str) -> String {
+    let matched_count = rows
+        .iter()
+        .filter(|r| r.row_kind == RowKind::Matched)
+        .count();
+
     let matches: Vec<MatchEntry> = rows
         .iter()
         .map(|row| {
             let diff: DiffRow = row.into();
-            MatchEntry {
-                side: row.side.clone(),
-                diff,
-                selection: SelectionView {
+            let selection = match row.row_kind {
+                RowKind::DiffOnly => None,
+                _ => Some(SelectionView {
                     name: row.viz_name.clone().unwrap_or_default(),
                     birth_date: row.viz_birth_date.clone(),
                     death_date: row.viz_death_date.clone(),
                     gender: row.viz_gender.clone().unwrap_or_default(),
                     family_group: row.viz_family_group.unwrap_or(0),
-                },
+                }),
+            };
+            MatchEntry {
+                row_kind: row.row_kind.clone(),
+                side: row.side.clone(),
+                diff,
+                selection,
             }
         })
         .collect();
@@ -121,7 +137,8 @@ pub fn format_json(rows: &[MergedRow], diff_path: &str, sel_path: &str) -> Strin
     let output = JsonOutput {
         diff_file: diff_path.to_string(),
         selection_file: sel_path.to_string(),
-        matched_count: rows.len(),
+        row_count: rows.len(),
+        matched_count,
         matches,
     };
 
@@ -208,6 +225,60 @@ mod tests {
         }
     }
 
+    /// A DiffOnly row for testing JSON output (no selection field).
+    fn diff_only_row() -> MergedRow {
+        MergedRow {
+            classification: "Modified".to_string(),
+            item_type: "Person".to_string(),
+            handle_a: Some("H001".to_string()),
+            gramps_id_a: Some("I0001".to_string()),
+            display_name_a: Some("Old Name".to_string()),
+            handle_b: Some("H002".to_string()),
+            gramps_id_b: Some("I0002".to_string()),
+            display_name_b: Some("New Name".to_string()),
+            confidence: 0.95,
+            field_name: "surname".to_string(),
+            field_kind: "Text".to_string(),
+            old_value: "Smith".to_string(),
+            new_value: "Jones".to_string(),
+            similarity: 0.5,
+            side: String::new(),
+            row_kind: RowKind::DiffOnly,
+            viz_name: None,
+            viz_birth_date: None,
+            viz_death_date: None,
+            viz_gender: None,
+            viz_family_group: None,
+        }
+    }
+
+    /// A VizOnly row for testing JSON output (default diff fields).
+    fn viz_only_row() -> MergedRow {
+        MergedRow {
+            classification: String::new(),
+            item_type: "Person".to_string(),
+            handle_a: None,
+            gramps_id_a: None,
+            display_name_a: None,
+            handle_b: None,
+            gramps_id_b: None,
+            display_name_b: None,
+            confidence: 0.0,
+            field_name: String::new(),
+            field_kind: String::new(),
+            old_value: String::new(),
+            new_value: String::new(),
+            similarity: 0.0,
+            side: String::new(),
+            row_kind: RowKind::VizOnly,
+            viz_name: Some("Viz Person".to_string()),
+            viz_birth_date: None,
+            viz_death_date: None,
+            viz_gender: Some("male".to_string()),
+            viz_family_group: Some(5),
+        }
+    }
+
     // -----------------------------------------------------------------------
     // CSV tests
     // -----------------------------------------------------------------------
@@ -231,7 +302,7 @@ mod tests {
         for col in CSV_HEADER {
             assert!(header.contains(col), "header should contain {col}");
         }
-        // Header should have exactly 20 columns
+        // Header should have exactly 21 columns
         let cols: Vec<&str> = header.split(',').collect();
         assert_eq!(cols.len(), 21);
     }
@@ -295,7 +366,7 @@ mod tests {
     // JSON tests
     // -----------------------------------------------------------------------
 
-    /// JSON: valid structure with matched count.
+    /// JSON: valid structure with row count and matched count.
     #[test]
     fn json_valid() {
         let rows = vec![full_row()];
@@ -304,14 +375,16 @@ mod tests {
 
         assert_eq!(value["diff_file"], "diff.csv");
         assert_eq!(value["selection_file"], "selections.json");
+        assert_eq!(value["row_count"], 1);
         assert_eq!(value["matched_count"], 1);
         assert_eq!(value["matches"].as_array().unwrap().len(), 1);
 
         let m = &value["matches"][0];
+        assert_eq!(m["row_kind"], "matched");
         assert_eq!(m["side"], "a");
+        assert!(m["selection"].is_object());
         assert_eq!(m["diff"]["classification"], "Modified");
         assert_eq!(m["diff"]["handle_a"], "H001");
-        assert_eq!(m["diff"]["surname"], serde_json::Value::Null); // field_name="surname", old_value="Smith"
         assert_eq!(m["diff"]["field_name"], "surname");
         assert_eq!(m["diff"]["old_value"], "Smith");
         assert_eq!(m["diff"]["new_value"], "Jones");
@@ -322,25 +395,86 @@ mod tests {
         assert_eq!(m["selection"]["family_group"], 3);
     }
 
-    /// JSON: empty rows → "matches": [] and matched_count 0.
+    /// JSON: empty rows → "matches": [], row_count 0, matched_count 0.
     #[test]
     fn json_empty() {
         let json = format_json(&[], "diff.csv", "selections.json");
         let value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        assert_eq!(value["row_count"], 0);
         assert_eq!(value["matched_count"], 0);
         assert_eq!(value["matches"].as_array().unwrap().len(), 0);
     }
 
-    /// JSON: None fields serialize as null.
+    /// JSON: None fields serialize as null, selection omitted for DiffOnly.
     #[test]
     fn json_none_fields_null() {
         let json = format_json(&[sparse_row()], "d.csv", "s.json");
         let value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
         let m = &value["matches"][0];
+        assert_eq!(m["row_kind"], "matched");
         assert_eq!(m["side"], "b");
         assert_eq!(m["diff"]["handle_a"], serde_json::Value::Null);
         assert_eq!(m["selection"]["birth_date"], serde_json::Value::Null);
         assert_eq!(m["selection"]["death_date"], serde_json::Value::Null);
+    }
+
+    /// JSON: DiffOnly row has row_kind "diff_only" and no selection field.
+    #[test]
+    fn json_diff_only() {
+        let json = format_json(&[diff_only_row()], "d.csv", "s.json");
+        let value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+
+        assert_eq!(value["row_count"], 1);
+        assert_eq!(value["matched_count"], 0);
+
+        let m = &value["matches"][0];
+        assert_eq!(m["row_kind"], "diff_only");
+        assert_eq!(m["side"], "");
+        assert_eq!(m["diff"]["classification"], "Modified");
+        assert_eq!(m["diff"]["handle_a"], "H001");
+        // selection field should be absent for DiffOnly rows
+        assert_eq!(m.get("selection"), None);
+    }
+
+    /// JSON: VizOnly row has row_kind "viz_only", default diff fields, and selection present.
+    #[test]
+    fn json_viz_only() {
+        let json = format_json(&[viz_only_row()], "d.csv", "s.json");
+        let value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+
+        assert_eq!(value["row_count"], 1);
+        assert_eq!(value["matched_count"], 0);
+
+        let m = &value["matches"][0];
+        assert_eq!(m["row_kind"], "viz_only");
+        assert_eq!(m["side"], "");
+        // Diff fields should be default
+        assert_eq!(m["diff"]["classification"], "");
+        assert_eq!(m["diff"]["handle_a"], serde_json::Value::Null);
+        assert_eq!(m["diff"]["confidence"], 0.0);
+        // Selection should be present
+        assert_eq!(m["selection"]["name"], "Viz Person");
+        assert_eq!(m["selection"]["family_group"], 5);
+    }
+
+    /// JSON: mixed rows produce correct row_count vs matched_count.
+    #[test]
+    fn json_mixed_counts() {
+        let rows = vec![full_row(), diff_only_row(), viz_only_row()];
+        let json = format_json(&rows, "d.csv", "s.json");
+        let value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+
+        assert_eq!(value["row_count"], 3);
+        assert_eq!(value["matched_count"], 1);
+        assert_eq!(value["matches"].as_array().unwrap().len(), 3);
+
+        let ms = value["matches"].as_array().unwrap();
+        assert_eq!(ms[0]["row_kind"], "matched");
+        assert!(ms[0]["selection"].is_object());
+        assert_eq!(ms[1]["row_kind"], "diff_only");
+        assert_eq!(ms[1].get("selection"), None);
+        assert_eq!(ms[2]["row_kind"], "viz_only");
+        assert!(ms[2]["selection"].is_object());
     }
 
     // -----------------------------------------------------------------------
@@ -453,12 +587,34 @@ mod tests {
             let value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
             assert_eq!(value["diff_file"], "diff.csv");
             assert_eq!(value["selection_file"], "selections.json");
-            assert_eq!(value["matched_count"].as_u64().unwrap(), rows.len() as u64);
+            assert_eq!(value["row_count"].as_u64().unwrap(), rows.len() as u64);
+            let matched_count = rows
+                .iter()
+                .filter(|r| r.row_kind == crate::merge::RowKind::Matched)
+                .count();
+            assert_eq!(
+                value["matched_count"].as_u64().unwrap(),
+                matched_count as u64
+            );
             let matches = value["matches"].as_array().unwrap();
             assert_eq!(matches.len(), rows.len());
 
             for (i, m) in matches.iter().enumerate() {
                 let row = &rows[i];
+                match row.row_kind {
+                    crate::merge::RowKind::Matched => {
+                        assert_eq!(m["row_kind"], "matched");
+                        assert!(m.get("selection").is_some());
+                    }
+                    crate::merge::RowKind::DiffOnly => {
+                        assert_eq!(m["row_kind"], "diff_only");
+                        assert_eq!(m.get("selection"), None);
+                    }
+                    crate::merge::RowKind::VizOnly => {
+                        assert_eq!(m["row_kind"], "viz_only");
+                        assert!(m.get("selection").is_some());
+                    }
+                }
                 // Check side
                 assert_eq!(m["side"].as_str().unwrap(), row.side);
                 // Check diff object has all expected keys
@@ -469,13 +625,15 @@ mod tests {
                 assert!(diff.contains_key("field_name"));
                 assert!(diff.contains_key("old_value"));
                 assert!(diff.contains_key("new_value"));
-                // Check selection object has all expected keys
-                let sel = m["selection"].as_object().unwrap();
-                assert!(sel.contains_key("name"));
-                assert!(sel.contains_key("birth_date"));
-                assert!(sel.contains_key("death_date"));
-                assert!(sel.contains_key("gender"));
-                assert!(sel.contains_key("family_group"));
+                // Check selection is present for Matched/VizOnly, absent for DiffOnly
+                if row.row_kind != crate::merge::RowKind::DiffOnly {
+                    let sel = m["selection"].as_object().unwrap();
+                    assert!(sel.contains_key("name"));
+                    assert!(sel.contains_key("birth_date"));
+                    assert!(sel.contains_key("death_date"));
+                    assert!(sel.contains_key("gender"));
+                    assert!(sel.contains_key("family_group"));
+                }
             }
         }
     }
