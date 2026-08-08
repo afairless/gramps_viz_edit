@@ -6,9 +6,11 @@
 //! [`DeletePlan`] with all handles to delete.
 
 pub mod cascade;
+pub mod manifest;
 pub mod types;
 
 pub use cascade::cascade;
+pub use manifest::{build_manifest, check_source_file, load_manifest, save_manifest, validate_manifest, ManifestError};
 pub use types::{
     DeleteCandidate, DeleteManifest, DeletePlan, NodeKindLabel, ReviewState, TypePlan,
 };
