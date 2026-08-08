@@ -953,6 +953,7 @@ fn e2e_integrate_diff_viz_csv_output() {
 
     // Verify integrated columns header
     assert!(content.contains("side"));
+    assert!(content.contains("row_kind"));
     assert!(content.contains("viz_family_group"));
 
     // Clean up
@@ -983,21 +984,124 @@ fn e2e_integrate_diff_viz_missing_diff() {
     );
 }
 
-/// E2E test: full visualizer-style selection envelope with 3 diff rows and 2 matching
+/// E2E test: unmatched diff row still appears as DiffOnly row in output.
+#[test]
+fn e2e_integrate_diff_viz_unmatched() {
+    // Create a diff CSV where one handle has no matching selection
+    let diff_csv = "\"classification\",\"item_type\",\"handle_a\",\"gramps_id_a\",\"display_name_a\",\"handle_b\",\"gramps_id_b\",\"display_name_b\",\"confidence\",\"field_name\",\"field_kind\",\"old_value\",\"new_value\",\"similarity\"
+\"MODIFIED\",\"Person\",\"H001\",\"I0001\",\"John Smith\",\"H001\",\"I0001\",\"John Smith\",\"1.00\",\"surname\",\"Text\",\"Smith\",\"Jones\",\"0.50\"
+\"ADDED\",\"Person\",\"\",\"\",\"\",\"H002\",\"I0002\",\"Jane Doe\",\"1.00\",\"\",\"\",\"\",\"\",\"0.00\"
+";
+
+    // Only H001 is in selections — H002 has no matching selection
+    let selections_json = r#"{
+      "selections": [
+        {"handle": "H001", "name": "John Smith", "birth_date": "1840-07-13", "death_date": "1910-03-22", "gender": "male", "family_group": 3}
+      ]
+    }"#;
+
+    let diff_path = format!(
+        "/tmp/gramps_gen_e2e_unmatched_diff_{}.csv",
+        std::process::id()
+    );
+    let sel_path = format!(
+        "/tmp/gramps_gen_e2e_unmatched_sel_{}.json",
+        std::process::id()
+    );
+
+    std::fs::write(&diff_path, diff_csv).unwrap();
+    std::fs::write(&sel_path, selections_json).unwrap();
+
+    // Test CSV output
+    let out_path = format!(
+        "/tmp/gramps_gen_e2e_unmatched_out_{}.csv",
+        std::process::id()
+    );
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "integrate",
+        "diff-viz",
+        "--diff",
+        &diff_path,
+        "--selections",
+        &sel_path,
+        "--output",
+        &out_path,
+    ]);
+    assert_eq!(
+        code,
+        Some(0),
+        "integrate diff-viz should succeed with unmatched row, stderr: {}",
+        stderr
+    );
+
+    let content = std::fs::read_to_string(&out_path).unwrap_or_default();
+    // Both H001 and H002 should appear
+    assert!(
+        content.contains("H001"),
+        "output should contain H001 (matched)"
+    );
+    assert!(
+        content.contains("H002"),
+        "output should contain H002 (DiffOnly)"
+    );
+    // H002 row should have empty viz fields and side
+    assert!(content.contains("row_kind"));
+
+    // Test JSON output
+    let (json_stdout, json_stderr, json_code) = gramps_gen(&[
+        "integrate",
+        "diff-viz",
+        "--diff",
+        &diff_path,
+        "--selections",
+        &sel_path,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(
+        json_code,
+        Some(0),
+        "JSON output should succeed, stderr: {}",
+        json_stderr
+    );
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json_stdout).expect("should be valid JSON");
+    assert_eq!(
+        parsed["row_count"].as_i64(),
+        Some(2),
+        "row_count should be 2"
+    );
+    assert_eq!(
+        parsed["matched_count"].as_i64(),
+        Some(1),
+        "matched_count should be 1"
+    );
+
+    // Verify row kinds
+    let matches = parsed["matches"].as_array().unwrap();
+    assert_eq!(matches[0]["row_kind"], "matched");
+    assert_eq!(matches[1]["row_kind"], "diff_only");
+    // DiffOnly row should have no selection field
+    assert_eq!(matches[1].get("selection"), None);
+
+    // Clean up
+    let _ = std::fs::remove_file(&diff_path);
+    let _ = std::fs::remove_file(&sel_path);
+    let _ = std::fs::remove_file(&out_path);
+}
 /// selections verifies the wrapped format produced by the fixed export_selections
 /// command is correctly consumed by integrate diff-viz.
 #[test]
 fn e2e_integrate_diff_viz_wrapped_envelope() {
-    // Create a diff CSV with 3 Person rows (one will be filtered out)
+    // Create a diff CSV with 3 Person rows (abc-3 will be DiffOnly)
     let diff_csv = "\"classification\",\"item_type\",\"handle_a\",\"gramps_id_a\",\"display_name_a\",\"handle_b\",\"gramps_id_b\",\"display_name_b\",\"confidence\",\"field_name\",\"field_kind\",\"old_value\",\"new_value\",\"similarity\"
 \"MODIFIED\",\"Person\",\"abc-1\",\"I0001\",\"John Smith\",\"abc-1\",\"I0001\",\"John Smith\",\"1.00\",\"name\",\"Text\",\"John\",\"John Smith\",\"0.80\"
 \"SAME\",\"Person\",\"abc-2\",\"I0002\",\"Jane Doe\",\"abc-2\",\"I0002\",\"Jane Doe\",\"1.00\",\"\",\"\",\"\",\"\",\"0.00\"
 \"ADDED\",\"Person\",\"abc-3\",\"I0003\",\"Bob Brown\",\"abc-3\",\"I0003\",\"Bob Brown\",\"1.00\",\"\",\"\",\"\",\"\",\"0.00\"
 ";
 
-    // Create a selections JSON in the wrapped envelope format (as produced by
-    // the fixed export_selections Tauri command). Only abc-1 and abc-2 are
-    // selected; abc-3 is not, so it should be filtered out.
+    // Create a selections JSON with only abc-1 and abc-2 selected.
     let selections_json = r#"{
   "exported_at": "2025-01-15T10:30:00.000Z",
   "file": "selections.json",
@@ -1048,9 +1152,10 @@ fn e2e_integrate_diff_viz_wrapped_envelope() {
         content.contains("abc-2"),
         "output should contain abc-2 (matched)"
     );
+    // With full outer join, abc-3 appears as a DiffOnly row
     assert!(
-        !content.contains("abc-3"),
-        "output should NOT contain abc-3 (no matching selection)"
+        content.contains("abc-3"),
+        "output should contain abc-3 as DiffOnly row"
     );
     assert!(content.contains("John Smith"));
     assert!(content.contains("Jane Doe"));
@@ -1058,6 +1163,7 @@ fn e2e_integrate_diff_viz_wrapped_envelope() {
     assert!(content.contains("female"));
     assert!(content.contains("viz_name"));
     assert!(content.contains("viz_family_group"));
+    assert!(content.contains("row_kind"));
 
     // Also test --format json output to verify structured output
     let (json_stdout, json_stderr, json_code) = gramps_gen(&[
@@ -1083,21 +1189,40 @@ fn e2e_integrate_diff_viz_wrapped_envelope() {
     let matches = parsed["matches"]
         .as_array()
         .expect("should have matches array");
-    assert_eq!(matches.len(), 2, "should have exactly 2 matched rows");
+    // 2 Matched + 1 DiffOnly = 3 total rows
+    assert_eq!(
+        matches.len(),
+        3,
+        "should have 3 rows: 2 matched + 1 diff-only"
+    );
     assert_eq!(
         parsed["matched_count"].as_i64(),
         Some(2),
         "matched_count should be 2"
     );
+    assert_eq!(
+        parsed["row_count"].as_i64(),
+        Some(3),
+        "row_count should be 3"
+    );
 
-    // Verify both handles appear
+    // Verify row kinds
+    assert_eq!(matches[0]["row_kind"], "matched");
+    assert_eq!(matches[1]["row_kind"], "matched");
+    assert_eq!(matches[2]["row_kind"], "diff_only");
+
+    // Verify matched handles
     let handles: Vec<&str> = matches
         .iter()
+        .filter(|m| m["row_kind"] == "matched")
         .filter_map(|m| m["diff"]["handle_a"].as_str())
         .collect();
     assert!(handles.contains(&"abc-1"), "missing abc-1");
     assert!(handles.contains(&"abc-2"), "missing abc-2");
-    assert_eq!(handles.len(), 2, "should have exactly 2 handles");
+    assert_eq!(handles.len(), 2, "should have exactly 2 matched handles");
+
+    // Verify diff-only row has no selection field
+    assert_eq!(matches[2].get("selection"), None);
 
     // Clean up
     let _ = std::fs::remove_file(&diff_path);

@@ -50,6 +50,8 @@ fn integrate_diff_viz_matches() {
 
     // 3 Person rows: H001 (matches via handle_a), H002 (matches via handle_a),
     // H003 (handle_a not in selections, handle_b=H004 matches)
+    // All 3 are Matched — no DiffOnly or VizOnly rows
+    assert_eq!(report.row_count, 3);
     assert_eq!(report.matched_count, 3);
     assert_eq!(report.rows.len(), 3);
     assert_eq!(report.diff_path, diff_path);
@@ -78,9 +80,9 @@ fn integrate_diff_viz_matches() {
     cleanup_temp_file(&sel_path);
 }
 
-/// Mismatched handles → 0 matches.
+/// Mismatched handles → all diff rows become DiffOnly, selections become VizOnly.
 #[test]
-fn integrate_diff_viz_no_matches() {
+fn integrate_diff_viz_data_all_unmatched() {
     // Diff rows reference H001/H002/H003, selections reference unrelated handles.
     let diff_path = create_temp_file(DIFF_CSV);
     let mismatched_json = r#"{
@@ -92,8 +94,19 @@ fn integrate_diff_viz_no_matches() {
     let sel_path = create_temp_file(mismatched_json);
 
     let report = integrate_diff_viz(&diff_path, &sel_path).expect("run orchestrator");
+    // 3 diff rows → 3 DiffOnly + 2 selections → 2 VizOnly = 5 rows total
+    assert_eq!(report.row_count, 5);
     assert_eq!(report.matched_count, 0);
-    assert!(report.rows.is_empty());
+    assert!(!report.rows.is_empty());
+
+    // All diff rows should be DiffOnly
+    for row in &report.rows {
+        if row.viz_name.is_some() {
+            assert_eq!(row.row_kind, integrate::merge::RowKind::VizOnly);
+        } else {
+            assert_eq!(row.row_kind, integrate::merge::RowKind::DiffOnly);
+        }
+    }
 
     cleanup_temp_file(&diff_path);
     cleanup_temp_file(&sel_path);
@@ -123,7 +136,7 @@ fn integrate_diff_viz_missing_selections() {
     cleanup_temp_file(&diff_path);
 }
 
-/// Diff CSV with no Person rows → empty result but not an error.
+/// Diff CSV with no Person rows → VizOnly rows emitted for all selections.
 #[test]
 fn integrate_diff_viz_no_person_rows() {
     let no_person_csv = "\"classification\",\"item_type\",\"handle_a\",\"gramps_id_a\",\"display_name_a\",\"handle_b\",\"gramps_id_b\",\"display_name_b\",\"confidence\",\"field_name\",\"field_kind\",\"old_value\",\"new_value\",\"similarity\"\n\"SAME\",\"Family\",\"F001\",\"F0001\",\"Smith Family\",\"F001\",\"F0001\",\"Smith Family\",\"1.00\",\"\",\"\",\"\",\"\",\"0.00\"\n";
@@ -131,9 +144,45 @@ fn integrate_diff_viz_no_person_rows() {
     let sel_path = create_temp_file(SELECTIONS_JSON);
 
     let report = integrate_diff_viz(&diff_path, &sel_path).expect("run orchestrator");
+    // 3 selections → 3 VizOnly rows
+    assert_eq!(report.row_count, 3);
     assert_eq!(report.matched_count, 0);
-    assert!(report.rows.is_empty());
+    assert_eq!(report.rows.len(), 3);
+    for row in &report.rows {
+        assert_eq!(row.row_kind, integrate::merge::RowKind::VizOnly);
+    }
 
     cleanup_temp_file(&diff_path);
     cleanup_temp_file(&sel_path);
+}
+
+/// Selections-only test: partial matches produce Matched and VizOnly rows.
+#[test]
+fn integrate_diff_viz_selections_only() {
+    let partial_diff = "\"classification\",\"item_type\",\"handle_a\",\"gramps_id_a\",\"display_name_a\",\"handle_b\",\"gramps_id_b\",\"display_name_b\",\"confidence\",\"field_name\",\"field_kind\",\"old_value\",\"new_value\",\"similarity\"\n\"MODIFIED\",\"Person\",\"H001\",\"I0001\",\"John Smith\",\"H001\",\"I0001\",\"John Smith\",\"1.00\",\"surname\",\"Text\",\"Smith\",\"Jones\",\"0.50\"\n";
+    let partial_sel = r#"{
+      "selections": [
+        {"handle": "H001", "name": "John Smith", "birth_date": "1840-07-13", "death_date": "1910-03-22", "gender": "male", "family_group": 3},
+        {"handle": "H999", "name": "Viz Only Person", "birth_date": null, "death_date": null, "gender": "female", "family_group": 5}
+      ]
+    }"#;
+
+    let pd_path = create_temp_file(partial_diff);
+    let ps_path = create_temp_file(partial_sel);
+
+    let report = integrate_diff_viz(&pd_path, &ps_path).expect("run orchestrator");
+    // 1 diff row matched + 1 viz-only = 2 rows
+    assert_eq!(report.row_count, 2);
+    assert_eq!(report.matched_count, 1);
+
+    // Row 0: Matched
+    assert_eq!(report.rows[0].row_kind, integrate::merge::RowKind::Matched);
+    assert_eq!(report.rows[0].viz_name.as_deref(), Some("John Smith"));
+
+    // Row 1: VizOnly
+    assert_eq!(report.rows[1].row_kind, integrate::merge::RowKind::VizOnly);
+    assert_eq!(report.rows[1].viz_name.as_deref(), Some("Viz Only Person"));
+
+    cleanup_temp_file(&pd_path);
+    cleanup_temp_file(&ps_path);
 }
