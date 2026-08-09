@@ -135,11 +135,17 @@ pub fn cascade(graph: &Graph, seeds: &HashSet<Handle>) -> DeletePlan {
     to_delete.retain(|h| graph.contains_node(h));
 
     // Frontier: nodes whose neighbors should be evaluated for orphanhood.
-    // Using Vec as a stack for DFS-like traversal (not a priority queue, so
-    // no sort is needed — reachability and correctness don't depend on order).
+    // Using Vec as a stack for DFS-like traversal. The frontier is re-sorted
+    // at the top of each iteration so processing order is deterministic and
+    // independent of HashSet/Vec iteration order. Sorting guarantees the
+    // cascade converges to the same `to_delete` set regardless of the
+    // (nondeterministic) order in which seeds and neighbors are iterated.
     let mut frontier: Vec<Handle> = to_delete.iter().cloned().collect();
+    frontier.sort_unstable();
 
     while let Some(handle) = frontier.pop() {
+        // Re-sort the remaining frontier so each pop is deterministic.
+        frontier.sort_unstable();
         for edge in graph.edges_incident_to(&handle) {
             let neighbor = edge_other_endpoint(edge, &handle);
 
