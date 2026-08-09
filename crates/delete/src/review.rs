@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::{BufRead, Write};
 
-use typed_graph::{Edge, Graph, Handle, Node};
+use typed_graph::{get_source_handle, Edge, Graph, Handle, Node};
 
 use crate::types::{DeletePlan, NodeKindLabel};
 
@@ -460,11 +460,35 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
             (desc, data.gramps_id.clone())
         }
         Some(Node::Citation(data)) => {
+            let source_handle = get_source_handle(&data.source_handle);
+            let source_desc = if !source_handle.is_empty() {
+                graph.get_node(&source_handle)
+                    .map(|n| {
+                        if let Node::Source(s) = n {
+                            let id = format_gramps_id(&s.gramps_id);
+                            if s.title.is_empty() {
+                                format!("source({})", s.handle)
+                            } else {
+                                format!("source{} \"{}\"", id, s.title)
+                            }
+                        } else {
+                            String::new()
+                        }
+                    })
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let source_str = if source_desc.is_empty() {
+                "no source".to_string()
+            } else {
+                source_desc
+            };
             let page = data
                 .page
                 .as_deref()
                 .unwrap_or("no page");
-            let desc = format!("Citation (page: {})", page);
+            let desc = format!("Citation → {}, p. {}", source_str, page);
             (desc, data.gramps_id.clone())
         }
         Some(Node::Repository(data)) => {
@@ -1237,6 +1261,112 @@ mod tests {
             desc,
             "Birth event (2000) — Alice Brown"
         );
+        assert_eq!(gramps_id, None);
+    }
+
+    // -----------------------------------------------------------------------
+    // Enhanced Citation description tests
+    // -----------------------------------------------------------------------
+
+    /// Helper: create a graph with a citation and optionally a source.
+    fn citation_graph(
+        gramps_id: Option<&str>,
+        page: Option<&str>,
+        source_title: Option<&str>,
+    ) -> (Graph, Handle) {
+        let mut graph = Graph::new();
+        let citation_h = "c0001".to_string();
+        let source_h = "s0001".to_string();
+
+        if let Some(title) = source_title {
+            graph
+                .add_node(
+                    source_h.clone(),
+                    Node::Source(typed_graph::SourceData {
+                        handle: source_h.clone(),
+                        gramps_id: Some("S0001".to_string()),
+                        title: title.to_string(),
+                        ..typed_graph::SourceData::default()
+                    }),
+                )
+                .unwrap();
+        }
+
+        let source_handle_val = if source_title.is_some() {
+            source_h
+        } else {
+            String::new()
+        };
+
+        graph
+            .add_node(
+                citation_h.clone(),
+                Node::Citation(typed_graph::CitationData {
+                    handle: citation_h.clone(),
+                    gramps_id: gramps_id.map(|s| s.to_string()),
+                    source_handle: Some(source_handle_val),
+                    page: page.map(|s| s.to_string()),
+                    ..typed_graph::CitationData::default()
+                }),
+            )
+            .unwrap();
+        (graph, citation_h)
+    }
+
+    #[test]
+    fn describe_citation_with_source() {
+        let (graph, handle) = citation_graph(
+            Some("C0001"),
+            Some("42"),
+            Some("Census Record"),
+        );
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(
+            desc,
+            "Citation → source [S0001] \"Census Record\", p. 42"
+        );
+        assert_eq!(gramps_id, Some("C0001".to_string()));
+    }
+
+    #[test]
+    fn describe_citation_no_source() {
+        let (graph, handle) = citation_graph(
+            Some("C0002"),
+            Some("5"),
+            None,
+        );
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(
+            desc,
+            "Citation → no source, p. 5"
+        );
+        assert_eq!(gramps_id, Some("C0002".to_string()));
+    }
+
+    #[test]
+    fn describe_citation_no_page() {
+        let (graph, handle) = citation_graph(
+            Some("C0003"),
+            None,
+            Some("Marriage Record"),
+        );
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(
+            desc,
+            "Citation → source [S0001] \"Marriage Record\", p. no page"
+        );
+        assert_eq!(gramps_id, Some("C0003".to_string()));
+    }
+
+    #[test]
+    fn describe_citation_no_gramps_id() {
+        let (graph, handle) = citation_graph(
+            None,
+            Some("10"),
+            Some("Census Record"),
+        );
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert!(desc.contains("Census Record"));
         assert_eq!(gramps_id, None);
     }
 
