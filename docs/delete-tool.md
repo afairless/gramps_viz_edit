@@ -147,7 +147,7 @@ A Source is only deleted if no surviving Citation references it.
 | **Person** | Explicitly selected as a seed for deletion |
 | **Family** | No remaining father/mother connections to surviving people, **and** no remaining children (via `ChildRef` edges) |
 | **Event** | No remaining `PersonEventRef` or `FamilyEventRef` edges from surviving nodes |
-| **Place** | No remaining `EventPlace`, `PlacePlaceRef`, or `LdsOrdPlace` edges, and no `place_handle` references from surviving nodes |
+| **Place** | No remaining `EventPlace`, `PlacePlaceRef`, `PlaceCitation`, `PlaceMediaRef`, `PlaceNote`, or `PlaceTag` edges from surviving nodes |
 | **Citation** | No remaining `CitationRef` edges from surviving nodes |
 | **Source** | No remaining `source_handle` references from surviving citations, and no remaining `RepoRef` edges |
 | **Repository** | No remaining `repo_handle` references from surviving sources |
