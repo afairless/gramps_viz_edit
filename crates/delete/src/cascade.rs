@@ -277,8 +277,17 @@ fn type_specific_orphan_rule(handle: &Handle, graph: &Graph, to_delete: &HashSet
                 | Edge::CitationTag { source, .. }
                 | Edge::RepositoryTag { source, .. }
                 | Edge::MediaTag { source, .. }
-                | Edge::NoteTag { source, .. }
-                | Edge::TagTag { source, .. } => !to_delete.contains(source),
+                | Edge::NoteTag { source, .. } => !to_delete.contains(source),
+                // For TagTag, only incoming edges keep the tag alive.
+                // An edge where this tag is the source is outgoing and
+                // does not count as a keep-alive reference.
+                Edge::TagTag { source, target } => {
+                    if target == handle {
+                        !to_delete.contains(source)
+                    } else {
+                        false
+                    }
+                }
                 _ => false,
             });
             !has_live_tag_ref
@@ -1326,6 +1335,353 @@ mod tests {
         assert!(plan.to_delete.contains(&e1));
         assert!(!plan.to_delete.contains(&pl1),
             "Place should be kept alive by PlaceMediaRef to live media");
+    }
+
+    // -----------------------------------------------------------------------
+    // Category A: Directly associated, isolated → DELETED
+    // -----------------------------------------------------------------------
+    // A1: seed person alone -> deleted
+    #[test]
+    fn a1_seed_person_deleted() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert_eq!(plan.to_delete.len(), 1);
+        assert!(plan.to_delete.contains(&p1));
+    }
+
+    // A2: family with both parents deleted
+    #[test]
+    fn a2_family_all_parents_deleted() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let p2 = make_person(&mut graph, "p2");
+        let f1 = make_family_with_parents(&mut graph, "f1", &p1, &p2);
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        seeds.insert(p2.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&p2));
+        assert!(plan.to_delete.contains(&f1));
+        assert_eq!(plan.to_delete.len(), 3);
+    }
+
+    // A3: family with both parents and child all deleted
+    #[test]
+    fn a3_family_all_parents_and_children_deleted() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let p2 = make_person(&mut graph, "p2");
+        let p3 = make_person(&mut graph, "p3");
+        let f1 = make_family_with_parents_and_child(&mut graph, "f1", &p1, &p2, &p3);
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        seeds.insert(p2.clone());
+        seeds.insert(p3.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&p2));
+        assert!(plan.to_delete.contains(&p3));
+        assert!(plan.to_delete.contains(&f1));
+        assert_eq!(plan.to_delete.len(), 4);
+    }
+
+    // A4: single event from single person -> deleted
+    #[test]
+    fn a4_event_birth_deleted() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let e1 = make_event(&mut graph, "e1", &p1);
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&e1));
+        assert_eq!(plan.to_delete.len(), 2);
+    }
+
+    // A5: event shared by two people, both deleted -> event deleted
+    #[test]
+    fn a5_event_shared_two_people_both_deleted() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let p2 = make_person(&mut graph, "p2");
+        let e1 = make_event(&mut graph, "e1", &p1);
+        // Connect p2 to same event manually
+        graph
+            .add_edge(Edge::PersonEventRef {
+                source: p2.clone(),
+                target: e1.clone(),
+                metadata: Box::new(typed_graph::EventRef {
+                    ref_field: e1.clone(),
+                    ..typed_graph::EventRef::default()
+                }),
+            })
+            .unwrap();
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        seeds.insert(p2.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&p2));
+        assert!(plan.to_delete.contains(&e1));
+        assert_eq!(plan.to_delete.len(), 3);
+    }
+
+    // A6: marriage event on family, both parents deleted -> event deleted
+    #[test]
+    fn a6_event_marriage_both_parents_deleted() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let p2 = make_person(&mut graph, "p2");
+        let f1 = make_family_with_parents(&mut graph, "f1", &p1, &p2);
+        let e1 = "e1".to_string();
+        graph
+            .add_node(
+                e1.clone(),
+                Node::Event(typed_graph::EventData {
+                    handle: e1.clone(),
+                    ..typed_graph::EventData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::FamilyEventRef {
+                source: f1.clone(),
+                target: e1.clone(),
+                metadata: Box::new(typed_graph::EventRef {
+                    ref_field: e1.clone(),
+                    ..typed_graph::EventRef::default()
+                }),
+            })
+            .unwrap();
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        seeds.insert(p2.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&p2));
+        assert!(plan.to_delete.contains(&f1));
+        assert!(plan.to_delete.contains(&e1));
+        assert_eq!(plan.to_delete.len(), 4);
+    }
+
+    // A7: citation from person -> deleted
+    #[test]
+    fn a7_citation_person_deleted() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let c1 = citation_from_person(&mut graph, "c1", &p1);
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&c1));
+        assert_eq!(plan.to_delete.len(), 2);
+    }
+
+    // A8: source cascaded from citation
+    #[test]
+    fn a8_source_cascade_from_citation() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let c1 = citation_from_person(&mut graph, "c1", &p1);
+        let s1 = source_from_citation(&mut graph, "s1", &c1);
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&c1));
+        assert!(plan.to_delete.contains(&s1));
+        assert_eq!(plan.to_delete.len(), 3);
+    }
+
+    // A9: repository cascaded from source
+    #[test]
+    fn a9_repository_cascade_from_source() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let c1 = citation_from_person(&mut graph, "c1", &p1);
+        let s1 = source_from_citation(&mut graph, "s1", &c1);
+        let r1 = repository_from_source(&mut graph, "r1", &s1);
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&c1));
+        assert!(plan.to_delete.contains(&s1));
+        assert!(plan.to_delete.contains(&r1));
+        assert_eq!(plan.to_delete.len(), 4);
+    }
+
+    // A10: media cascaded from person
+    #[test]
+    fn a10_media_cascade_from_person() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let m1 = media_from_person(&mut graph, "m1", &p1);
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&m1));
+        assert_eq!(plan.to_delete.len(), 2);
+    }
+
+    // A11: media cascaded from source
+    #[test]
+    fn a11_media_cascade_from_source() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let c1 = citation_from_person(&mut graph, "c1", &p1);
+        let s1 = source_from_citation(&mut graph, "s1", &c1);
+        let m1 = media_from_source(&mut graph, "m1", &s1);
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&c1));
+        assert!(plan.to_delete.contains(&s1));
+        assert!(plan.to_delete.contains(&m1));
+        assert_eq!(plan.to_delete.len(), 4);
+    }
+
+    // A12: media cascaded from citation
+    #[test]
+    fn a12_media_cascade_from_citation() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let c1 = citation_from_person(&mut graph, "c1", &p1);
+        let m1 = media_from_citation(&mut graph, "m1", &c1);
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&c1));
+        assert!(plan.to_delete.contains(&m1));
+        assert_eq!(plan.to_delete.len(), 3);
+    }
+
+    // A13: note cascaded from person
+    #[test]
+    fn a13_note_cascade_from_person() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let n1 = note_from_person(&mut graph, "n1", &p1);
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&n1));
+        assert_eq!(plan.to_delete.len(), 2);
+    }
+
+    // A14: note cascaded from citation
+    #[test]
+    fn a14_note_cascade_from_citation() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let c1 = citation_from_person(&mut graph, "c1", &p1);
+        let n1 = note_from_citation(&mut graph, "n1", &c1);
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&c1));
+        assert!(plan.to_delete.contains(&n1));
+        assert_eq!(plan.to_delete.len(), 3);
+    }
+
+    // A15: tag cascaded from person
+    #[test]
+    fn a15_tag_cascade_from_person() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let t1 = tag_from_person(&mut graph, "t1", &p1);
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&t1));
+        assert_eq!(plan.to_delete.len(), 2);
+    }
+
+    // A16: tag cascaded from event
+    #[test]
+    fn a16_tag_cascade_from_event() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let e1 = make_event(&mut graph, "e1", &p1);
+        let t1 = tag_from_event(&mut graph, "t1", &e1);
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&e1));
+        assert!(plan.to_delete.contains(&t1));
+        assert_eq!(plan.to_delete.len(), 3);
+    }
+
+    // A17: tag-to-tag cascade
+    #[test]
+    fn a17_tag_tag_cascade() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let t1 = tag_from_person(&mut graph, "t1", &p1);
+        let t2 = "t2".to_string();
+        graph
+            .add_node(
+                t2.clone(),
+                Node::Tag(typed_graph::TagData {
+                    handle: t2.clone(),
+                    ..typed_graph::TagData::default()
+                }),
+            )
+            .unwrap();
+        tag_tag(&mut graph, &t1, &t2);
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&t1));
+        assert!(plan.to_delete.contains(&t2));
+        assert_eq!(plan.to_delete.len(), 3);
+    }
+
+    // A18: place transitive cascade via event
+    #[test]
+    fn a18_place_transitive_cascade() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let e1 = make_event(&mut graph, "e1", &p1);
+        let pl1 = make_place(&mut graph, "pl1", &e1);
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&e1));
+        assert!(plan.to_delete.contains(&pl1));
+        assert_eq!(plan.to_delete.len(), 3);
     }
 
     // -----------------------------------------------------------------------
