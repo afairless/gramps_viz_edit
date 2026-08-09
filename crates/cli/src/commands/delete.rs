@@ -56,19 +56,22 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
 
     // 1. Parse the input .gramps file
     log::info!("Reading input file: {}", input_path.display());
-    let content = read_gramps_file(&input_path.display().to_string())
-        .map_err(|e| CliError::Io {
+    let content =
+        read_gramps_file(&input_path.display().to_string()).map_err(|e| CliError::Io {
             path: input_path.display().to_string(),
             source: std::io::Error::other(e.to_string()),
         })?;
 
     log::info!("Parsing XML graph...");
-    let (graph, namespace) = parse_gramps_xml(&content)
-        .map_err(|e| CliError::XmlParseError {
-            message: format!("failed to parse '{}': {}", input_path.display(), e),
-        })?;
+    let (graph, namespace) = parse_gramps_xml(&content).map_err(|e| CliError::XmlParseError {
+        message: format!("failed to parse '{}': {}", input_path.display(), e),
+    })?;
 
-    log::info!("Graph loaded: {} nodes, {} edges", graph.node_count(), graph.edge_count());
+    log::info!(
+        "Graph loaded: {} nodes, {} edges",
+        graph.node_count(),
+        graph.edge_count()
+    );
 
     // 2. Determine seed handles (from selections or loaded manifest)
     let seed_people: HashSet<String> = if let Some(ref manifest_path) = args.load_manifest {
@@ -77,9 +80,8 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
         manifest.seed_people.into_iter().collect()
     } else if let Some(ref selections_path) = args.selections {
         log::info!("Loading selections: {}", selections_path.display());
-        let selections = integrate::json_reader::parse_selections_json(
-            &selections_path.display().to_string(),
-        )?;
+        let selections =
+            integrate::json_reader::parse_selections_json(&selections_path.display().to_string())?;
         if selections.is_empty() {
             return Err(CliError::ConfigError(
                 "selections file is empty (no people selected)".to_string(),
@@ -123,14 +125,23 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
     };
 
     // 3. Run cascade engine
-    log::info!("Running cascade engine with {} seed people...", seed_people.len());
+    log::info!(
+        "Running cascade engine with {} seed people...",
+        seed_people.len()
+    );
     let plan: DeletePlan = cascade::cascade(&graph, &seed_people);
     log::info!(
         "Cascade result: {} total handles to delete ({} people, {} families, {} events, ...)",
         plan.to_delete.len(),
-        plan.per_type.get(&delete::types::NodeKindLabel::Person).map_or(0, |v| v.len()),
-        plan.per_type.get(&delete::types::NodeKindLabel::Family).map_or(0, |v| v.len()),
-        plan.per_type.get(&delete::types::NodeKindLabel::Event).map_or(0, |v| v.len()),
+        plan.per_type
+            .get(&delete::types::NodeKindLabel::Person)
+            .map_or(0, |v| v.len()),
+        plan.per_type
+            .get(&delete::types::NodeKindLabel::Family)
+            .map_or(0, |v| v.len()),
+        plan.per_type
+            .get(&delete::types::NodeKindLabel::Event)
+            .map_or(0, |v| v.len()),
     );
 
     if plan.to_delete.is_empty() {
@@ -153,13 +164,7 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
     } else {
         let mut stdin = std::io::BufReader::new(std::io::stdin());
         let mut stdout = std::io::stdout();
-        let review_result = run_interactive_review(
-            &plan,
-            &graph,
-            false,
-            &mut stdin,
-            &mut stdout,
-        );
+        let review_result = run_interactive_review(&plan, &graph, false, &mut stdin, &mut stdout);
         match review_result {
             ReviewResult::Confirmed(confirmed) => {
                 let mut result = HashSet::new();
@@ -204,7 +209,10 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
 
     // 6. Dry run check
     if args.dry_run {
-        log::info!("Dry run complete. Would delete {} handles.", final_to_delete.len());
+        log::info!(
+            "Dry run complete. Would delete {} handles.",
+            final_to_delete.len()
+        );
         return Ok(());
     }
 
@@ -214,10 +222,7 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "output".to_string());
-        let out = if input_path
-            .extension()
-            .is_some_and(|e| e == "gz")
-        {
+        let out = if input_path.extension().is_some_and(|e| e == "gz") {
             // For .gramps.gz, strip both extensions
             let base = input_path
                 .file_stem()
@@ -238,9 +243,7 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
     log::info!("Writing output to: {}", output_path.display());
 
     // Determine whether to write gzip
-    let is_gzip = output_path
-        .extension()
-        .is_some_and(|e| e == "gz");
+    let is_gzip = output_path.extension().is_some_and(|e| e == "gz");
 
     // Build the writer with filter and namespace preservation
     let serialization_map = SerializationMap::new();

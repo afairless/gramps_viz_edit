@@ -60,7 +60,9 @@ pub fn run_interactive_review(
         // Also include seeds even if they have no per_type entry
         for handle in &plan.seed_people {
             let type_name = if let Some(node) = graph.get_node(handle) {
-                crate::cascade::node_kind_to_label(node).plural().to_string()
+                crate::cascade::node_kind_to_label(node)
+                    .plural()
+                    .to_string()
             } else {
                 continue;
             };
@@ -166,7 +168,9 @@ fn review_type_prompt(
         let _ = writeln!(
             output,
             "\n═══ Step {}/{}: {} ═══",
-            step, total, to_title(type_name)
+            step,
+            total,
+            to_title(type_name)
         );
         let _ = writeln!(
             output,
@@ -218,11 +222,7 @@ fn review_type_prompt(
                 for h in handles {
                     let (desc, gramps_id) = describe_node(graph, h);
                     let id_str = format_gramps_id(&gramps_id);
-                    let _ = writeln!(
-                        output,
-                        "  • {}{} — {}",
-                        h, id_str, desc
-                    );
+                    let _ = writeln!(output, "  • {}{} — {}", h, id_str, desc);
                 }
                 let _ = writeln!(output, "\n[Press Enter to continue]");
                 let mut _pause = String::new();
@@ -248,7 +248,8 @@ fn review_type_prompt(
                 }
                 // Validate that all entered handles are actually candidates
                 let candidate_set: HashSet<Handle> = handles.iter().cloned().collect();
-                let valid: HashSet<Handle> = to_keep.intersection(&candidate_set).cloned().collect();
+                let valid: HashSet<Handle> =
+                    to_keep.intersection(&candidate_set).cloned().collect();
                 let invalid: Vec<&Handle> = to_keep.difference(&candidate_set).collect();
                 if !invalid.is_empty() {
                     let _ = writeln!(
@@ -271,7 +272,10 @@ fn review_type_prompt(
             }
             "q" => return ReviewAction::Abort,
             _ => {
-                let _ = writeln!(output, "Unknown command. Type 'y', 'n', 'l', 'r', 's', or 'q'.");
+                let _ = writeln!(
+                    output,
+                    "Unknown command. Type 'y', 'n', 'l', 'r', 's', or 'q'."
+                );
             }
         }
     }
@@ -279,11 +283,7 @@ fn review_type_prompt(
 
 /// Build a full name string from a PersonData node.
 fn person_full_name(p: &typed_graph::PersonData) -> String {
-    let first = p
-        .primary_name
-        .first_name
-        .as_deref()
-        .unwrap_or("Unknown");
+    let first = p.primary_name.first_name.as_deref().unwrap_or("Unknown");
     let surname = p
         .primary_name
         .surname_list
@@ -327,7 +327,8 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
             // Resolve birth year via birth_ref_index into event_ref_list
             let resolve_year = |idx_opt: &Option<i32>| -> Option<String> {
                 idx_opt.and_then(|idx| {
-                    data.event_ref_list.get(idx as usize)
+                    data.event_ref_list
+                        .get(idx as usize)
                         .and_then(|eref| graph.get_node(&eref.ref_field))
                         .and_then(|n| {
                             if let Node::Event(ed) = n {
@@ -336,10 +337,7 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
                                 None
                             }
                         })
-                        .and_then(|d| {
-                            d.text.clone()
-                                .or_else(|| Some(format!("{:04}", d.year)))
-                        })
+                        .and_then(|d| d.text.clone().or_else(|| Some(format!("{:04}", d.year))))
                 })
             };
             let birth = resolve_year(&data.birth_ref_index);
@@ -356,7 +354,8 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
             // Use edge traversal for father, mother, and children
             let incident = graph.edges_incident_to(handle);
 
-            let father_name = incident.iter()
+            let father_name = incident
+                .iter()
                 .filter_map(|e| match e {
                     Edge::FamilyFather { target, .. } => Some(target.clone()),
                     _ => None,
@@ -372,7 +371,8 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
                 })
                 .unwrap_or_default();
 
-            let mother_name = incident.iter()
+            let mother_name = incident
+                .iter()
                 .filter_map(|e| match e {
                     Edge::FamilyMother { target, .. } => Some(target.clone()),
                     _ => None,
@@ -389,14 +389,17 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
                 .unwrap_or_default();
 
             // Children via FamilyChildRef edges (from family TO child)
-            let child_handles: Vec<Handle> = incident.iter()
+            let child_handles: Vec<Handle> = incident
+                .iter()
                 .filter_map(|e| match e {
                     Edge::FamilyChildRef { target, .. } => Some(target.clone()),
                     _ => None,
                 })
                 .collect();
             let child_count = child_handles.len();
-            let child_names: Vec<String> = child_handles.iter().take(2)
+            let child_names: Vec<String> = child_handles
+                .iter()
+                .take(2)
                 .filter_map(|h| graph.get_node(h))
                 .filter_map(|n| {
                     if let Node::Person(p) = n {
@@ -420,10 +423,19 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
                     format!("Family: {} | child: {}", parents, child_names[0])
                 }
                 2 if child_count == 2 => {
-                    format!("Family: {} | children: {}, {}", parents, child_names[0], child_names[1])
+                    format!(
+                        "Family: {} | children: {}, {}",
+                        parents, child_names[0], child_names[1]
+                    )
                 }
                 _ => {
-                    format!("Family: {} | children: {}, {} (+{} more)", parents, child_names[0], child_names[1], child_count - 2)
+                    format!(
+                        "Family: {} | children: {}, {} (+{} more)",
+                        parents,
+                        child_names[0],
+                        child_names[1],
+                        child_count - 2
+                    )
                 }
             };
             (desc, data.gramps_id.clone())
@@ -435,9 +447,7 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
                 .map(|t| format!("{:?}", t))
                 .unwrap_or_else(|| "Unknown".to_string());
             let date_str = if let Some(ref d) = data.date {
-                d.text
-                    .clone()
-                    .unwrap_or_else(|| format!("{:04}", d.year))
+                d.text.clone().unwrap_or_else(|| format!("{:04}", d.year))
             } else {
                 "no date".to_string()
             };
@@ -448,7 +458,9 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
 
             // Collect people from PersonEventRef edges (Person → Event)
             for person_h in incident.iter().filter_map(|e| match e {
-                Edge::PersonEventRef { source, target, .. } if target == handle => Some(source.clone()),
+                Edge::PersonEventRef { source, target, .. } if target == handle => {
+                    Some(source.clone())
+                }
                 _ => None,
             }) {
                 if people.len() >= 3 {
@@ -485,16 +497,17 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
             let desc = match people.len() {
                 0 => format!("{} event ({})", event_type, date_str),
                 1 => format!("{} event ({}) — {}", event_type, date_str, people[0]),
-                _ => format!("{} event ({}) — {}", event_type, date_str, people.join(", ")),
+                _ => format!(
+                    "{} event ({}) — {}",
+                    event_type,
+                    date_str,
+                    people.join(", ")
+                ),
             };
             (desc, data.gramps_id.clone())
         }
         Some(Node::Place(data)) => {
-            let desc = data
-                .title
-                .as_deref()
-                .unwrap_or("Unnamed Place")
-                .to_string();
+            let desc = data.title.as_deref().unwrap_or("Unnamed Place").to_string();
             (desc, data.gramps_id.clone())
         }
         Some(Node::Source(data)) => {
@@ -516,10 +529,13 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
             let source_handle = get_source_handle(&data.source_handle);
             let source_handle = if source_handle.is_empty() {
                 // Fall back to CitationSource edge
-                graph.edges_incident_to(handle).iter()
+                graph
+                    .edges_incident_to(handle)
+                    .iter()
                     .filter_map(|e| match e {
-                        Edge::CitationSource { source, target }
-                            if source == handle => Some(target.clone()),
+                        Edge::CitationSource { source, target } if source == handle => {
+                            Some(target.clone())
+                        }
                         _ => None,
                     })
                     .next()
@@ -528,7 +544,8 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
                 source_handle
             };
             let source_desc = if !source_handle.is_empty() {
-                graph.get_node(&source_handle)
+                graph
+                    .get_node(&source_handle)
                     .map(|n| {
                         if let Node::Source(s) = n {
                             let id = format_gramps_id(&s.gramps_id);
@@ -550,10 +567,7 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
             } else {
                 source_desc
             };
-            let page = data
-                .page
-                .as_deref()
-                .unwrap_or("no page");
+            let page = data.page.as_deref().unwrap_or("no page");
             let desc = format!("Citation → {}, p. {}", source_str, page);
             (desc, data.gramps_id.clone())
         }
@@ -575,13 +589,19 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
                 if !path.is_empty() {
                     format!("Media: {}", path)
                 } else if let Some(ref date) = data.date {
-                    let d = date.text.clone().unwrap_or_else(|| format!("{:04}", date.year));
+                    let d = date
+                        .text
+                        .clone()
+                        .unwrap_or_else(|| format!("{:04}", date.year));
                     format!("Media from {}", d)
                 } else {
                     "Unnamed Media".to_string()
                 }
             } else if let Some(ref date) = data.date {
-                let d = date.text.clone().unwrap_or_else(|| format!("{:04}", date.year));
+                let d = date
+                    .text
+                    .clone()
+                    .unwrap_or_else(|| format!("{:04}", date.year));
                 format!("Media from {}", d)
             } else {
                 "Unnamed Media".to_string()
@@ -1001,13 +1021,8 @@ mod tests {
 
     #[test]
     fn describe_person_only_birth() {
-        let (graph, handle) = person_with_events_graph(
-            Some("I0002"),
-            Some("Jane"),
-            Some("Doe"),
-            Some(1810),
-            None,
-        );
+        let (graph, handle) =
+            person_with_events_graph(Some("I0002"), Some("Jane"), Some("Doe"), Some(1810), None);
         let (desc, gramps_id) = describe_node(&graph, &handle);
         assert_eq!(desc, "Jane Doe (b. 1810)");
         assert_eq!(gramps_id, Some("I0002".to_string()));
@@ -1015,13 +1030,8 @@ mod tests {
 
     #[test]
     fn describe_person_only_death() {
-        let (graph, handle) = person_with_events_graph(
-            Some("I0003"),
-            Some("Bob"),
-            Some("White"),
-            None,
-            Some(1900),
-        );
+        let (graph, handle) =
+            person_with_events_graph(Some("I0003"), Some("Bob"), Some("White"), None, Some(1900));
         let (desc, gramps_id) = describe_node(&graph, &handle);
         assert_eq!(desc, "Bob White (d. 1900)");
         assert_eq!(gramps_id, Some("I0003".to_string()));
@@ -1029,13 +1039,8 @@ mod tests {
 
     #[test]
     fn describe_person_no_dates() {
-        let (graph, handle) = person_with_events_graph(
-            Some("I0004"),
-            Some("Eve"),
-            Some("Brown"),
-            None,
-            None,
-        );
+        let (graph, handle) =
+            person_with_events_graph(Some("I0004"), Some("Eve"), Some("Brown"), None, None);
         let (desc, gramps_id) = describe_node(&graph, &handle);
         assert_eq!(desc, "Eve Brown");
         assert_eq!(gramps_id, Some("I0004".to_string()));
@@ -1043,13 +1048,8 @@ mod tests {
 
     #[test]
     fn describe_person_no_gramps_id() {
-        let (graph, handle) = person_with_events_graph(
-            None,
-            Some("No"),
-            Some("Id"),
-            Some(1950),
-            None,
-        );
+        let (graph, handle) =
+            person_with_events_graph(None, Some("No"), Some("Id"), Some(1950), None);
         let (desc, gramps_id) = describe_node(&graph, &handle);
         assert_eq!(desc, "No Id (b. 1950)");
         assert_eq!(gramps_id, None);
@@ -1186,10 +1186,7 @@ mod tests {
             vec![("Alice", "Smith")],
         );
         let (desc, gramps_id) = describe_node(&graph, &handle);
-        assert_eq!(
-            desc,
-            "Family: John Smith & Jane Doe | child: Alice Smith"
-        );
+        assert_eq!(desc, "Family: John Smith & Jane Doe | child: Alice Smith");
         assert_eq!(gramps_id, Some("F0002".to_string()));
     }
 
@@ -1216,12 +1213,7 @@ mod tests {
 
     #[test]
     fn describe_family_no_parents_no_children() {
-        let (graph, handle) = family_graph(
-            Some("F0004"),
-            None,
-            None,
-            vec![],
-        );
+        let (graph, handle) = family_graph(Some("F0004"), None, None, vec![]);
         let (desc, gramps_id) = describe_node(&graph, &handle);
         assert!(desc.contains("no parents"));
         assert_eq!(gramps_id, Some("F0004".to_string()));
@@ -1236,21 +1228,14 @@ mod tests {
             vec![("Alice", "Smith")],
         );
         let (desc, gramps_id) = describe_node(&graph, &handle);
-        assert_eq!(
-            desc,
-            "Family: John Smith | child: Alice Smith"
-        );
+        assert_eq!(desc, "Family: John Smith | child: Alice Smith");
         assert_eq!(gramps_id, Some("F0005".to_string()));
     }
 
     #[test]
     fn describe_family_no_gramps_id() {
-        let (graph, handle) = family_graph(
-            None,
-            Some(("John", "Smith")),
-            Some(("Jane", "Doe")),
-            vec![],
-        );
+        let (graph, handle) =
+            family_graph(None, Some(("John", "Smith")), Some(("Jane", "Doe")), vec![]);
         let (desc, gramps_id) = describe_node(&graph, &handle);
         assert!(desc.contains("John Smith & Jane Doe"));
         assert_eq!(gramps_id, None);
@@ -1328,10 +1313,7 @@ mod tests {
             vec![("John", "Smith")],
         );
         let (desc, gramps_id) = describe_node(&graph, &handle);
-        assert_eq!(
-            desc,
-            "Birth event (1850) — John Smith"
-        );
+        assert_eq!(desc, "Birth event (1850) — John Smith");
         assert_eq!(gramps_id, Some("E0001".to_string()));
     }
 
@@ -1344,10 +1326,7 @@ mod tests {
             vec![("John", "Smith"), ("Jane", "Doe")],
         );
         let (desc, gramps_id) = describe_node(&graph, &handle);
-        assert_eq!(
-            desc,
-            "Marriage event (1900) — John Smith, Jane Doe"
-        );
+        assert_eq!(desc, "Marriage event (1900) — John Smith, Jane Doe");
         assert_eq!(gramps_id, Some("E0002".to_string()));
     }
 
@@ -1360,10 +1339,7 @@ mod tests {
             vec![],
         );
         let (desc, gramps_id) = describe_node(&graph, &handle);
-        assert_eq!(
-            desc,
-            "Census event (no date)"
-        );
+        assert_eq!(desc, "Census event (no date)");
         assert_eq!(gramps_id, Some("E0003".to_string()));
     }
 
@@ -1376,10 +1352,7 @@ mod tests {
             vec![("Alice", "Brown")],
         );
         let (desc, gramps_id) = describe_node(&graph, &handle);
-        assert_eq!(
-            desc,
-            "Birth event (2000) — Alice Brown"
-        );
+        assert_eq!(desc, "Birth event (2000) — Alice Brown");
         assert_eq!(gramps_id, None);
     }
 
@@ -1437,7 +1410,7 @@ mod tests {
             .unwrap();
         graph
             .add_edge(Edge::FamilyFather {
-            source: family_h.clone(),
+                source: family_h.clone(),
                 target: father_h.clone(),
             })
             .unwrap();
@@ -1478,10 +1451,7 @@ mod tests {
             .unwrap();
 
         let (desc, gramps_id) = describe_node(&graph, &event_h);
-        assert_eq!(
-            desc,
-            "Marriage event (1900) — John Smith, Jane Smith"
-        );
+        assert_eq!(desc, "Marriage event (1900) — John Smith, Jane Smith");
         assert_eq!(gramps_id, Some("E0001".to_string()));
     }
 
@@ -1547,41 +1517,23 @@ mod tests {
 
     #[test]
     fn describe_citation_with_source() {
-        let (graph, handle) = citation_graph(
-            Some("C0001"),
-            Some("42"),
-            Some("Census Record"),
-        );
+        let (graph, handle) = citation_graph(Some("C0001"), Some("42"), Some("Census Record"));
         let (desc, gramps_id) = describe_node(&graph, &handle);
-        assert_eq!(
-            desc,
-            "Citation → source [S0001] \"Census Record\", p. 42"
-        );
+        assert_eq!(desc, "Citation → source [S0001] \"Census Record\", p. 42");
         assert_eq!(gramps_id, Some("C0001".to_string()));
     }
 
     #[test]
     fn describe_citation_no_source() {
-        let (graph, handle) = citation_graph(
-            Some("C0002"),
-            Some("5"),
-            None,
-        );
+        let (graph, handle) = citation_graph(Some("C0002"), Some("5"), None);
         let (desc, gramps_id) = describe_node(&graph, &handle);
-        assert_eq!(
-            desc,
-            "Citation → no source, p. 5"
-        );
+        assert_eq!(desc, "Citation → no source, p. 5");
         assert_eq!(gramps_id, Some("C0002".to_string()));
     }
 
     #[test]
     fn describe_citation_no_page() {
-        let (graph, handle) = citation_graph(
-            Some("C0003"),
-            None,
-            Some("Marriage Record"),
-        );
+        let (graph, handle) = citation_graph(Some("C0003"), None, Some("Marriage Record"));
         let (desc, gramps_id) = describe_node(&graph, &handle);
         assert_eq!(
             desc,
@@ -1592,11 +1544,7 @@ mod tests {
 
     #[test]
     fn describe_citation_no_gramps_id() {
-        let (graph, handle) = citation_graph(
-            None,
-            Some("10"),
-            Some("Census Record"),
-        );
+        let (graph, handle) = citation_graph(None, Some("10"), Some("Census Record"));
         let (desc, gramps_id) = describe_node(&graph, &handle);
         assert!(desc.contains("Census Record"));
         assert_eq!(gramps_id, None);
@@ -1634,7 +1582,7 @@ mod tests {
             .unwrap();
         graph
             .add_edge(Edge::CitationSource {
-            source: citation_h.clone(),
+                source: citation_h.clone(),
                 target: source_h.clone(),
             })
             .unwrap();
@@ -1904,18 +1852,9 @@ mod tests {
         pre_connectivity.insert(p_h.clone(), 1usize);
 
         // 3 types with candidates
-        per_type.insert(
-            NodeKindLabel::Person,
-            vec![p_h.clone()],
-        );
-        per_type.insert(
-            NodeKindLabel::Event,
-            vec!["e0001".to_string()],
-        );
-        per_type.insert(
-            NodeKindLabel::Place,
-            vec!["pl0001".to_string()],
-        );
+        per_type.insert(NodeKindLabel::Person, vec![p_h.clone()]);
+        per_type.insert(NodeKindLabel::Event, vec!["e0001".to_string()]);
+        per_type.insert(NodeKindLabel::Place, vec!["pl0001".to_string()]);
 
         let plan = DeletePlan {
             to_delete: seed_people.clone(),
@@ -1946,10 +1885,7 @@ mod tests {
             output_str.contains("Step 3/3"),
             "Expected 'Step 3/3' in output"
         );
-        assert!(
-            !output_str.contains("Step 4/"),
-            "Should not have a Step 4"
-        );
+        assert!(!output_str.contains("Step 4/"), "Should not have a Step 4");
 
         match result {
             ReviewResult::Confirmed(confirmed) => {

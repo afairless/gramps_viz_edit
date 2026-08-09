@@ -110,7 +110,11 @@ fn edge_other_endpoint(edge: &Edge, handle: &Handle) -> Handle {
             metadata: _,
         } => (source.clone(), target.clone()),
     };
-    if source == *handle { target } else { source }
+    if source == *handle {
+        target
+    } else {
+        source
+    }
 }
 
 /// Run the deletion cascade on a graph starting from a set of seed handles
@@ -1267,40 +1271,66 @@ mod tests {
         let pl1 = "pl0001".to_string();
         let c1 = "c0001".to_string();
 
-        graph.add_node(p1.clone(), Node::Person(typed_graph::PersonData {
-            handle: p1.clone(),
-            ..typed_graph::PersonData::default()
-        })).unwrap();
-        graph.add_node(e1.clone(), Node::Event(typed_graph::EventData {
-            handle: e1.clone(),
-            ..typed_graph::EventData::default()
-        })).unwrap();
-        graph.add_node(pl1.clone(), Node::Place(typed_graph::PlaceData {
-            handle: pl1.clone(),
-            ..typed_graph::PlaceData::default()
-        })).unwrap();
-        graph.add_node(c1.clone(), Node::Citation(typed_graph::CitationData {
-            handle: c1.clone(),
-            ..typed_graph::CitationData::default()
-        })).unwrap();
+        graph
+            .add_node(
+                p1.clone(),
+                Node::Person(typed_graph::PersonData {
+                    handle: p1.clone(),
+                    ..typed_graph::PersonData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                e1.clone(),
+                Node::Event(typed_graph::EventData {
+                    handle: e1.clone(),
+                    ..typed_graph::EventData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                pl1.clone(),
+                Node::Place(typed_graph::PlaceData {
+                    handle: pl1.clone(),
+                    ..typed_graph::PlaceData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                c1.clone(),
+                Node::Citation(typed_graph::CitationData {
+                    handle: c1.clone(),
+                    ..typed_graph::CitationData::default()
+                }),
+            )
+            .unwrap();
 
-        graph.add_edge(Edge::PersonEventRef {
-            source: p1.clone(),
-            target: e1.clone(),
-            metadata: Box::new(typed_graph::EventRef {
-                ref_field: e1.clone(),
-                ..typed_graph::EventRef::default()
-            }),
-        }).unwrap();
-        graph.add_edge(Edge::EventPlace {
-            source: e1.clone(),
-            target: pl1.clone(),
-        }).unwrap();
+        graph
+            .add_edge(Edge::PersonEventRef {
+                source: p1.clone(),
+                target: e1.clone(),
+                metadata: Box::new(typed_graph::EventRef {
+                    ref_field: e1.clone(),
+                    ..typed_graph::EventRef::default()
+                }),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::EventPlace {
+                source: e1.clone(),
+                target: pl1.clone(),
+            })
+            .unwrap();
         // PlaceCitation is outgoing — does not keep place alive
-        graph.add_edge(Edge::PlaceCitation {
-            source: pl1.clone(),
-            target: c1.clone(),
-        }).unwrap();
+        graph
+            .add_edge(Edge::PlaceCitation {
+                source: pl1.clone(),
+                target: c1.clone(),
+            })
+            .unwrap();
 
         let mut seeds = HashSet::new();
         seeds.insert(p1.clone());
@@ -1323,44 +1353,70 @@ mod tests {
         let pl1 = "pl0001".to_string();
         let m1 = "m0001".to_string();
 
-        graph.add_node(p1.clone(), Node::Person(typed_graph::PersonData {
-            handle: p1.clone(),
-            ..typed_graph::PersonData::default()
-        })).unwrap();
-        graph.add_node(e1.clone(), Node::Event(typed_graph::EventData {
-            handle: e1.clone(),
-            ..typed_graph::EventData::default()
-        })).unwrap();
-        graph.add_node(pl1.clone(), Node::Place(typed_graph::PlaceData {
-            handle: pl1.clone(),
-            ..typed_graph::PlaceData::default()
-        })).unwrap();
-        graph.add_node(m1.clone(), Node::Media(typed_graph::MediaData {
-            handle: m1.clone(),
-            ..typed_graph::MediaData::default()
-        })).unwrap();
+        graph
+            .add_node(
+                p1.clone(),
+                Node::Person(typed_graph::PersonData {
+                    handle: p1.clone(),
+                    ..typed_graph::PersonData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                e1.clone(),
+                Node::Event(typed_graph::EventData {
+                    handle: e1.clone(),
+                    ..typed_graph::EventData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                pl1.clone(),
+                Node::Place(typed_graph::PlaceData {
+                    handle: pl1.clone(),
+                    ..typed_graph::PlaceData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                m1.clone(),
+                Node::Media(typed_graph::MediaData {
+                    handle: m1.clone(),
+                    ..typed_graph::MediaData::default()
+                }),
+            )
+            .unwrap();
 
-        graph.add_edge(Edge::PersonEventRef {
-            source: p1.clone(),
-            target: e1.clone(),
-            metadata: Box::new(typed_graph::EventRef {
-                ref_field: e1.clone(),
-                ..typed_graph::EventRef::default()
-            }),
-        }).unwrap();
-        graph.add_edge(Edge::EventPlace {
-            source: e1.clone(),
-            target: pl1.clone(),
-        }).unwrap();
+        graph
+            .add_edge(Edge::PersonEventRef {
+                source: p1.clone(),
+                target: e1.clone(),
+                metadata: Box::new(typed_graph::EventRef {
+                    ref_field: e1.clone(),
+                    ..typed_graph::EventRef::default()
+                }),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::EventPlace {
+                source: e1.clone(),
+                target: pl1.clone(),
+            })
+            .unwrap();
         // PlaceMediaRef is outgoing — does not keep place alive
-        graph.add_edge(Edge::PlaceMediaRef {
-            source: pl1.clone(),
-            target: m1.clone(),
-            metadata: Box::new(typed_graph::MediaRef {
-                ref_field: m1.clone(),
-                ..typed_graph::MediaRef::default()
-            }),
-        }).unwrap();
+        graph
+            .add_edge(Edge::PlaceMediaRef {
+                source: pl1.clone(),
+                target: m1.clone(),
+                metadata: Box::new(typed_graph::MediaRef {
+                    ref_field: m1.clone(),
+                    ..typed_graph::MediaRef::default()
+                }),
+            })
+            .unwrap();
 
         let mut seeds = HashSet::new();
         seeds.insert(p1.clone());
@@ -2309,34 +2365,53 @@ mod tests {
         let sx = "sx".to_string();
         let rx = "rx".to_string();
         let mx = "mx".to_string();
-        graph.add_node(sx.clone(), Node::Source(typed_graph::SourceData {
-            handle: sx.clone(),
-            ..typed_graph::SourceData::default()
-        })).unwrap();
-        graph.add_node(rx.clone(), Node::Repository(typed_graph::RepositoryData {
-            handle: rx.clone(),
-            ..typed_graph::RepositoryData::default()
-        })).unwrap();
-        graph.add_node(mx.clone(), Node::Media(typed_graph::MediaData {
-            handle: mx.clone(),
-            ..typed_graph::MediaData::default()
-        })).unwrap();
-        graph.add_edge(Edge::SourceRepoRef {
-            source: sx.clone(),
-            target: rx.clone(),
-            metadata: Box::new(typed_graph::RepoRef {
-                ref_field: rx.clone(),
-                ..typed_graph::RepoRef::default()
-            }),
-        }).unwrap();
-        graph.add_edge(Edge::SourceMediaRef {
-            source: sx.clone(),
-            target: mx.clone(),
-            metadata: Box::new(typed_graph::MediaRef {
-                ref_field: mx.clone(),
-                ..typed_graph::MediaRef::default()
-            }),
-        }).unwrap();
+        graph
+            .add_node(
+                sx.clone(),
+                Node::Source(typed_graph::SourceData {
+                    handle: sx.clone(),
+                    ..typed_graph::SourceData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                rx.clone(),
+                Node::Repository(typed_graph::RepositoryData {
+                    handle: rx.clone(),
+                    ..typed_graph::RepositoryData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                mx.clone(),
+                Node::Media(typed_graph::MediaData {
+                    handle: mx.clone(),
+                    ..typed_graph::MediaData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::SourceRepoRef {
+                source: sx.clone(),
+                target: rx.clone(),
+                metadata: Box::new(typed_graph::RepoRef {
+                    ref_field: rx.clone(),
+                    ..typed_graph::RepoRef::default()
+                }),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::SourceMediaRef {
+                source: sx.clone(),
+                target: mx.clone(),
+                metadata: Box::new(typed_graph::MediaRef {
+                    ref_field: mx.clone(),
+                    ..typed_graph::MediaRef::default()
+                }),
+            })
+            .unwrap();
 
         let mut seeds = HashSet::new();
         seeds.insert(p1.clone());
@@ -2412,58 +2487,98 @@ mod tests {
         let mx = "mx".to_string();
         let nx = "nx".to_string();
         let tx = "tx".to_string();
-        graph.add_node(cx.clone(), Node::Citation(typed_graph::CitationData {
-            handle: cx.clone(),
-            ..typed_graph::CitationData::default()
-        })).unwrap();
-        graph.add_node(sx.clone(), Node::Source(typed_graph::SourceData {
-            handle: sx.clone(),
-            ..typed_graph::SourceData::default()
-        })).unwrap();
-        graph.add_node(rx.clone(), Node::Repository(typed_graph::RepositoryData {
-            handle: rx.clone(),
-            ..typed_graph::RepositoryData::default()
-        })).unwrap();
-        graph.add_node(mx.clone(), Node::Media(typed_graph::MediaData {
-            handle: mx.clone(),
-            ..typed_graph::MediaData::default()
-        })).unwrap();
-        graph.add_node(nx.clone(), Node::Note(typed_graph::NoteData {
-            handle: nx.clone(),
-            ..typed_graph::NoteData::default()
-        })).unwrap();
-        graph.add_node(tx.clone(), Node::Tag(typed_graph::TagData {
-            handle: tx.clone(),
-            ..typed_graph::TagData::default()
-        })).unwrap();
-        graph.add_edge(Edge::CitationSource {
-            source: cx.clone(),
-            target: sx.clone(),
-        }).unwrap();
-        graph.add_edge(Edge::SourceRepoRef {
-            source: sx.clone(),
-            target: rx.clone(),
-            metadata: Box::new(typed_graph::RepoRef {
-                ref_field: rx.clone(),
-                ..typed_graph::RepoRef::default()
-            }),
-        }).unwrap();
-        graph.add_edge(Edge::SourceMediaRef {
-            source: sx.clone(),
-            target: mx.clone(),
-            metadata: Box::new(typed_graph::MediaRef {
-                ref_field: mx.clone(),
-                ..typed_graph::MediaRef::default()
-            }),
-        }).unwrap();
-        graph.add_edge(Edge::MediaNote {
-            source: mx.clone(),
-            target: nx.clone(),
-        }).unwrap();
-        graph.add_edge(Edge::MediaTag {
-            source: mx.clone(),
-            target: tx.clone(),
-        }).unwrap();
+        graph
+            .add_node(
+                cx.clone(),
+                Node::Citation(typed_graph::CitationData {
+                    handle: cx.clone(),
+                    ..typed_graph::CitationData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                sx.clone(),
+                Node::Source(typed_graph::SourceData {
+                    handle: sx.clone(),
+                    ..typed_graph::SourceData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                rx.clone(),
+                Node::Repository(typed_graph::RepositoryData {
+                    handle: rx.clone(),
+                    ..typed_graph::RepositoryData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                mx.clone(),
+                Node::Media(typed_graph::MediaData {
+                    handle: mx.clone(),
+                    ..typed_graph::MediaData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                nx.clone(),
+                Node::Note(typed_graph::NoteData {
+                    handle: nx.clone(),
+                    ..typed_graph::NoteData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                tx.clone(),
+                Node::Tag(typed_graph::TagData {
+                    handle: tx.clone(),
+                    ..typed_graph::TagData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::CitationSource {
+                source: cx.clone(),
+                target: sx.clone(),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::SourceRepoRef {
+                source: sx.clone(),
+                target: rx.clone(),
+                metadata: Box::new(typed_graph::RepoRef {
+                    ref_field: rx.clone(),
+                    ..typed_graph::RepoRef::default()
+                }),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::SourceMediaRef {
+                source: sx.clone(),
+                target: mx.clone(),
+                metadata: Box::new(typed_graph::MediaRef {
+                    ref_field: mx.clone(),
+                    ..typed_graph::MediaRef::default()
+                }),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::MediaNote {
+                source: mx.clone(),
+                target: nx.clone(),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::MediaTag {
+                source: mx.clone(),
+                target: tx.clone(),
+            })
+            .unwrap();
 
         let mut seeds = HashSet::new();
         seeds.insert(p1.clone());

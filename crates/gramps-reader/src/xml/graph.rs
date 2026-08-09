@@ -1983,8 +1983,7 @@ mod tests {
 
     #[test]
     fn parse_citation_with_sourceref() {
-        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>"#
-            .to_string()
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>"#.to_string()
             + r#"
 <database xmlns="http://gramps-project.org/xml/1.7.2/">
   <header>
@@ -2029,8 +2028,7 @@ mod tests {
 
     #[test]
     fn parse_event_with_place_hlink() {
-        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>"#
-            .to_string()
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>"#.to_string()
             + r#"
 <database xmlns="http://gramps-project.org/xml/1.7.2/">
   <header>

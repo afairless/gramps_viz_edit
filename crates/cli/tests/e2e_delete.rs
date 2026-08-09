@@ -185,10 +185,7 @@ fn e2e_delete_both_people_removes_family() {
     assert!(!content.contains("John"), "John should be deleted");
     assert!(!content.contains("Jane"), "Jane should be deleted");
     // Family should be removed too (both parents deleted)
-    assert!(
-        !content.contains("f0001"),
-        "Family should be deleted"
-    );
+    assert!(!content.contains("f0001"), "Family should be deleted");
 
     // Clean up
     let _ = std::fs::remove_file(&input);
@@ -326,16 +323,12 @@ fn e2e_delete_zero_percent_overlap_errors() {
     // Write selections with a handle that doesn't exist in the graph
     write_selections(&selections, &["nonexistent_handle"]);
 
-    let (_stdout, stderr, code) = gramps_gen(&[
-        "delete",
-        &input,
-        "--selections",
-        &selections,
-        "--yes",
-    ]);
+    let (_stdout, stderr, code) =
+        gramps_gen(&["delete", &input, "--selections", &selections, "--yes"]);
     // Should fail with non-zero exit code
     assert_ne!(
-        code, Some(0),
+        code,
+        Some(0),
         "Should fail when 0% of selections match\nstderr: {}",
         stderr
     );

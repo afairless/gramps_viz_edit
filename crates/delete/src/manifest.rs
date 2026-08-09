@@ -332,7 +332,10 @@ mod tests {
         let path = dir.join("bad_version.json");
         save_manifest(&manifest, &path).unwrap();
         let result = load_manifest(&path);
-        assert!(matches!(result, Err(ManifestError::UnsupportedVersion(999))));
+        assert!(matches!(
+            result,
+            Err(ManifestError::UnsupportedVersion(999))
+        ));
         let _ = std::fs::remove_file(&path);
     }
 
@@ -413,7 +416,10 @@ mod tests {
 
         let path = Path::new("test.gramps");
         let result = check_source_file(&manifest, path);
-        assert!(matches!(result, Err(ManifestError::SourceFileMismatch { .. })));
+        assert!(matches!(
+            result,
+            Err(ManifestError::SourceFileMismatch { .. })
+        ));
     }
 
     #[test]
@@ -439,7 +445,13 @@ mod tests {
             .unwrap();
 
         let to_delete = vec!["p1".to_string(), "e1".to_string()];
-        let manifest = build_manifest("test.gramps", Some("sel.json"), &["p1".to_string()], &to_delete, &graph);
+        let manifest = build_manifest(
+            "test.gramps",
+            Some("sel.json"),
+            &["p1".to_string()],
+            &to_delete,
+            &graph,
+        );
 
         assert_eq!(manifest.version, 1);
         assert_eq!(manifest.source_file, "test.gramps");
