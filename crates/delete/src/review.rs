@@ -275,7 +275,6 @@ fn review_type_prompt(
 }
 
 /// Build a full name string from a PersonData node.
-#[allow(dead_code)]
 fn person_full_name(p: &typed_graph::PersonData) -> String {
     let first = p
         .primary_name
@@ -296,7 +295,6 @@ fn person_full_name(p: &typed_graph::PersonData) -> String {
 }
 
 /// Format an optional gramps_id for display, e.g. `[I0001]`.
-#[allow(dead_code)]
 fn format_gramps_id(gramps_id: &Option<String>) -> String {
     gramps_id
         .as_ref()
@@ -323,21 +321,32 @@ fn fallback_source(data: &typed_graph::SourceData) -> String {
 fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
     match graph.get_node(handle) {
         Some(Node::Person(data)) => {
-            let name = data
-                .primary_name
-                .first_name
-                .as_deref()
-                .unwrap_or("Unknown");
-            let surname = data
-                .primary_name
-                .surname_list
-                .first()
-                .and_then(|s| s.surname.as_deref())
-                .unwrap_or("");
-            let desc = if surname.is_empty() {
-                name.to_string()
-            } else {
-                format!("{} {}", name, surname)
+            let full_name = person_full_name(data);
+            // Resolve birth year via birth_ref_index into event_ref_list
+            let resolve_year = |idx_opt: &Option<i32>| -> Option<String> {
+                idx_opt.and_then(|idx| {
+                    data.event_ref_list.get(idx as usize)
+                        .and_then(|eref| graph.get_node(&eref.ref_field))
+                        .and_then(|n| {
+                            if let Node::Event(ed) = n {
+                                ed.date.as_ref()
+                            } else {
+                                None
+                            }
+                        })
+                        .and_then(|d| {
+                            d.text.clone()
+                                .or_else(|| Some(format!("{:04}", d.year)))
+                        })
+                })
+            };
+            let birth = resolve_year(&data.birth_ref_index);
+            let death = resolve_year(&data.death_ref_index);
+            let desc = match (birth, death) {
+                (Some(b), Some(d)) => format!("{} ({}-{})", full_name, b, d),
+                (Some(b), None) => format!("{} (b. {})", full_name, b),
+                (None, Some(d)) => format!("{} (d. {})", full_name, d),
+                (None, None) => full_name,
             };
             (desc, data.gramps_id.clone())
         }
@@ -691,6 +700,175 @@ mod tests {
             ..typed_graph::PersonData::default()
         };
         assert_eq!(person_full_name(&data), "Cher");
+    }
+
+    // -----------------------------------------------------------------------
+    // Enhanced Person description tests
+    // -----------------------------------------------------------------------
+
+    /// Helper: create a graph with a person who has a birth and/or death event.
+    fn person_with_events_graph(
+        gramps_id: Option<&str>,
+        first_name: Option<&str>,
+        surname: Option<&str>,
+        birth_year: Option<i32>,
+        death_year: Option<i32>,
+    ) -> (Graph, Handle) {
+        let mut graph = Graph::new();
+        let handle = "p0001".to_string();
+
+        let mut event_ref_list = Vec::new();
+        let mut birth_ref_index = None;
+        let mut death_ref_index = None;
+
+        if let Some(year) = birth_year {
+            let event_h = format!("e_birth_{}", handle);
+            graph
+                .add_node(
+                    event_h.clone(),
+                    Node::Event(typed_graph::EventData {
+                        handle: event_h.clone(),
+                        gramps_id: None,
+                        event_type: Some(typed_graph::EventType::Birth),
+                        date: Some(typed_graph::DateValue {
+                            year,
+                            text: Some(format!("{:04}", year)),
+                            ..typed_graph::DateValue::default()
+                        }),
+                        ..typed_graph::EventData::default()
+                    }),
+                )
+                .unwrap();
+            birth_ref_index = Some(event_ref_list.len() as i32);
+            event_ref_list.push(typed_graph::EventRef {
+                ref_field: event_h,
+                ..typed_graph::EventRef::default()
+            });
+        }
+
+        if let Some(year) = death_year {
+            let event_h = format!("e_death_{}", handle);
+            graph
+                .add_node(
+                    event_h.clone(),
+                    Node::Event(typed_graph::EventData {
+                        handle: event_h.clone(),
+                        gramps_id: None,
+                        event_type: Some(typed_graph::EventType::Death),
+                        date: Some(typed_graph::DateValue {
+                            year,
+                            text: Some(format!("{:04}", year)),
+                            ..typed_graph::DateValue::default()
+                        }),
+                        ..typed_graph::EventData::default()
+                    }),
+                )
+                .unwrap();
+            death_ref_index = Some(event_ref_list.len() as i32);
+            event_ref_list.push(typed_graph::EventRef {
+                ref_field: event_h,
+                ..typed_graph::EventRef::default()
+            });
+        }
+
+        let mut primary_name = typed_graph::Name {
+            ..typed_graph::Name::default()
+        };
+        if let Some(fn_val) = first_name {
+            primary_name.first_name = Some(fn_val.to_string());
+        }
+        if let Some(sn_val) = surname {
+            primary_name.surname_list = vec![typed_graph::Surname {
+                surname: Some(sn_val.to_string()),
+                ..typed_graph::Surname::default()
+            }];
+        }
+
+        graph
+            .add_node(
+                handle.clone(),
+                Node::Person(typed_graph::PersonData {
+                    handle: handle.clone(),
+                    gramps_id: gramps_id.map(|s| s.to_string()),
+                    primary_name,
+                    birth_ref_index,
+                    death_ref_index,
+                    event_ref_list,
+                    ..typed_graph::PersonData::default()
+                }),
+            )
+            .unwrap();
+        (graph, handle)
+    }
+
+    #[test]
+    fn describe_person_birth_and_death() {
+        let (graph, handle) = person_with_events_graph(
+            Some("I0001"),
+            Some("John"),
+            Some("Smith"),
+            Some(1800),
+            Some(1875),
+        );
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(desc, "John Smith (1800-1875)");
+        assert_eq!(gramps_id, Some("I0001".to_string()));
+    }
+
+    #[test]
+    fn describe_person_only_birth() {
+        let (graph, handle) = person_with_events_graph(
+            Some("I0002"),
+            Some("Jane"),
+            Some("Doe"),
+            Some(1810),
+            None,
+        );
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(desc, "Jane Doe (b. 1810)");
+        assert_eq!(gramps_id, Some("I0002".to_string()));
+    }
+
+    #[test]
+    fn describe_person_only_death() {
+        let (graph, handle) = person_with_events_graph(
+            Some("I0003"),
+            Some("Bob"),
+            Some("White"),
+            None,
+            Some(1900),
+        );
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(desc, "Bob White (d. 1900)");
+        assert_eq!(gramps_id, Some("I0003".to_string()));
+    }
+
+    #[test]
+    fn describe_person_no_dates() {
+        let (graph, handle) = person_with_events_graph(
+            Some("I0004"),
+            Some("Eve"),
+            Some("Brown"),
+            None,
+            None,
+        );
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(desc, "Eve Brown");
+        assert_eq!(gramps_id, Some("I0004".to_string()));
+    }
+
+    #[test]
+    fn describe_person_no_gramps_id() {
+        let (graph, handle) = person_with_events_graph(
+            None,
+            Some("No"),
+            Some("Id"),
+            Some(1950),
+            None,
+        );
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(desc, "No Id (b. 1950)");
+        assert_eq!(gramps_id, None);
     }
 
     // -----------------------------------------------------------------------
