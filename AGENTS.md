@@ -219,6 +219,8 @@ cargo test --workspace
 cargo test -p typed-graph
 cargo test -p output
 cargo test -p cli
+cargo test -p integrate
+cargo test -p delete
 
 # E2E tests (need the binary built)
 cargo test -p cli --test e2e
@@ -239,6 +241,8 @@ cargo clippy --all-targets --all-features -- -D warnings
 | `uuid` (v4) | Auto-generated handles |
 | `log` / `env_logger` | Logging in CLI crate |
 | `ureq` | HTTP requests for `schema download` |
+| `csv` | integrate, cli | CSV parsing and serialization for diff-viz merge |
+| `flate2` | cli, gramps-reader, visualize | Gzip compression/decompression |
 
 ## Code Conventions
 

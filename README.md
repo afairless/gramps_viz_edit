@@ -193,9 +193,15 @@ See [Visualization](#visualization) for details on the force-directed graph.
 
 | Command | Description |
 |---|---|
+| `generate --count <N>` | Full 5-stage pipeline → `.gramps` output |
+| `validate <file>` | Minimal XML structure check |
+| `stats <file>` | Streaming count and summary (text or JSON) |
+| `visualize <file>` | Open Tauri desktop window with force-directed graph |
 | `schema list` | List local and available Gramps schemas |
-| `schema download` | Download a schema from Gramps GitHub |
-| `diff <file_a> <file_b>` | Compare two Gramps XML files and produce a structured diff report |
+| `schema download <VERSION>` | Download a schema from Gramps GitHub |
+| `diff <file_a> <file_b>` | Compare two Gramps XML files |
+| `integrate diff-viz --diff <CSV> --selections <JSON>` | Merge diff CSV with visualizer selections |
+| `delete <file> --selections <JSON>` | Delete selected people and orphaned dependencies |
 | `integrate diff-viz --diff <CSV> --selections <JSON>` | Merge diff CSV with visualizer selections (CSV/JSON output) |
 | `delete <FILE> --selections <JSON>` | Delete selected people and their orphaned dependencies from a .gramps file |
 
@@ -325,6 +331,38 @@ Generate → Validate (Gate 1) → Adversarial Transform → Validate (Gate 2) �
 | `integrate` | `crates/integrate/` | Merge `gramps-gen diff` CSV output with visualizer selection JSON (full outer join by handle) |
 | `diff` | `crates/diff/` | Gramps XML diff analyzer: compare two `.gramps` files, produce structured diff report |
 | `delete` | `crates/delete/` | Deletion cascade engine: remove selected people and compute orphaned dependencies for removal |
+
+## Tools
+
+### Diff (`gramps-gen diff`)
+
+Compare two Gramps XML files. Matches people, families, events, and other
+entities across files, identifies additions/deletions/modifications, and
+produces a structured report in text, JSON, or CSV format. See
+[docs/diff-tool.md](docs/diff-tool.md) for the full guide.
+
+### Visualizer (`gramps-gen visualize`)
+
+Interactive desktop app (Tauri v2 + D3.js) for exploring family trees as a
+force-directed graph. Zoom, pan, hover tooltips, multi-select, family group
+filtering, and force-layout tuning sliders. See
+[docs/visualizer-tool.md](docs/visualizer-tool.md) for the full guide.
+
+### Integrate (`gramps-gen integrate`)
+
+Merge a diff CSV report with visualizer selection JSON. Performs a full outer
+join by person handle, producing combined rows with both diff field-change
+data and visualizer metadata. Useful for cross-referencing who changed vs.
+who was selected. Output in CSV or JSON. See
+[docs/integrate-tool.md](docs/integrate-tool.md) for the full guide.
+
+### Delete (`gramps-gen delete`)
+
+Safely remove selected people and all orphaned dependencies from a Gramps
+file. Uses a fixed-point cascade engine to determine which families, events,
+places, sources, citations, repositories, media, notes, and tags become
+unreachable. Supports interactive review, dry-run mode, and auditable JSON
+manifests. See [docs/delete-tool.md](docs/delete-tool.md) for the full guide.
 
 ## Documentation
 

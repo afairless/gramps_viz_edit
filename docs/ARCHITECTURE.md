@@ -822,6 +822,7 @@ type-by-type (People, Families, Events, etc.) with 6 actions: `y` (delete), `n`
 
 Deletion manifests are version-1 JSON files with: `version`, `source_file`,
 `selections_file`, `created_at`, `seed_people`, and `plan` (per-type `to_delete`
+
 - `kept` arrays). Manifests support audit trail workflows and can be saved/loaded
 via `--save-manifest` / `--load-manifest`.
 
@@ -933,6 +934,8 @@ cargo test -p cli --test e2e    # E2E tests
 | `log` / `env_logger` | cli | Logging |
 | `ureq` | cli | HTTP requests for `schema download` |
 | `strsim` | diff | String similarity scoring for entity matching |
+| `csv` | integrate, cli | CSV parsing and serialization |
+| `flate2` | cli, gramps-reader, visualize | Gzip compression/decompression |
 
 ---
 
