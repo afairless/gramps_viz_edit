@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::{BufRead, Write};
 
-use typed_graph::{Graph, Handle, Node};
+use typed_graph::{Edge, Graph, Handle, Node};
 
 use crate::types::{DeletePlan, NodeKindLabel};
 
@@ -420,7 +420,27 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
             } else {
                 "no date".to_string()
             };
-            let desc = format!("{} event ({})", event_type, date_str);
+            // Find associated people (up to 3) by checking PersonEventRef edges
+            let people: Vec<String> = graph.edges_incident_to(handle).iter()
+                .filter_map(|e| match e {
+                    Edge::PersonEventRef { source, target, .. } if target == handle => Some(source.clone()),
+                    _ => None,
+                })
+                .take(3)
+                .filter_map(|h| graph.get_node(&h))
+                .filter_map(|n| {
+                    if let Node::Person(p) = n {
+                        Some(person_full_name(p))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            let desc = match people.len() {
+                0 => format!("{} event ({})", event_type, date_str),
+                1 => format!("{} event ({}) — {}", event_type, date_str, people[0]),
+                _ => format!("{} event ({}) — {}", event_type, date_str, people.join(", ")),
+            };
             (desc, data.gramps_id.clone())
         }
         Some(Node::Place(data)) => {
@@ -1090,6 +1110,133 @@ mod tests {
         );
         let (desc, gramps_id) = describe_node(&graph, &handle);
         assert!(desc.contains("John Smith & Jane Doe"));
+        assert_eq!(gramps_id, None);
+    }
+
+    // -----------------------------------------------------------------------
+    // Enhanced Event description tests
+    // -----------------------------------------------------------------------
+
+    /// Helper: create a graph with an event and optionally associated people.
+    fn event_with_people_graph(
+        gramps_id: Option<&str>,
+        event_type: Option<typed_graph::EventType>,
+        year: Option<i32>,
+        people: Vec<(&str, &str)>,
+    ) -> (Graph, Handle) {
+        let mut graph = Graph::new();
+        let event_h = "e0001".to_string();
+
+        graph
+            .add_node(
+                event_h.clone(),
+                Node::Event(typed_graph::EventData {
+                    handle: event_h.clone(),
+                    gramps_id: gramps_id.map(|s| s.to_string()),
+                    event_type,
+                    date: year.map(|y| typed_graph::DateValue {
+                        year: y,
+                        text: Some(format!("{:04}", y)),
+                        ..typed_graph::DateValue::default()
+                    }),
+                    ..typed_graph::EventData::default()
+                }),
+            )
+            .unwrap();
+
+        for (i, (first, surname)) in people.iter().enumerate() {
+            let person_h = format!("p{}", i);
+            graph
+                .add_node(
+                    person_h.clone(),
+                    Node::Person(typed_graph::PersonData {
+                        handle: person_h.clone(),
+                        gramps_id: None,
+                        primary_name: typed_graph::Name {
+                            first_name: Some(first.to_string()),
+                            surname_list: vec![typed_graph::Surname {
+                                surname: Some(surname.to_string()),
+                                ..typed_graph::Surname::default()
+                            }],
+                            ..typed_graph::Name::default()
+                        },
+                        ..typed_graph::PersonData::default()
+                    }),
+                )
+                .unwrap();
+            graph
+                .add_edge(Edge::PersonEventRef {
+                    source: person_h,
+                    target: event_h.clone(),
+                    metadata: Box::new(typed_graph::EventRef::default()),
+                })
+                .unwrap();
+        }
+
+        (graph, event_h)
+    }
+
+    #[test]
+    fn describe_event_with_one_person() {
+        let (graph, handle) = event_with_people_graph(
+            Some("E0001"),
+            Some(typed_graph::EventType::Birth),
+            Some(1850),
+            vec![("John", "Smith")],
+        );
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(
+            desc,
+            "Birth event (1850) — John Smith"
+        );
+        assert_eq!(gramps_id, Some("E0001".to_string()));
+    }
+
+    #[test]
+    fn describe_event_with_multiple_people() {
+        let (graph, handle) = event_with_people_graph(
+            Some("E0002"),
+            Some(typed_graph::EventType::Marriage),
+            Some(1900),
+            vec![("John", "Smith"), ("Jane", "Doe")],
+        );
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(
+            desc,
+            "Marriage event (1900) — John Smith, Jane Doe"
+        );
+        assert_eq!(gramps_id, Some("E0002".to_string()));
+    }
+
+    #[test]
+    fn describe_event_with_no_people() {
+        let (graph, handle) = event_with_people_graph(
+            Some("E0003"),
+            Some(typed_graph::EventType::Census),
+            None,
+            vec![],
+        );
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(
+            desc,
+            "Census event (no date)"
+        );
+        assert_eq!(gramps_id, Some("E0003".to_string()));
+    }
+
+    #[test]
+    fn describe_event_no_gramps_id() {
+        let (graph, handle) = event_with_people_graph(
+            None,
+            Some(typed_graph::EventType::Birth),
+            Some(2000),
+            vec![("Alice", "Brown")],
+        );
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(
+            desc,
+            "Birth event (2000) — Alice Brown"
+        );
         assert_eq!(gramps_id, None);
     }
 
