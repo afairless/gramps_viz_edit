@@ -160,38 +160,35 @@ fn type_specific_orphan_rule(handle: &Handle, graph: &Graph, to_delete: &HashSet
             !has_live_event_ref
         }
         Node::Place(_) => {
-            // A place is orphaned if it has NO remaining edges to non-deleted
-            // nodes. Check EventPlace, PlacePlaceRef, PlaceCitation,
-            // PlaceMediaRef, PlaceNote, and PlaceTag edges.
+            // A place is orphaned if it has NO remaining INCOMING edges from
+            // non-deleted nodes. Only incoming edges (EventPlace target,
+            // PlacePlaceRef target) keep a place alive. Outgoing edges like
+            // PlaceCitation, PlaceMediaRef, PlaceNote, PlaceTag are the place's
+            // own references and do not count as keep-alive connections.
             let incident = graph.edges_incident_to(handle);
-            let has_live_connection = incident.iter().any(|e| match e {
+            let has_live_incoming = incident.iter().any(|e| match e {
+                // EventPlace: event -> place (incoming). Check if event is alive.
                 Edge::EventPlace { source, target } => {
-                    let other = if target == handle { source } else { target };
-                    !to_delete.contains(other)
+                    if target == handle {
+                        !to_delete.contains(source)
+                    } else {
+                        false
+                    }
                 }
+                // PlacePlaceRef: source -> target. Only incoming (this place
+                // is the target) keeps us alive.
                 Edge::PlacePlaceRef { source, target, .. } => {
-                    let other = if target == handle { source } else { target };
-                    !to_delete.contains(other)
+                    if target == handle {
+                        !to_delete.contains(source)
+                    } else {
+                        false
+                    }
                 }
-                Edge::PlaceCitation { source, target } => {
-                    let other = if target == handle { source } else { target };
-                    !to_delete.contains(other)
-                }
-                Edge::PlaceMediaRef { source, target, .. } => {
-                    let other = if target == handle { source } else { target };
-                    !to_delete.contains(other)
-                }
-                Edge::PlaceNote { source, target } => {
-                    let other = if target == handle { source } else { target };
-                    !to_delete.contains(other)
-                }
-                Edge::PlaceTag { source, target } => {
-                    let other = if target == handle { source } else { target };
-                    !to_delete.contains(other)
-                }
+                // Outgoing edges (PlaceCitation, PlaceMediaRef, PlaceNote,
+                // PlaceTag) do NOT keep the place alive.
                 _ => false,
             });
-            !has_live_connection
+            !has_live_incoming
         }
         Node::Source(_) => {
             // A source is orphaned if it has NO remaining CitationSource edges
@@ -1225,9 +1222,11 @@ mod tests {
     }
 
     #[test]
-    fn place_kept_alive_by_place_citation() {
-        // A place referenced by a citation that is NOT being deleted
-        // should be kept alive via PlaceCitation edge.
+    fn place_outgoing_citation_cascades() {
+        // PlaceCitation is an outgoing edge from Place → Citation.
+        // It does NOT keep the place alive. When the place's only incoming
+        // edge (EventPlace) is severed, the place is orphaned and cascades,
+        // which then orphanes the citation too.
         let mut graph = Graph::new();
         let p1 = "p0001".to_string();
         let e1 = "e0001".to_string();
@@ -1263,7 +1262,7 @@ mod tests {
             source: e1.clone(),
             target: pl1.clone(),
         }).unwrap();
-        // Place also connected to a live citation
+        // PlaceCitation is outgoing — does not keep place alive
         graph.add_edge(Edge::PlaceCitation {
             source: pl1.clone(),
             target: c1.clone(),
@@ -1272,17 +1271,18 @@ mod tests {
         let mut seeds = HashSet::new();
         seeds.insert(p1.clone());
         let plan = cascade(&graph, &seeds);
-        // Person and event are cascaded, but place is kept alive by citation
+        // Person, event, place, and citation all cascade
         assert!(plan.to_delete.contains(&p1));
         assert!(plan.to_delete.contains(&e1));
-        assert!(!plan.to_delete.contains(&pl1),
-            "Place should be kept alive by PlaceCitation to live citation");
+        assert!(plan.to_delete.contains(&pl1));
+        assert!(plan.to_delete.contains(&c1));
+        assert_eq!(plan.to_delete.len(), 4);
     }
 
     #[test]
-    fn place_kept_alive_by_place_media_ref() {
-        // A place kept alive by a PlaceMediaRef edge to non-deleted media
-        // should not cascade even when its EventPlace connection is deleted.
+    fn place_outgoing_media_ref_cascades() {
+        // PlaceMediaRef is an outgoing edge from Place → Media.
+        // It does NOT keep the place alive.
         let mut graph = Graph::new();
         let p1 = "p0001".to_string();
         let e1 = "e0001".to_string();
@@ -1318,7 +1318,7 @@ mod tests {
             source: e1.clone(),
             target: pl1.clone(),
         }).unwrap();
-        // Place also connected to live media
+        // PlaceMediaRef is outgoing — does not keep place alive
         graph.add_edge(Edge::PlaceMediaRef {
             source: pl1.clone(),
             target: m1.clone(),
@@ -1331,10 +1331,12 @@ mod tests {
         let mut seeds = HashSet::new();
         seeds.insert(p1.clone());
         let plan = cascade(&graph, &seeds);
+        // Person, event, place, and media all cascade
         assert!(plan.to_delete.contains(&p1));
         assert!(plan.to_delete.contains(&e1));
-        assert!(!plan.to_delete.contains(&pl1),
-            "Place should be kept alive by PlaceMediaRef to live media");
+        assert!(plan.to_delete.contains(&pl1));
+        assert!(plan.to_delete.contains(&m1));
+        assert_eq!(plan.to_delete.len(), 4);
     }
 
     // -----------------------------------------------------------------------
@@ -1682,6 +1684,537 @@ mod tests {
         assert!(plan.to_delete.contains(&e1));
         assert!(plan.to_delete.contains(&pl1));
         assert_eq!(plan.to_delete.len(), 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // Category B: Directly associated, NOT isolated → KEPT
+    // -----------------------------------------------------------------------
+
+    // B1: one parent deleted, other keeps family alive
+    #[test]
+    fn b1_family_one_parent_remains() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let p2 = make_person(&mut graph, "p2");
+        let f1 = make_family_with_parents(&mut graph, "f1", &p1, &p2);
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(!plan.to_delete.contains(&f1));
+        assert!(!plan.to_delete.contains(&p2));
+        assert_eq!(plan.to_delete.len(), 1);
+    }
+
+    // B2: child keeps family alive when parent is deleted
+    #[test]
+    fn b2_family_child_keeps_family_alive() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let p3 = make_person(&mut graph, "p3");
+        let f1 = "f1".to_string();
+        graph
+            .add_node(
+                f1.clone(),
+                Node::Family(typed_graph::FamilyData {
+                    handle: f1.clone(),
+                    ..typed_graph::FamilyData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::FamilyFather {
+                source: f1.clone(),
+                target: p1.clone(),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::FamilyChildRef {
+                source: f1.clone(),
+                target: p3.clone(),
+                metadata: Box::new(typed_graph::ChildRef {
+                    ref_field: p3.clone(),
+                    ..typed_graph::ChildRef::default()
+                }),
+            })
+            .unwrap();
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(!plan.to_delete.contains(&f1));
+        assert!(!plan.to_delete.contains(&p3));
+        assert_eq!(plan.to_delete.len(), 1);
+    }
+
+    // B3: event shared by two people, one remains
+    #[test]
+    fn b3_event_shared_two_people_one_deleted() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let p2 = make_person(&mut graph, "p2");
+        let e1 = make_event(&mut graph, "e1", &p1);
+        // Connect p2 to same event
+        graph
+            .add_edge(Edge::PersonEventRef {
+                source: p2.clone(),
+                target: e1.clone(),
+                metadata: Box::new(typed_graph::EventRef {
+                    ref_field: e1.clone(),
+                    ..typed_graph::EventRef::default()
+                }),
+            })
+            .unwrap();
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(!plan.to_delete.contains(&e1));
+        assert!(!plan.to_delete.contains(&p2));
+        assert_eq!(plan.to_delete.len(), 1);
+    }
+
+    // B4: marriage event kept alive by surviving parent
+    #[test]
+    fn b4_event_marriage_one_parent_remains() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let p2 = make_person(&mut graph, "p2");
+        let f1 = make_family_with_parents(&mut graph, "f1", &p1, &p2);
+        let e1 = "e1".to_string();
+        graph
+            .add_node(
+                e1.clone(),
+                Node::Event(typed_graph::EventData {
+                    handle: e1.clone(),
+                    ..typed_graph::EventData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::FamilyEventRef {
+                source: f1.clone(),
+                target: e1.clone(),
+                metadata: Box::new(typed_graph::EventRef {
+                    ref_field: e1.clone(),
+                    ..typed_graph::EventRef::default()
+                }),
+            })
+            .unwrap();
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(!plan.to_delete.contains(&f1));
+        assert!(!plan.to_delete.contains(&e1));
+        assert!(!plan.to_delete.contains(&p2));
+        assert_eq!(plan.to_delete.len(), 1);
+    }
+
+    // B5: citation shared by two people, one remains
+    #[test]
+    fn b5_citation_shared_person_keeps_alive() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let p2 = make_person(&mut graph, "p2");
+        let c1 = citation_from_person(&mut graph, "c1", &p1);
+        // Connect p2 to same citation
+        graph
+            .add_edge(Edge::PersonCitation {
+                source: p2.clone(),
+                target: c1.clone(),
+            })
+            .unwrap();
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(!plan.to_delete.contains(&c1));
+        assert!(!plan.to_delete.contains(&p2));
+        assert_eq!(plan.to_delete.len(), 1);
+    }
+
+    // B6: source shared across two citations, one keeps it alive
+    #[test]
+    fn b6_source_shared_citation_keeps_alive() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let p2 = make_person(&mut graph, "p2");
+        let s1 = "s1".to_string();
+        graph
+            .add_node(
+                s1.clone(),
+                Node::Source(typed_graph::SourceData {
+                    handle: s1.clone(),
+                    ..typed_graph::SourceData::default()
+                }),
+            )
+            .unwrap();
+        // Both citations reference the same source
+        let c1 = citation_from_person(&mut graph, "c1", &p1);
+        // Manually set up c1→s1 by adding CitationSource edge
+        graph
+            .add_edge(Edge::CitationSource {
+                source: c1.clone(),
+                target: s1.clone(),
+            })
+            .unwrap();
+        let c2 = citation_from_person(&mut graph, "c2", &p2);
+        graph
+            .add_edge(Edge::CitationSource {
+                source: c2.clone(),
+                target: s1.clone(),
+            })
+            .unwrap();
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&c1));
+        assert!(!plan.to_delete.contains(&s1));
+        assert!(!plan.to_delete.contains(&p2));
+        assert!(!plan.to_delete.contains(&c2));
+        assert_eq!(plan.to_delete.len(), 2);
+    }
+
+    // B7: repository shared across two sources, one keeps it alive
+    #[test]
+    fn b7_repository_shared_source_keeps_alive() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let p2 = make_person(&mut graph, "p2");
+        let r1 = "r1".to_string();
+        graph
+            .add_node(
+                r1.clone(),
+                Node::Repository(typed_graph::RepositoryData {
+                    handle: r1.clone(),
+                    ..typed_graph::RepositoryData::default()
+                }),
+            )
+            .unwrap();
+        // Build chain: P1→C1→S1→R1 and P2→C2→S2→R1
+        let s1 = "s1".to_string();
+        graph
+            .add_node(
+                s1.clone(),
+                Node::Source(typed_graph::SourceData {
+                    handle: s1.clone(),
+                    ..typed_graph::SourceData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::SourceRepoRef {
+                source: s1.clone(),
+                target: r1.clone(),
+                metadata: Box::new(typed_graph::RepoRef {
+                    ref_field: r1.clone(),
+                    ..typed_graph::RepoRef::default()
+                }),
+            })
+            .unwrap();
+
+        let s2 = "s2".to_string();
+        graph
+            .add_node(
+                s2.clone(),
+                Node::Source(typed_graph::SourceData {
+                    handle: s2.clone(),
+                    ..typed_graph::SourceData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::SourceRepoRef {
+                source: s2.clone(),
+                target: r1.clone(),
+                metadata: Box::new(typed_graph::RepoRef {
+                    ref_field: r1.clone(),
+                    ..typed_graph::RepoRef::default()
+                }),
+            })
+            .unwrap();
+
+        let c1 = citation_from_person(&mut graph, "c1", &p1);
+        graph
+            .add_edge(Edge::CitationSource {
+                source: c1.clone(),
+                target: s1.clone(),
+            })
+            .unwrap();
+        let c2 = citation_from_person(&mut graph, "c2", &p2);
+        graph
+            .add_edge(Edge::CitationSource {
+                source: c2.clone(),
+                target: s2.clone(),
+            })
+            .unwrap();
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&c1));
+        assert!(plan.to_delete.contains(&s1));
+        assert!(!plan.to_delete.contains(&r1));
+        assert!(!plan.to_delete.contains(&p2));
+        assert!(!plan.to_delete.contains(&c2));
+        assert!(!plan.to_delete.contains(&s2));
+        assert_eq!(plan.to_delete.len(), 3);
+    }
+
+    // B8: media shared across two people, one remains
+    #[test]
+    fn b8_media_shared_person_keeps_alive() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let p2 = make_person(&mut graph, "p2");
+        let m1 = media_from_person(&mut graph, "m1", &p1);
+        // Connect p2 to same media
+        graph
+            .add_edge(Edge::PersonMediaRef {
+                source: p2.clone(),
+                target: m1.clone(),
+                metadata: Box::new(typed_graph::MediaRef {
+                    ref_field: m1.clone(),
+                    ..typed_graph::MediaRef::default()
+                }),
+            })
+            .unwrap();
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(!plan.to_delete.contains(&m1));
+        assert!(!plan.to_delete.contains(&p2));
+        assert_eq!(plan.to_delete.len(), 1);
+    }
+
+    // B9: note shared across two people, one remains
+    #[test]
+    fn b9_note_shared_person_keeps_alive() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let p2 = make_person(&mut graph, "p2");
+        let n1 = note_from_person(&mut graph, "n1", &p1);
+        // Connect p2 to same note
+        graph
+            .add_edge(Edge::PersonNote {
+                source: p2.clone(),
+                target: n1.clone(),
+            })
+            .unwrap();
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(!plan.to_delete.contains(&n1));
+        assert!(!plan.to_delete.contains(&p2));
+        assert_eq!(plan.to_delete.len(), 1);
+    }
+
+    // B10: tag shared across two people, one remains
+    #[test]
+    fn b10_tag_shared_person_keeps_alive() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let p2 = make_person(&mut graph, "p2");
+        let t1 = tag_from_person(&mut graph, "t1", &p1);
+        // Connect p2 to same tag
+        graph
+            .add_edge(Edge::PersonTag {
+                source: p2.clone(),
+                target: t1.clone(),
+            })
+            .unwrap();
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(!plan.to_delete.contains(&t1));
+        assert!(!plan.to_delete.contains(&p2));
+        assert_eq!(plan.to_delete.len(), 1);
+    }
+
+    // B11: place shared across two events, one remains
+    #[test]
+    fn b11_place_shared_event_keeps_alive() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let p2 = make_person(&mut graph, "p2");
+        let e1 = make_event(&mut graph, "e1", &p1);
+        let e2 = make_event(&mut graph, "e2", &p2);
+        let pl1 = "pl1".to_string();
+        graph
+            .add_node(
+                pl1.clone(),
+                Node::Place(typed_graph::PlaceData {
+                    handle: pl1.clone(),
+                    ..typed_graph::PlaceData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::EventPlace {
+                source: e1.clone(),
+                target: pl1.clone(),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::EventPlace {
+                source: e2.clone(),
+                target: pl1.clone(),
+            })
+            .unwrap();
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&e1));
+        assert!(!plan.to_delete.contains(&pl1));
+        assert!(!plan.to_delete.contains(&p2));
+        assert!(!plan.to_delete.contains(&e2));
+        assert_eq!(plan.to_delete.len(), 2);
+    }
+
+    // B12: place kept alive by PlacePlaceRef target
+    #[test]
+    fn b12_place_place_ref_target_keeps_alive() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let p2 = make_person(&mut graph, "p2");
+        let e1 = make_event(&mut graph, "e1", &p1);
+        let e2 = make_event(&mut graph, "e2", &p2);
+        let pl1 = "pl1".to_string();
+        let pl2 = "pl2".to_string();
+        graph
+            .add_node(
+                pl1.clone(),
+                Node::Place(typed_graph::PlaceData {
+                    handle: pl1.clone(),
+                    ..typed_graph::PlaceData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                pl2.clone(),
+                Node::Place(typed_graph::PlaceData {
+                    handle: pl2.clone(),
+                    ..typed_graph::PlaceData::default()
+                }),
+            )
+            .unwrap();
+        // P1→E1→Pl1
+        graph
+            .add_edge(Edge::EventPlace {
+                source: e1.clone(),
+                target: pl1.clone(),
+            })
+            .unwrap();
+        // Pl2→Pl1 (Pl2 is a child of Pl1 via PlacePlaceRef)
+        make_place_with_place_ref(&mut graph, &pl2, &pl1);
+        // P2→E2→Pl2
+        graph
+            .add_edge(Edge::EventPlace {
+                source: e2.clone(),
+                target: pl2.clone(),
+            })
+            .unwrap();
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&e1));
+        assert!(!plan.to_delete.contains(&pl1));
+        assert!(!plan.to_delete.contains(&pl2));
+        assert!(!plan.to_delete.contains(&p2));
+        assert!(!plan.to_delete.contains(&e2));
+        assert_eq!(plan.to_delete.len(), 2);
+    }
+
+    // -----------------------------------------------------------------------
+    // Category C: Indirectly associated, isolated → DELETED (transitive cascade)
+    // -----------------------------------------------------------------------
+
+    // C1: citation cascaded from event
+    #[test]
+    fn c1_citation_event_cascade() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let e1 = make_event(&mut graph, "e1", &p1);
+        let c1 = citation_from_event(&mut graph, "c1", &e1);
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&e1));
+        assert!(plan.to_delete.contains(&c1));
+        assert_eq!(plan.to_delete.len(), 3);
+    }
+
+    // C2: citation cascaded from place via PlaceCitation
+    #[test]
+    fn c2_citation_place_cascade() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let e1 = make_event(&mut graph, "e1", &p1);
+        let pl1 = make_place(&mut graph, "pl1", &e1);
+        let c1 = citation_from_place(&mut graph, "c1", &pl1);
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&e1));
+        assert!(plan.to_delete.contains(&pl1));
+        assert!(plan.to_delete.contains(&c1));
+        assert_eq!(plan.to_delete.len(), 4);
+    }
+
+    // -----------------------------------------------------------------------
+    // Category D: Indirectly associated, NOT isolated → KEPT
+    // -----------------------------------------------------------------------
+
+    // D1: citation shared by two events, one remains
+    #[test]
+    fn d1_event_shared_indirect_keeps_citation_alive() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let p2 = make_person(&mut graph, "p2");
+        let e1 = make_event(&mut graph, "e1", &p1);
+        let e2 = make_event(&mut graph, "e2", &p2);
+        let c1 = citation_from_event(&mut graph, "c1", &e1);
+        // Connect e2 to same citation
+        graph
+            .add_edge(Edge::EventCitation {
+                source: e2.clone(),
+                target: c1.clone(),
+            })
+            .unwrap();
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&e1));
+        assert!(!plan.to_delete.contains(&c1));
+        assert!(!plan.to_delete.contains(&p2));
+        assert!(!plan.to_delete.contains(&e2));
+        assert_eq!(plan.to_delete.len(), 2);
     }
 
     // -----------------------------------------------------------------------
