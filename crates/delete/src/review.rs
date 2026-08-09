@@ -441,22 +441,47 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
             } else {
                 "no date".to_string()
             };
-            // Find associated people (up to 3) by checking PersonEventRef edges
-            let people: Vec<String> = graph.edges_incident_to(handle).iter()
-                .filter_map(|e| match e {
-                    Edge::PersonEventRef { source, target, .. } if target == handle => Some(source.clone()),
+            // Find associated people (up to 3) by checking
+            // PersonEventRef edges and FamilyEventRef edges.
+            let incident = graph.edges_incident_to(handle);
+            let mut people: Vec<String> = Vec::new();
+
+            // Collect people from PersonEventRef edges (Person → Event)
+            for person_h in incident.iter().filter_map(|e| match e {
+                Edge::PersonEventRef { source, target, .. } if target == handle => Some(source.clone()),
+                _ => None,
+            }) {
+                if people.len() >= 3 {
+                    break;
+                }
+                if let Some(Node::Person(p)) = graph.get_node(&person_h) {
+                    people.push(person_full_name(p));
+                }
+            }
+
+            // Also check FamilyEventRef edges (Family → Event)
+            if people.len() < 3 {
+                for family_edge in incident.iter().filter_map(|e| match e {
+                    Edge::FamilyEventRef { source, .. } => Some(source.clone()),
                     _ => None,
-                })
-                .take(3)
-                .filter_map(|h| graph.get_node(&h))
-                .filter_map(|n| {
-                    if let Node::Person(p) = n {
-                        Some(person_full_name(p))
-                    } else {
-                        None
+                }) {
+                    // Resolve father/mother names for this family
+                    let family_incident = graph.edges_incident_to(&family_edge);
+                    for parent_h in family_incident.iter().filter_map(|e| match e {
+                        Edge::FamilyFather { target, .. } | Edge::FamilyMother { target, .. } => {
+                            Some(target.clone())
+                        }
+                        _ => None,
+                    }) {
+                        if people.len() >= 3 {
+                            break;
+                        }
+                        if let Some(Node::Person(p)) = graph.get_node(&parent_h) {
+                            people.push(person_full_name(p));
+                        }
                     }
-                })
-                .collect();
+                }
+            }
             let desc = match people.len() {
                 0 => format!("{} event ({})", event_type, date_str),
                 1 => format!("{} event ({}) — {}", event_type, date_str, people[0]),
@@ -1342,6 +1367,108 @@ mod tests {
             "Birth event (2000) — Alice Brown"
         );
         assert_eq!(gramps_id, None);
+    }
+
+    #[test]
+    fn describe_event_with_family_event_ref() {
+        let mut graph = Graph::new();
+
+        // Create family with father and mother
+        let family_h = "fam0001".to_string();
+        let father_h = "f1".to_string();
+        let mother_h = "m1".to_string();
+
+        graph
+            .add_node(
+                father_h.clone(),
+                Node::Person(typed_graph::PersonData {
+                    handle: father_h.clone(),
+                    primary_name: typed_graph::Name {
+                        first_name: Some("John".to_string()),
+                        surname_list: vec![typed_graph::Surname {
+                            surname: Some("Smith".to_string()),
+                            ..typed_graph::Surname::default()
+                        }],
+                        ..typed_graph::Name::default()
+                    },
+                    ..typed_graph::PersonData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                mother_h.clone(),
+                Node::Person(typed_graph::PersonData {
+                    handle: mother_h.clone(),
+                    primary_name: typed_graph::Name {
+                        first_name: Some("Jane".to_string()),
+                        surname_list: vec![typed_graph::Surname {
+                            surname: Some("Smith".to_string()),
+                            ..typed_graph::Surname::default()
+                        }],
+                        ..typed_graph::Name::default()
+                    },
+                    ..typed_graph::PersonData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                family_h.clone(),
+                Node::Family(typed_graph::FamilyData {
+                    handle: family_h.clone(),
+                    ..typed_graph::FamilyData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::FamilyFather {
+            source: family_h.clone(),
+                target: father_h.clone(),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::FamilyMother {
+                source: family_h.clone(),
+                target: mother_h.clone(),
+            })
+            .unwrap();
+
+        // Create event with FamilyEventRef
+        let event_h = "e0001".to_string();
+        graph
+            .add_node(
+                event_h.clone(),
+                Node::Event(typed_graph::EventData {
+                    handle: event_h.clone(),
+                    gramps_id: Some("E0001".to_string()),
+                    event_type: Some(typed_graph::EventType::Marriage),
+                    date: Some(typed_graph::DateValue {
+                        year: 1900,
+                        text: Some("1900".to_string()),
+                        ..typed_graph::DateValue::default()
+                    }),
+                    ..typed_graph::EventData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::FamilyEventRef {
+                source: family_h,
+                target: event_h.clone(),
+                metadata: Box::new(typed_graph::EventRef {
+                    ref_field: event_h.clone(),
+                    ..typed_graph::EventRef::default()
+                }),
+            })
+            .unwrap();
+
+        let (desc, gramps_id) = describe_node(&graph, &event_h);
+        assert_eq!(
+            desc,
+            "Marriage event (1900) — John Smith, Jane Smith"
+        );
+        assert_eq!(gramps_id, Some("E0001".to_string()));
     }
 
     // -----------------------------------------------------------------------
