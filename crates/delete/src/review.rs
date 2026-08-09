@@ -353,9 +353,16 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
             (desc, data.gramps_id.clone())
         }
         Some(Node::Family(data)) => {
-            // Get father name
-            let father_name = data.father_handle.as_ref()
-                .and_then(|h| graph.get_node(h))
+            // Use edge traversal for father, mother, and children
+            let incident = graph.edges_incident_to(handle);
+
+            let father_name = incident.iter()
+                .filter_map(|e| match e {
+                    Edge::FamilyFather { target, .. } => Some(target.clone()),
+                    _ => None,
+                })
+                .next()
+                .and_then(|h| graph.get_node(&h))
                 .and_then(|n| {
                     if let Node::Person(p) = n {
                         Some(person_full_name(p))
@@ -364,9 +371,14 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
                     }
                 })
                 .unwrap_or_default();
-            // Get mother name
-            let mother_name = data.mother_handle.as_ref()
-                .and_then(|h| graph.get_node(h))
+
+            let mother_name = incident.iter()
+                .filter_map(|e| match e {
+                    Edge::FamilyMother { target, .. } => Some(target.clone()),
+                    _ => None,
+                })
+                .next()
+                .and_then(|h| graph.get_node(&h))
                 .and_then(|n| {
                     if let Node::Person(p) = n {
                         Some(person_full_name(p))
@@ -375,9 +387,17 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
                     }
                 })
                 .unwrap_or_default();
-            // Up to 2 children
-            let child_names: Vec<String> = data.child_ref_list.iter().take(2)
-                .filter_map(|cr| graph.get_node(&cr.ref_field))
+
+            // Children via FamilyChildRef edges (from family TO child)
+            let child_handles: Vec<Handle> = incident.iter()
+                .filter_map(|e| match e {
+                    Edge::FamilyChildRef { target, .. } => Some(target.clone()),
+                    _ => None,
+                })
+                .collect();
+            let child_count = child_handles.len();
+            let child_names: Vec<String> = child_handles.iter().take(2)
+                .filter_map(|h| graph.get_node(h))
                 .filter_map(|n| {
                     if let Node::Person(p) = n {
                         Some(person_full_name(p))
@@ -386,7 +406,6 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
                     }
                 })
                 .collect();
-            let child_count = data.child_ref_list.len();
 
             let parents = match (father_name.is_empty(), mother_name.is_empty()) {
                 (true, true) => "no parents".to_string(),
@@ -1068,6 +1087,38 @@ mod tests {
                 }),
             )
             .unwrap();
+
+        // Add edges for edge-based display (Step 3 of delete-tool fix)
+        if father_name.is_some() {
+            graph
+                .add_edge(Edge::FamilyFather {
+                    source: family_h.clone(),
+                    target: father_handle.clone(),
+                })
+                .unwrap();
+        }
+        if mother_name.is_some() {
+            graph
+                .add_edge(Edge::FamilyMother {
+                    source: family_h.clone(),
+                    target: mother_handle.clone(),
+                })
+                .unwrap();
+        }
+        for (i, _) in child_names.iter().enumerate() {
+            let child_h = format!("c{}", i);
+            graph
+                .add_edge(Edge::FamilyChildRef {
+                    source: family_h.clone(),
+                    target: child_h,
+                    metadata: Box::new(typed_graph::ChildRef {
+                        ref_field: family_h.clone(),
+                        ..typed_graph::ChildRef::default()
+                    }),
+                })
+                .unwrap();
+        }
+
         (graph, family_h)
     }
 
