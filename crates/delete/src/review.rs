@@ -512,7 +512,21 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
             (desc, data.gramps_id.clone())
         }
         Some(Node::Citation(data)) => {
+            // Try data field first, then fall back to CitationSource edge
             let source_handle = get_source_handle(&data.source_handle);
+            let source_handle = if source_handle.is_empty() {
+                // Fall back to CitationSource edge
+                graph.edges_incident_to(handle).iter()
+                    .filter_map(|e| match e {
+                        Edge::CitationSource { source, target }
+                            if source == handle => Some(target.clone()),
+                        _ => None,
+                    })
+                    .next()
+                    .unwrap_or_default()
+            } else {
+                source_handle
+            };
             let source_desc = if !source_handle.is_empty() {
                 graph.get_node(&source_handle)
                     .map(|n| {
@@ -1500,7 +1514,7 @@ mod tests {
         }
 
         let source_handle_val = if source_title.is_some() {
-            source_h
+            source_h.clone()
         } else {
             String::new()
         };
@@ -1517,6 +1531,17 @@ mod tests {
                 }),
             )
             .unwrap();
+
+        // Add CitationSource edge for edge-based display
+        if source_title.is_some() {
+            graph
+                .add_edge(Edge::CitationSource {
+                    source: citation_h.clone(),
+                    target: source_h.clone(),
+                })
+                .unwrap();
+        }
+
         (graph, citation_h)
     }
 
@@ -1575,6 +1600,51 @@ mod tests {
         let (desc, gramps_id) = describe_node(&graph, &handle);
         assert!(desc.contains("Census Record"));
         assert_eq!(gramps_id, None);
+    }
+
+    #[test]
+    fn describe_citation_edge_fallback_no_data() {
+        // Citation with no source_handle in data but with CitationSource edge
+        let mut graph = Graph::new();
+        let citation_h = "c0001".to_string();
+        let source_h = "s0001".to_string();
+
+        graph
+            .add_node(
+                source_h.clone(),
+                Node::Source(typed_graph::SourceData {
+                    handle: source_h.clone(),
+                    gramps_id: Some("S0001".to_string()),
+                    title: "Marriage Record".to_string(),
+                    ..typed_graph::SourceData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_node(
+                citation_h.clone(),
+                Node::Citation(typed_graph::CitationData {
+                    handle: citation_h.clone(),
+                    gramps_id: Some("C0001".to_string()),
+                    source_handle: None,
+                    page: Some("p. 12".to_string()),
+                    ..typed_graph::CitationData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::CitationSource {
+            source: citation_h.clone(),
+                target: source_h.clone(),
+            })
+            .unwrap();
+
+        let (desc, gramps_id) = describe_node(&graph, &citation_h);
+        assert_eq!(
+            desc,
+            "Citation → source [S0001] \"Marriage Record\", p. p. 12"
+        );
+        assert_eq!(gramps_id, Some("C0001".to_string()));
     }
 
     // -----------------------------------------------------------------------
