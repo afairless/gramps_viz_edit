@@ -152,7 +152,11 @@ fn review_type_prompt(
     let samples: Vec<String> = handles
         .iter()
         .take(3)
-        .map(|h| format!("  • {} — {}", h, describe_node(graph, h)))
+        .map(|h| {
+            let (desc, gramps_id) = describe_node(graph, h);
+            let id_str = format_gramps_id(&gramps_id);
+            format!("  • {}{} — {}", h, id_str, desc)
+        })
         .collect();
 
     loop {
@@ -209,11 +213,12 @@ fn review_type_prompt(
             "l" => {
                 let _ = writeln!(output, "\nAll {} candidates:", type_name);
                 for h in handles {
+                    let (desc, gramps_id) = describe_node(graph, h);
+                    let id_str = format_gramps_id(&gramps_id);
                     let _ = writeln!(
                         output,
-                        "  • {} — {}",
-                        h,
-                        describe_node(graph, h)
+                        "  • {}{} — {}",
+                        h, id_str, desc
                     );
                 }
                 let _ = writeln!(output, "\n[Press Enter to continue]");
@@ -311,8 +316,11 @@ fn fallback_source(data: &typed_graph::SourceData) -> String {
     "Unnamed Source".to_string()
 }
 
-/// Generate a human-readable description of a node.
-fn describe_node(graph: &Graph, handle: &Handle) -> String {
+/// Generate a human-readable description of a node and its optional gramps_id.
+///
+/// Returns `(description, gramps_id)` where `gramps_id` is `None` when the
+/// node type has no gramps_id set.
+fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
     match graph.get_node(handle) {
         Some(Node::Person(data)) => {
             let name = data
@@ -326,14 +334,16 @@ fn describe_node(graph: &Graph, handle: &Handle) -> String {
                 .first()
                 .and_then(|s| s.surname.as_deref())
                 .unwrap_or("");
-            if surname.is_empty() {
+            let desc = if surname.is_empty() {
                 name.to_string()
             } else {
                 format!("{} {}", name, surname)
-            }
+            };
+            (desc, data.gramps_id.clone())
         }
         Some(Node::Family(_data)) => {
-            format!("Family ({})", handle)
+            let desc = format!("Family ({})", handle);
+            (desc, _data.gramps_id.clone())
         }
         Some(Node::Event(data)) => {
             let event_type = data
@@ -348,39 +358,48 @@ fn describe_node(graph: &Graph, handle: &Handle) -> String {
             } else {
                 "no date".to_string()
             };
-            format!("{} event ({})", event_type, date_str)
+            let desc = format!("{} event ({})", event_type, date_str);
+            (desc, data.gramps_id.clone())
         }
         Some(Node::Place(data)) => {
-            data.title
+            let desc = data
+                .title
                 .as_deref()
                 .unwrap_or("Unnamed Place")
-                .to_string()
+                .to_string();
+            (desc, data.gramps_id.clone())
         }
         Some(Node::Source(data)) => {
-            if data.title.is_empty() {
+            let desc = if data.title.is_empty() {
                 "Unnamed Source".to_string()
             } else {
                 data.title.clone()
-            }
+            };
+            (desc, data.gramps_id.clone())
         }
         Some(Node::Citation(data)) => {
             let page = data
                 .page
                 .as_deref()
                 .unwrap_or("no page");
-            format!("Citation (page: {})", page)
+            let desc = format!("Citation (page: {})", page);
+            (desc, data.gramps_id.clone())
         }
         Some(Node::Repository(data)) => {
-            data.name
+            let desc = data
+                .name
                 .as_deref()
                 .unwrap_or("Unnamed Repository")
-                .to_string()
+                .to_string();
+            (desc, data.gramps_id.clone())
         }
         Some(Node::Media(data)) => {
-            data.desc
+            let desc = data
+                .desc
                 .as_deref()
                 .unwrap_or("Unnamed Media")
-                .to_string()
+                .to_string();
+            (desc, data.gramps_id.clone())
         }
         Some(Node::Note(data)) => {
             let text_preview = if data.text.len() > 60 {
@@ -390,16 +409,18 @@ fn describe_node(graph: &Graph, handle: &Handle) -> String {
             } else {
                 data.text.clone()
             };
-            format!("Note: \"{}\"", text_preview)
+            let desc = format!("Note: \"{}\"", text_preview);
+            (desc, data.gramps_id.clone())
         }
         Some(Node::Tag(data)) => {
-            if data.name.is_empty() {
+            let desc = if data.name.is_empty() {
                 format!("Tag ({})", handle)
             } else {
                 data.name.clone()
-            }
+            };
+            (desc, data.gramps_id.clone())
         }
-        None => format!("Unknown node ({})", handle),
+        None => (format!("Unknown node ({})", handle), None),
     }
 }
 
@@ -514,15 +535,17 @@ mod tests {
     #[test]
     fn describe_person_node() {
         let (graph, handle) = person_graph();
-        let desc = describe_node(&graph, &handle);
+        let (desc, gramps_id) = describe_node(&graph, &handle);
         assert_eq!(desc, "John Smith");
+        assert_eq!(gramps_id, Some("I0001".to_string()));
     }
 
     #[test]
     fn describe_unknown_node() {
         let graph = Graph::new();
-        let desc = describe_node(&graph, &"nonexistent".to_string());
+        let (desc, gramps_id) = describe_node(&graph, &"nonexistent".to_string());
         assert_eq!(desc, "Unknown node (nonexistent)");
+        assert_eq!(gramps_id, None);
     }
 
     #[test]
@@ -534,6 +557,7 @@ mod tests {
                 h.clone(),
                 Node::Event(typed_graph::EventData {
                     handle: h.clone(),
+                    gramps_id: Some("E0001".to_string()),
                     event_type: Some(typed_graph::EventType::Birth),
                     date: Some(typed_graph::DateValue {
                         year: 1850,
@@ -543,8 +567,9 @@ mod tests {
                 }),
             )
             .unwrap();
-        let desc = describe_node(&graph, &h);
+        let (desc, gramps_id) = describe_node(&graph, &h);
         assert!(desc.contains("Birth"));
+        assert_eq!(gramps_id, Some("E0001".to_string()));
     }
 
     #[test]
@@ -556,13 +581,15 @@ mod tests {
                 h.clone(),
                 Node::Place(typed_graph::PlaceData {
                     handle: h.clone(),
+                    gramps_id: Some("P0001".to_string()),
                     title: Some("New York".to_string()),
                     ..typed_graph::PlaceData::default()
                 }),
             )
             .unwrap();
-        let desc = describe_node(&graph, &h);
+        let (desc, gramps_id) = describe_node(&graph, &h);
         assert_eq!(desc, "New York");
+        assert_eq!(gramps_id, Some("P0001".to_string()));
     }
 
     #[test]
@@ -574,13 +601,15 @@ mod tests {
                 h.clone(),
                 Node::Source(typed_graph::SourceData {
                     handle: h.clone(),
+                    gramps_id: Some("S0001".to_string()),
                     title: "Census Record".to_string(),
                     ..typed_graph::SourceData::default()
                 }),
             )
             .unwrap();
-        let desc = describe_node(&graph, &h);
+        let (desc, gramps_id) = describe_node(&graph, &h);
         assert_eq!(desc, "Census Record");
+        assert_eq!(gramps_id, Some("S0001".to_string()));
     }
 
     #[test]
@@ -592,13 +621,15 @@ mod tests {
                 h.clone(),
                 Node::Source(typed_graph::SourceData {
                     handle: h.clone(),
+                    gramps_id: Some("S0001".to_string()),
                     title: String::new(),
                     ..typed_graph::SourceData::default()
                 }),
             )
             .unwrap();
-        let desc = describe_node(&graph, &h);
+        let (desc, gramps_id) = describe_node(&graph, &h);
         assert_eq!(desc, "Unnamed Source");
+        assert_eq!(gramps_id, Some("S0001".to_string()));
     }
 
     // -----------------------------------------------------------------------
