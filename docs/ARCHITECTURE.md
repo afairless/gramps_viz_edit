@@ -4,13 +4,14 @@
 
 **gramps-gen** generates valid, plausible [Gramps](https://gramps-project.org/) family tree datasets for testing and development. It models Gramps data as a **typed directed multigraph**, supports both random and scenario-driven generation, applies adversarial transforms for stress-testing, and outputs Gramps XML (`.gramps` format).
 
-The system is a **Rust workspace** with six crates:
+The system is a **Rust workspace** with eight crates:
 
 | Crate | Purpose |
 |---|---|
 | `typed-graph` | Core graph model, schema codegen, validation, generation |
 | `output` | Gramps XML serialization |
 | `gramps-reader` | Shared library for streaming `.gramps` XML parsing, DSU, generation computation, `compute_generation_table` for FamilyGroupGenerationTable |
+| `integrate` | Diff-viz merge: full outer join of diff CSV and visualizer selections by handle |
 | `diff` | Gramps XML diff analyzer — compare and match entities across two family trees |
 | `cli` | CLI binary (`gramps-gen`), scenario parsing, pipeline wiring |
 | `visualize` | Tauri v2 desktop app with D3.js force-directed graph visualization (optional, gated behind `--features visualize`) |
@@ -95,7 +96,16 @@ A **Python extractor** (`extract/extract_schema.py`) introspects Gramps Python c
 └──────────────────────────┬─────────────────────────────────────┘
                            │
 ┌──────────────────────────┼─────────────────────────────────────┐
-│  cli  (Rust binary)      │                                     │
+│  integrate  (Rust crate)  │  consumes diff CSV + viz JSON       │
+│                          ▼                                     │
+│  CSV reader   ────────────── csv_reader.rs                      │
+│  JSON reader  ────────────── json_reader.rs                     │
+│  Merge engine ────────────── merge.rs (full outer join)         │
+│  Output       ────────────── output.rs (CSV + JSON)             │
+└──────────────────────────┬─────────────────────────────────────┘
+                           │
+┌──────────────────────────┼──────────────────────────────────────┐
+│  cli  (Rust binary)      │                                      │
 │                          ▼                                     │
 │  gramps-gen generate ──────── 5-stage pipeline                 │
 │  gramps-gen validate ──────── XML structure check              │
@@ -534,6 +544,7 @@ Future: plan describes extracting this from the Gramps RelaxNG schema at build t
 | `gramps-gen schema list` | List local and available Gramps schemas |
 | `gramps-gen schema download [VERSION]` | Download a schema from Gramps GitHub |
 | `gramps-gen diff <file_a> <file_b>` | Compare two Gramps XML files and produce a structured diff report |
+| `gramps-gen integrate diff-viz` | Merge diff CSV and visualizer selections into a combined report |
 
 ### Generate flags
 
@@ -710,6 +721,41 @@ The generation gap is configurable (default: 25 years, validated range: 1-100).
 | Force layout tuning | `types.ts` | `ForceConfig` with generationPull, spouseStrength, parentChildStrength; UI sliders |
 | Legend | `colors.ts` | Gradient bar with year labels, undated/imputed caption items |
 | Standalone test page | `test-harness.html` | HTML page for manual D3 rendering tests outside Tauri |
+
+---
+
+## Integrate Tool
+
+The `integrate` crate provides a merge tool that combines diff CSV output
+(`gramps-gen diff --output csv`) with visualizer selection JSON exports.
+
+### Purpose
+
+Merge diff CSV results with visualizer selection JSON. Performs a **full outer
+join** by person handle, producing combined rows where the diff data (what
+changed) is paired with visualizer metadata (who was selected).
+
+### Architecture
+
+The merge pipeline runs in three stages:
+
+1. **CSV reader** (`csv_reader.rs`) — Parses diff CSV rows into `DiffRow` structs
+2. **JSON reader** (`json_reader.rs`) — Parses visualizer selection JSON into `Selection` structs
+3. **Merge engine** (`merge.rs`) — Full outer join by handle, producing three row kinds:
+   - **Matched** — person appears in both diff and selections
+   - **DiffOnly** — person appears only in the diff CSV
+   - **VizOnly** — person appears only in the selections JSON
+
+### Output
+
+`output.rs` provides CSV and JSON formatters for the merged rows. CSV output
+includes all diff fields plus selection metadata (name, birth date, death date,
+gender, family group) with a `row_kind` column indicating the match status.
+
+### Integration
+
+The `gramps-gen integrate diff-viz` CLI subcommand wires the pipeline:
+`parse diff CSV → parse selections JSON → merge → format output`.
 
 ---
 

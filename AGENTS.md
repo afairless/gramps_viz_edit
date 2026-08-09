@@ -51,6 +51,16 @@ gramps_viz_edit/
 │   │       └── xml/
 │   │           ├── count.rs      # Streaming element count
 │   │           └── extract.rs    # Streaming person/family extraction
+│   ├── integrate/                # Diff-viz merge: combine diff CSV with visualizer selections
+│   │   ├── src/
+│   │   │   ├── lib.rs            # Library root, re-exports, integrate_diff_viz() orchestrator
+│   │   │   ├── csv_reader.rs     # Parse diff CSV into DiffRow structs
+│   │   │   ├── json_reader.rs    # Parse visualizer selections JSON into Selection structs
+│   │   │   ├── merge.rs          # Full outer join by handle: Matched, DiffOnly, VizOnly rows
+│   │   │   └── output.rs         # CSV + JSON output formatters for merged rows
+│   │   └── tests/
+│   │       ├── integration.rs
+│   │       └── roundtrip.rs
 │   ├── diff/                     # Gramps XML diff analyzer (compare two .gramps files)
 │   │   ├── src/
 │   │   │   ├── lib.rs            # Crate root, re-exports
@@ -102,6 +112,7 @@ gramps_viz_edit/
 │       │   └── commands/
 │       │       ├── mod.rs
 │       │       ├── generate.rs   # Full 5-stage pipeline
+│       │       ├── integrate.rs  # Merge diff CSV with visualizer selections
 │       │       ├── schema.rs     # Schema list/download subcommands
 │       │       ├── stats/        # Streaming count & report (stats command)
 │       │       ├── validate.rs   # Minimal XML structure check
