@@ -350,9 +350,62 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
             };
             (desc, data.gramps_id.clone())
         }
-        Some(Node::Family(_data)) => {
-            let desc = format!("Family ({})", handle);
-            (desc, _data.gramps_id.clone())
+        Some(Node::Family(data)) => {
+            // Get father name
+            let father_name = data.father_handle.as_ref()
+                .and_then(|h| graph.get_node(h))
+                .and_then(|n| {
+                    if let Node::Person(p) = n {
+                        Some(person_full_name(p))
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_default();
+            // Get mother name
+            let mother_name = data.mother_handle.as_ref()
+                .and_then(|h| graph.get_node(h))
+                .and_then(|n| {
+                    if let Node::Person(p) = n {
+                        Some(person_full_name(p))
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_default();
+            // Up to 2 children
+            let child_names: Vec<String> = data.child_ref_list.iter().take(2)
+                .filter_map(|cr| graph.get_node(&cr.ref_field))
+                .filter_map(|n| {
+                    if let Node::Person(p) = n {
+                        Some(person_full_name(p))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            let child_count = data.child_ref_list.len();
+
+            let parents = match (father_name.is_empty(), mother_name.is_empty()) {
+                (true, true) => "no parents".to_string(),
+                (false, true) => father_name,
+                (true, false) => mother_name,
+                (false, false) => format!("{} & {}", father_name, mother_name),
+            };
+
+            let desc = match child_names.len() {
+                0 => format!("Family: {} ({})", parents, handle),
+                1 if child_count == 1 => {
+                    format!("Family: {} | child: {}", parents, child_names[0])
+                }
+                2 if child_count == 2 => {
+                    format!("Family: {} | children: {}, {}", parents, child_names[0], child_names[1])
+                }
+                _ => {
+                    format!("Family: {} | children: {}, {} (+{} more)", parents, child_names[0], child_names[1], child_count - 2)
+                }
+            };
+            (desc, data.gramps_id.clone())
         }
         Some(Node::Event(data)) => {
             let event_type = data
@@ -868,6 +921,175 @@ mod tests {
         );
         let (desc, gramps_id) = describe_node(&graph, &handle);
         assert_eq!(desc, "No Id (b. 1950)");
+        assert_eq!(gramps_id, None);
+    }
+
+    // -----------------------------------------------------------------------
+    // Enhanced Family description tests
+    // -----------------------------------------------------------------------
+
+    /// Helper: create a graph with a family with father, mother, and children.
+    fn family_graph(
+        gramps_id: Option<&str>,
+        father_name: Option<(&str, &str)>,
+        mother_name: Option<(&str, &str)>,
+        child_names: Vec<(&str, &str)>,
+    ) -> (Graph, Handle) {
+        let mut graph = Graph::new();
+
+        let add_person = |graph: &mut Graph, handle: &str, first: &str, surname: &str| {
+            graph
+                .add_node(
+                    handle.to_string(),
+                    Node::Person(typed_graph::PersonData {
+                        handle: handle.to_string(),
+                        gramps_id: None,
+                        primary_name: typed_graph::Name {
+                            first_name: Some(first.to_string()),
+                            surname_list: vec![typed_graph::Surname {
+                                surname: Some(surname.to_string()),
+                                ..typed_graph::Surname::default()
+                            }],
+                            ..typed_graph::Name::default()
+                        },
+                        ..typed_graph::PersonData::default()
+                    }),
+                )
+                .unwrap();
+        };
+
+        let father_handle = "f1".to_string();
+        let mother_handle = "m1".to_string();
+        let family_h = "fam0001".to_string();
+
+        if let Some((first, surname)) = father_name {
+            add_person(&mut graph, &father_handle, first, surname);
+        }
+        if let Some((first, surname)) = mother_name {
+            add_person(&mut graph, &mother_handle, first, surname);
+        }
+
+        let child_ref_list: Vec<typed_graph::ChildRef> = child_names
+            .iter()
+            .enumerate()
+            .map(|(i, (first, surname))| {
+                let child_h = format!("c{}", i);
+                add_person(&mut graph, &child_h, first, surname);
+                typed_graph::ChildRef {
+                    ref_field: child_h,
+                    ..typed_graph::ChildRef::default()
+                }
+            })
+            .collect();
+
+        graph
+            .add_node(
+                family_h.clone(),
+                Node::Family(typed_graph::FamilyData {
+                    handle: family_h.clone(),
+                    gramps_id: gramps_id.map(|s| s.to_string()),
+                    father_handle: father_name.map(|_| father_handle.clone()),
+                    mother_handle: mother_name.map(|_| mother_handle.clone()),
+                    child_ref_list,
+                    ..typed_graph::FamilyData::default()
+                }),
+            )
+            .unwrap();
+        (graph, family_h)
+    }
+
+    #[test]
+    fn describe_family_with_both_parents_two_children() {
+        let (graph, handle) = family_graph(
+            Some("F0001"),
+            Some(("John", "Smith")),
+            Some(("Jane", "Doe")),
+            vec![("Alice", "Smith"), ("Bob", "Smith")],
+        );
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(
+            desc,
+            "Family: John Smith & Jane Doe | children: Alice Smith, Bob Smith"
+        );
+        assert_eq!(gramps_id, Some("F0001".to_string()));
+    }
+
+    #[test]
+    fn describe_family_with_parents_one_child() {
+        let (graph, handle) = family_graph(
+            Some("F0002"),
+            Some(("John", "Smith")),
+            Some(("Jane", "Doe")),
+            vec![("Alice", "Smith")],
+        );
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(
+            desc,
+            "Family: John Smith & Jane Doe | child: Alice Smith"
+        );
+        assert_eq!(gramps_id, Some("F0002".to_string()));
+    }
+
+    #[test]
+    fn describe_family_with_more_children_than_shown() {
+        let (graph, handle) = family_graph(
+            Some("F0003"),
+            Some(("John", "Smith")),
+            Some(("Jane", "Doe")),
+            vec![
+                ("Alice", "Smith"),
+                ("Bob", "Smith"),
+                ("Charlie", "Smith"),
+                ("Diana", "Smith"),
+            ],
+        );
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(
+            desc,
+            "Family: John Smith & Jane Doe | children: Alice Smith, Bob Smith (+2 more)"
+        );
+        assert_eq!(gramps_id, Some("F0003".to_string()));
+    }
+
+    #[test]
+    fn describe_family_no_parents_no_children() {
+        let (graph, handle) = family_graph(
+            Some("F0004"),
+            None,
+            None,
+            vec![],
+        );
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert!(desc.contains("no parents"));
+        assert_eq!(gramps_id, Some("F0004".to_string()));
+    }
+
+    #[test]
+    fn describe_family_only_father() {
+        let (graph, handle) = family_graph(
+            Some("F0005"),
+            Some(("John", "Smith")),
+            None,
+            vec![("Alice", "Smith")],
+        );
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(
+            desc,
+            "Family: John Smith | child: Alice Smith"
+        );
+        assert_eq!(gramps_id, Some("F0005".to_string()));
+    }
+
+    #[test]
+    fn describe_family_no_gramps_id() {
+        let (graph, handle) = family_graph(
+            None,
+            Some(("John", "Smith")),
+            Some(("Jane", "Doe")),
+            vec![],
+        );
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert!(desc.contains("John Smith & Jane Doe"));
         assert_eq!(gramps_id, None);
     }
 
