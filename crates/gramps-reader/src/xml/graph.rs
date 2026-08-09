@@ -468,6 +468,17 @@ impl GraphParser {
                                 }
                             }
                         }
+                        b"place" if current_event.is_some() => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                if let Some(ref mut ev) = current_event {
+                                    self.edges.push(Edge::EventPlace {
+                                        source: ev.handle.clone(),
+                                        target: h.clone(),
+                                    });
+                                    ev.place_handle = Some(h);
+                                }
+                            }
+                        }
                         b"description" if current_event.is_some() => {
                             let name_q = e.name().to_owned();
                             if let Ok(text) = reader.read_text(name_q) {
@@ -1255,6 +1266,17 @@ impl GraphParser {
                                 }
                             }
                         }
+                        b"place" if current_event.is_some() => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                if let Some(ref mut ev) = current_event {
+                                    self.edges.push(Edge::EventPlace {
+                                        source: ev.handle.clone(),
+                                        target: h.clone(),
+                                    });
+                                    ev.place_handle = Some(h);
+                                }
+                            }
+                        }
                         b"created" if self.state.in_header => {
                             // Already handled by detect_schema_version
                         }
@@ -2002,6 +2024,53 @@ mod tests {
             );
         } else {
             panic!("Expected Citation node");
+        }
+    }
+
+    #[test]
+    fn parse_event_with_place_hlink() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>"#
+            .to_string()
+            + r#"
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header>
+    <created date="2025-01-15" version="5.2"/>
+  </header>
+  <events>
+    <event handle="e0001" id="E0001">
+      <eventtype><type>Birth</type></eventtype>
+      <place hlink="pl0001"/>
+      <description>Birth of John</description>
+    </event>
+  </events>
+  <places>
+    <place handle="pl0001" id="P0001">
+      <title>New York</title>
+    </place>
+  </places>
+</database>"#;
+        let (graph, _) = parse_gramps_xml(&xml).unwrap();
+
+        // Should have 2 nodes: event + place
+        assert_eq!(graph.node_count(), 2);
+
+        // Should have 1 edge: EventPlace
+        assert_eq!(graph.edge_count(), 1);
+        let edges: Vec<_> = graph.iter_edges().collect();
+        assert!(edges.iter().any(|e| {
+            matches!(e, Edge::EventPlace { source, target }
+                if source == "e0001" && target == "pl0001")
+        }));
+
+        // Verify the event's place_handle was set
+        if let Some(Node::Event(data)) = graph.get_node(&"e0001".to_string()) {
+            assert_eq!(
+                data.place_handle.as_deref(),
+                Some("pl0001"),
+                "place_handle should be set on event data"
+            );
+        } else {
+            panic!("Expected Event node");
         }
     }
 
