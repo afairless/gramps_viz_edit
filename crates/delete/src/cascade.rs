@@ -161,8 +161,8 @@ fn type_specific_orphan_rule(handle: &Handle, graph: &Graph, to_delete: &HashSet
         }
         Node::Place(_) => {
             // A place is orphaned if it has NO remaining edges to non-deleted
-            // Events (EventPlace) AND no PlacePlaceRef edges to/from non-deleted
-            // places.
+            // nodes. Check EventPlace, PlacePlaceRef, PlaceCitation,
+            // PlaceMediaRef, PlaceNote, and PlaceTag edges.
             let incident = graph.edges_incident_to(handle);
             let has_live_connection = incident.iter().any(|e| match e {
                 Edge::EventPlace { source, target } => {
@@ -170,6 +170,22 @@ fn type_specific_orphan_rule(handle: &Handle, graph: &Graph, to_delete: &HashSet
                     !to_delete.contains(other)
                 }
                 Edge::PlacePlaceRef { source, target, .. } => {
+                    let other = if target == handle { source } else { target };
+                    !to_delete.contains(other)
+                }
+                Edge::PlaceCitation { source, target } => {
+                    let other = if target == handle { source } else { target };
+                    !to_delete.contains(other)
+                }
+                Edge::PlaceMediaRef { source, target, .. } => {
+                    let other = if target == handle { source } else { target };
+                    !to_delete.contains(other)
+                }
+                Edge::PlaceNote { source, target } => {
+                    let other = if target == handle { source } else { target };
+                    !to_delete.contains(other)
+                }
+                Edge::PlaceTag { source, target } => {
                     let other = if target == handle { source } else { target };
                     !to_delete.contains(other)
                 }
@@ -691,6 +707,119 @@ mod tests {
             plan.to_delete.contains(&pl1),
             "Place should be transitively cascaded"
         );
+    }
+
+    #[test]
+    fn place_kept_alive_by_place_citation() {
+        // A place referenced by a citation that is NOT being deleted
+        // should be kept alive via PlaceCitation edge.
+        let mut graph = Graph::new();
+        let p1 = "p0001".to_string();
+        let e1 = "e0001".to_string();
+        let pl1 = "pl0001".to_string();
+        let c1 = "c0001".to_string();
+
+        graph.add_node(p1.clone(), Node::Person(typed_graph::PersonData {
+            handle: p1.clone(),
+            ..typed_graph::PersonData::default()
+        })).unwrap();
+        graph.add_node(e1.clone(), Node::Event(typed_graph::EventData {
+            handle: e1.clone(),
+            ..typed_graph::EventData::default()
+        })).unwrap();
+        graph.add_node(pl1.clone(), Node::Place(typed_graph::PlaceData {
+            handle: pl1.clone(),
+            ..typed_graph::PlaceData::default()
+        })).unwrap();
+        graph.add_node(c1.clone(), Node::Citation(typed_graph::CitationData {
+            handle: c1.clone(),
+            ..typed_graph::CitationData::default()
+        })).unwrap();
+
+        graph.add_edge(Edge::PersonEventRef {
+            source: p1.clone(),
+            target: e1.clone(),
+            metadata: Box::new(typed_graph::EventRef {
+                ref_field: e1.clone(),
+                ..typed_graph::EventRef::default()
+            }),
+        }).unwrap();
+        graph.add_edge(Edge::EventPlace {
+            source: e1.clone(),
+            target: pl1.clone(),
+        }).unwrap();
+        // Place also connected to a live citation
+        graph.add_edge(Edge::PlaceCitation {
+            source: pl1.clone(),
+            target: c1.clone(),
+        }).unwrap();
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        // Person and event are cascaded, but place is kept alive by citation
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&e1));
+        assert!(!plan.to_delete.contains(&pl1),
+            "Place should be kept alive by PlaceCitation to live citation");
+    }
+
+    #[test]
+    fn place_kept_alive_by_place_media_ref() {
+        // A place kept alive by a PlaceMediaRef edge to non-deleted media
+        // should not cascade even when its EventPlace connection is deleted.
+        let mut graph = Graph::new();
+        let p1 = "p0001".to_string();
+        let e1 = "e0001".to_string();
+        let pl1 = "pl0001".to_string();
+        let m1 = "m0001".to_string();
+
+        graph.add_node(p1.clone(), Node::Person(typed_graph::PersonData {
+            handle: p1.clone(),
+            ..typed_graph::PersonData::default()
+        })).unwrap();
+        graph.add_node(e1.clone(), Node::Event(typed_graph::EventData {
+            handle: e1.clone(),
+            ..typed_graph::EventData::default()
+        })).unwrap();
+        graph.add_node(pl1.clone(), Node::Place(typed_graph::PlaceData {
+            handle: pl1.clone(),
+            ..typed_graph::PlaceData::default()
+        })).unwrap();
+        graph.add_node(m1.clone(), Node::Media(typed_graph::MediaData {
+            handle: m1.clone(),
+            ..typed_graph::MediaData::default()
+        })).unwrap();
+
+        graph.add_edge(Edge::PersonEventRef {
+            source: p1.clone(),
+            target: e1.clone(),
+            metadata: Box::new(typed_graph::EventRef {
+                ref_field: e1.clone(),
+                ..typed_graph::EventRef::default()
+            }),
+        }).unwrap();
+        graph.add_edge(Edge::EventPlace {
+            source: e1.clone(),
+            target: pl1.clone(),
+        }).unwrap();
+        // Place also connected to live media
+        graph.add_edge(Edge::PlaceMediaRef {
+            source: pl1.clone(),
+            target: m1.clone(),
+            metadata: Box::new(typed_graph::MediaRef {
+                ref_field: m1.clone(),
+                ..typed_graph::MediaRef::default()
+            }),
+        }).unwrap();
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        assert!(plan.to_delete.contains(&p1));
+        assert!(plan.to_delete.contains(&e1));
+        assert!(!plan.to_delete.contains(&pl1),
+            "Place should be kept alive by PlaceMediaRef to live media");
     }
 
     // -----------------------------------------------------------------------
