@@ -653,43 +653,6 @@ mod tests {
         h
     }
 
-    /// Create an event referenced by a person and linked to a place.
-    /// PersonEventRef(person → event) + EventPlace(event → place).
-    fn make_event_with_place(
-        graph: &mut Graph,
-        event_h: &str,
-        person: &Handle,
-        place_h: &Handle,
-    ) -> Handle {
-        let h = event_h.to_string();
-        graph
-            .add_node(
-                h.clone(),
-                Node::Event(typed_graph::EventData {
-                    handle: h.clone(),
-                    ..typed_graph::EventData::default()
-                }),
-            )
-            .unwrap();
-        graph
-            .add_edge(Edge::PersonEventRef {
-                source: person.clone(),
-                target: h.clone(),
-                metadata: Box::new(typed_graph::EventRef {
-                    ref_field: h.clone(),
-                    ..typed_graph::EventRef::default()
-                }),
-            })
-            .unwrap();
-        graph
-            .add_edge(Edge::EventPlace {
-                source: h.clone(),
-                target: place_h.clone(),
-            })
-            .unwrap();
-        h
-    }
-
     /// Create a place and connect it to an event via EventPlace.
     fn make_place(graph: &mut Graph, handle: &str, event: &Handle) -> Handle {
         let h = handle.to_string();
@@ -761,27 +724,6 @@ mod tests {
         graph
             .add_edge(Edge::EventCitation {
                 source: event.clone(),
-                target: h.clone(),
-            })
-            .unwrap();
-        h
-    }
-
-    /// Create a citation referenced by a family (FamilyCitation).
-    fn citation_from_family(graph: &mut Graph, handle: &str, family: &Handle) -> Handle {
-        let h = handle.to_string();
-        graph
-            .add_node(
-                h.clone(),
-                Node::Citation(typed_graph::CitationData {
-                    handle: h.clone(),
-                    ..typed_graph::CitationData::default()
-                }),
-            )
-            .unwrap();
-        graph
-            .add_edge(Edge::FamilyCitation {
-                source: family.clone(),
                 target: h.clone(),
             })
             .unwrap();
@@ -2758,5 +2700,134 @@ mod tests {
             .unwrap();
         let plan = cascade(&graph, &HashSet::new());
         assert_eq!(*plan.pre_connectivity.get(&e1).unwrap_or(&0), 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Category H: Property invariants (H6-H9)
+    // -----------------------------------------------------------------------
+
+    // H6: non-seed people are never deleted
+    #[test]
+    fn h6_non_seed_people_never_deleted() {
+        // Build a graph with a seed person, a non-seed person connected via
+        // family, and a completely unrelated person.
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let p2 = make_person(&mut graph, "p2");
+        let p3 = make_person(&mut graph, "p3");
+        // P1 and P2 are in a family together
+        make_family_with_parents(&mut graph, "f1", &p1, &p2);
+        // P3 is completely unrelated
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        // P1 is seed → deleted. P2 is non-seed → never deleted.
+        // P3 is non-seed → never deleted.
+        assert!(plan.to_delete.contains(&p1));
+        assert!(
+            !plan.to_delete.contains(&p2),
+            "Non-seed person P2 should never be deleted"
+        );
+        assert!(
+            !plan.to_delete.contains(&p3),
+            "Non-seed person P3 should never be deleted"
+        );
+        assert_eq!(plan.to_delete.len(), 1);
+    }
+
+    // H7: nodes with no path to seeds are never deleted
+    #[test]
+    fn h7_unrelated_subgraph_untouched() {
+        let mut graph = Graph::new();
+        // Seed subgraph
+        let p1 = make_person(&mut graph, "p1");
+        let e1 = make_event(&mut graph, "e1", &p1);
+        let _pl1 = make_place(&mut graph, "pl1", &e1);
+        // Unrelated subgraph: Px→Cx→Sx→Rx
+        let px = make_person(&mut graph, "px");
+        let cx = citation_from_person(&mut graph, "cx", &px);
+        let sx = source_from_citation(&mut graph, "sx", &cx);
+        let _rx = repository_from_source(&mut graph, "rx", &sx);
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+        // Only seed subgraph nodes should be in to_delete
+        assert!(plan.to_delete.contains(&p1));
+        assert!(!plan.to_delete.contains(&px));
+        assert!(!plan.to_delete.contains(&cx));
+        assert!(!plan.to_delete.contains(&sx));
+    }
+
+    // H8: same graph + same seeds = same to_delete set (deterministic)
+    #[test]
+    fn h8_deterministic_output() {
+        // Build a complex graph with multiple paths
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let p2 = make_person(&mut graph, "p2");
+        let _f1 = make_family_with_parents(&mut graph, "f1", &p1, &p2);
+        let e1 = make_event(&mut graph, "e1", &p1);
+        let e2 = make_event(&mut graph, "e2", &p2);
+        let pl1 = "pl1".to_string();
+        graph
+            .add_node(
+                pl1.clone(),
+                Node::Place(typed_graph::PlaceData {
+                    handle: pl1.clone(),
+                    ..typed_graph::PlaceData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::EventPlace {
+                source: e1.clone(),
+                target: pl1.clone(),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::EventPlace {
+                source: e2.clone(),
+                target: pl1.clone(),
+            })
+            .unwrap();
+        let c1 = citation_from_person(&mut graph, "c1", &p1);
+        let _s1 = source_from_citation(&mut graph, "s1", &c1);
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+
+        // Run cascade 10 times and verify identical results
+        let result = cascade(&graph, &seeds);
+        for _ in 0..10 {
+            let plan = cascade(&graph, &seeds);
+            assert_eq!(
+                plan.to_delete, result.to_delete,
+                "Deterministic output: cascade must produce the same to_delete set every time"
+            );
+        }
+    }
+
+    // H9: to_delete only grows monotonically through the cascade
+    #[test]
+    fn h9_monotonic_growth() {
+        let mut graph = Graph::new();
+        let p1 = make_person(&mut graph, "p1");
+        let p2 = make_person(&mut graph, "p2");
+        let _f1 = make_family_with_parents(&mut graph, "f1", &p1, &p2);
+        let e1 = make_event(&mut graph, "e1", &p1);
+        let c1 = citation_from_event(&mut graph, "c1", &e1);
+        let _s1 = source_from_citation(&mut graph, "s1", &c1);
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        seeds.insert(p2.clone());
+
+        let plan = cascade(&graph, &seeds);
+        // Verify that seed set is a subset of to_delete
+        for seed in &seeds {
+            assert!(plan.to_delete.contains(seed), "Seed must be in to_delete");
+        }
     }
 }
