@@ -457,6 +457,17 @@ impl GraphParser {
                                 }
                             }
                         }
+                        b"sourceref" if current_citation.is_some() => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                if let Some(ref mut c) = current_citation {
+                                    self.edges.push(Edge::CitationSource {
+                                        source: c.handle.clone(),
+                                        target: h.clone(),
+                                    });
+                                    c.source_handle = Some(h);
+                                }
+                            }
+                        }
                         b"description" if current_event.is_some() => {
                             let name_q = e.name().to_owned();
                             if let Ok(text) = reader.read_text(name_q) {
@@ -1233,6 +1244,17 @@ impl GraphParser {
                                 });
                             }
                         }
+                        b"sourceref" => {
+                            if let Some(h) = read_hlink_attr(e) {
+                                if let Some(ref mut c) = current_citation {
+                                    self.edges.push(Edge::CitationSource {
+                                        source: c.handle.clone(),
+                                        target: h.clone(),
+                                    });
+                                    c.source_handle = Some(h);
+                                }
+                            }
+                        }
                         b"created" if self.state.in_header => {
                             // Already handled by detect_schema_version
                         }
@@ -1935,6 +1957,52 @@ mod tests {
         assert!(graph.get_node(&"m0001".to_string()).is_some());
         assert!(graph.get_node(&"n0001".to_string()).is_some());
         assert!(graph.get_node(&"t0001".to_string()).is_some());
+    }
+
+    #[test]
+    fn parse_citation_with_sourceref() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>"#
+            .to_string()
+            + r#"
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header>
+    <created date="2025-01-15" version="5.2"/>
+  </header>
+  <sources>
+    <source handle="s0001" id="S0001">
+      <title>Census Record</title>
+    </source>
+  </sources>
+  <citations>
+    <citation handle="c0001" id="C0001">
+      <sourceref hlink="s0001"/>
+      <page>p. 42</page>
+    </citation>
+  </citations>
+</database>"#;
+        let (graph, _) = parse_gramps_xml(&xml).unwrap();
+
+        // Should have 2 nodes: source + citation
+        assert_eq!(graph.node_count(), 2);
+
+        // Should have 1 edge: CitationSource
+        assert_eq!(graph.edge_count(), 1);
+        let edges: Vec<_> = graph.iter_edges().collect();
+        assert!(edges.iter().any(|e| {
+            matches!(e, Edge::CitationSource { source, target }
+                if source == "c0001" && target == "s0001")
+        }));
+
+        // Verify the citation's source_handle was set
+        if let Some(Node::Citation(data)) = graph.get_node(&"c0001".to_string()) {
+            assert_eq!(
+                data.source_handle.as_deref(),
+                Some("s0001"),
+                "source_handle should be set on citation data"
+            );
+        } else {
+            panic!("Expected Citation node");
+        }
     }
 
     #[test]
