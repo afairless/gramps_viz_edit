@@ -269,6 +269,48 @@ fn review_type_prompt(
     }
 }
 
+/// Build a full name string from a PersonData node.
+#[allow(dead_code)]
+fn person_full_name(p: &typed_graph::PersonData) -> String {
+    let first = p
+        .primary_name
+        .first_name
+        .as_deref()
+        .unwrap_or("Unknown");
+    let surname = p
+        .primary_name
+        .surname_list
+        .first()
+        .and_then(|s| s.surname.as_deref())
+        .unwrap_or("");
+    if surname.is_empty() {
+        first.to_string()
+    } else {
+        format!("{} {}", first, surname)
+    }
+}
+
+/// Format an optional gramps_id for display, e.g. `[I0001]`.
+#[allow(dead_code)]
+fn format_gramps_id(gramps_id: &Option<String>) -> String {
+    gramps_id
+        .as_ref()
+        .filter(|s| !s.is_empty())
+        .map(|id| format!(" [{}]", id))
+        .unwrap_or_default()
+}
+
+/// Build a fallback description string when a Source has no title or author.
+#[allow(dead_code)]
+fn fallback_source(data: &typed_graph::SourceData) -> String {
+    if let Some(ref pubinfo) = data.pubinfo {
+        if !pubinfo.is_empty() {
+            return format!("Source: {}", pubinfo);
+        }
+    }
+    "Unnamed Source".to_string()
+}
+
 /// Generate a human-readable description of a node.
 fn describe_node(graph: &Graph, handle: &Handle) -> String {
     match graph.get_node(handle) {
@@ -557,6 +599,120 @@ mod tests {
             .unwrap();
         let desc = describe_node(&graph, &h);
         assert_eq!(desc, "Unnamed Source");
+    }
+
+    // -----------------------------------------------------------------------
+    // yes_mode test
+    // -----------------------------------------------------------------------
+
+    // -----------------------------------------------------------------------
+    // person_full_name tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn person_full_name_with_surname() {
+        let data = typed_graph::PersonData {
+            primary_name: typed_graph::Name {
+                first_name: Some("John".to_string()),
+                surname_list: vec![typed_graph::Surname {
+                    surname: Some("Smith".to_string()),
+                    ..typed_graph::Surname::default()
+                }],
+                ..typed_graph::Name::default()
+            },
+            ..typed_graph::PersonData::default()
+        };
+        assert_eq!(person_full_name(&data), "John Smith");
+    }
+
+    #[test]
+    fn person_full_name_no_surname() {
+        let data = typed_graph::PersonData {
+            primary_name: typed_graph::Name {
+                first_name: Some("Mona".to_string()),
+                ..typed_graph::Name::default()
+            },
+            ..typed_graph::PersonData::default()
+        };
+        assert_eq!(person_full_name(&data), "Mona");
+    }
+
+    #[test]
+    fn person_full_name_unknown_first() {
+        let data = typed_graph::PersonData {
+            primary_name: typed_graph::Name::default(),
+            ..typed_graph::PersonData::default()
+        };
+        assert_eq!(person_full_name(&data), "Unknown");
+    }
+
+    #[test]
+    fn person_full_name_first_only() {
+        let data = typed_graph::PersonData {
+            primary_name: typed_graph::Name {
+                first_name: Some("Cher".to_string()),
+                surname_list: vec![typed_graph::Surname {
+                    surname: Some("".to_string()),
+                    ..typed_graph::Surname::default()
+                }],
+                ..typed_graph::Name::default()
+            },
+            ..typed_graph::PersonData::default()
+        };
+        assert_eq!(person_full_name(&data), "Cher");
+    }
+
+    // -----------------------------------------------------------------------
+    // format_gramps_id tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn format_gramps_id_some() {
+        let id = Some("I0001".to_string());
+        assert_eq!(format_gramps_id(&id), " [I0001]");
+    }
+
+    #[test]
+    fn format_gramps_id_none() {
+        let id: Option<String> = None;
+        assert_eq!(format_gramps_id(&id), "");
+    }
+
+    #[test]
+    fn format_gramps_id_empty() {
+        let id = Some(String::new());
+        assert_eq!(format_gramps_id(&id), "");
+    }
+
+    // -----------------------------------------------------------------------
+    // fallback_source tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn fallback_source_with_pubinfo() {
+        let data = typed_graph::SourceData {
+            pubinfo: Some("Genealogical Society".to_string()),
+            ..typed_graph::SourceData::default()
+        };
+        assert_eq!(fallback_source(&data), "Source: Genealogical Society");
+    }
+
+    #[test]
+    fn fallback_source_empty_pubinfo() {
+        let data = typed_graph::SourceData {
+            pubinfo: Some(String::new()),
+            ..typed_graph::SourceData::default()
+        };
+        assert_eq!(fallback_source(&data), "Unnamed Source");
+    }
+
+    #[test]
+    fn fallback_source_no_pubinfo() {
+        let data = typed_graph::SourceData {
+            pubinfo: None,
+            ..typed_graph::SourceData::default()
+        };
+        assert_eq!(fallback_source(&data), "Unnamed Source");
     }
 
     // -----------------------------------------------------------------------
