@@ -434,6 +434,512 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // Comprehensive test helpers for cascade tests
+    // -----------------------------------------------------------------------
+
+    /// Create a person node with the given handle string.
+    fn make_person(graph: &mut Graph, handle: &str) -> Handle {
+        let h = handle.to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Person(typed_graph::PersonData {
+                    handle: h.clone(),
+                    ..typed_graph::PersonData::default()
+                }),
+            )
+            .unwrap();
+        h
+    }
+
+    /// Create a family with two parents (FamilyFather + FamilyMother edges).
+    /// Returns the family handle.
+    fn make_family_with_parents(
+        graph: &mut Graph,
+        handle: &str,
+        father: &Handle,
+        mother: &Handle,
+    ) -> Handle {
+        let h = handle.to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Family(typed_graph::FamilyData {
+                    handle: h.clone(),
+                    ..typed_graph::FamilyData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::FamilyFather {
+                source: h.clone(),
+                target: father.clone(),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::FamilyMother {
+                source: h.clone(),
+                target: mother.clone(),
+            })
+            .unwrap();
+        h
+    }
+
+    /// Create a family with both parents and one child.
+    /// The child gets a FamilyChildRef edge from the family.
+    /// The parents also get PersonParentFamily edges back to the family.
+    fn make_family_with_parents_and_child(
+        graph: &mut Graph,
+        handle: &str,
+        father: &Handle,
+        mother: &Handle,
+        child: &Handle,
+    ) -> Handle {
+        let h = handle.to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Family(typed_graph::FamilyData {
+                    handle: h.clone(),
+                    ..typed_graph::FamilyData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::FamilyFather {
+                source: h.clone(),
+                target: father.clone(),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::FamilyMother {
+                source: h.clone(),
+                target: mother.clone(),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::FamilyChildRef {
+                source: h.clone(),
+                target: child.clone(),
+                metadata: Box::new(typed_graph::ChildRef {
+                    ref_field: child.clone(),
+                    ..typed_graph::ChildRef::default()
+                }),
+            })
+            .unwrap();
+        // Parent back-edges
+        graph
+            .add_edge(Edge::PersonParentFamily {
+                source: father.clone(),
+                target: h.clone(),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonParentFamily {
+                source: mother.clone(),
+                target: h.clone(),
+            })
+            .unwrap();
+        h
+    }
+
+    /// Create an event referenced by a person (PersonEventRef).
+    fn make_event(graph: &mut Graph, handle: &str, person: &Handle) -> Handle {
+        let h = handle.to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Event(typed_graph::EventData {
+                    handle: h.clone(),
+                    ..typed_graph::EventData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonEventRef {
+                source: person.clone(),
+                target: h.clone(),
+                metadata: Box::new(typed_graph::EventRef {
+                    ref_field: h.clone(),
+                    ..typed_graph::EventRef::default()
+                }),
+            })
+            .unwrap();
+        h
+    }
+
+    /// Create an event referenced by a person and linked to a place.
+    /// PersonEventRef(person → event) + EventPlace(event → place).
+    fn make_event_with_place(
+        graph: &mut Graph,
+        event_h: &str,
+        person: &Handle,
+        place_h: &Handle,
+    ) -> Handle {
+        let h = event_h.to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Event(typed_graph::EventData {
+                    handle: h.clone(),
+                    ..typed_graph::EventData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonEventRef {
+                source: person.clone(),
+                target: h.clone(),
+                metadata: Box::new(typed_graph::EventRef {
+                    ref_field: h.clone(),
+                    ..typed_graph::EventRef::default()
+                }),
+            })
+            .unwrap();
+        graph
+            .add_edge(Edge::EventPlace {
+                source: h.clone(),
+                target: place_h.clone(),
+            })
+            .unwrap();
+        h
+    }
+
+    /// Create a place and connect it to an event via EventPlace.
+    fn make_place(graph: &mut Graph, handle: &str, event: &Handle) -> Handle {
+        let h = handle.to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Place(typed_graph::PlaceData {
+                    handle: h.clone(),
+                    ..typed_graph::PlaceData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::EventPlace {
+                source: event.clone(),
+                target: h.clone(),
+            })
+            .unwrap();
+        h
+    }
+
+    /// Create a PlacePlaceRef edge from source to target.
+    fn make_place_with_place_ref(graph: &mut Graph, source_h: &Handle, target_h: &Handle) {
+        graph
+            .add_edge(Edge::PlacePlaceRef {
+                source: source_h.clone(),
+                target: target_h.clone(),
+                metadata: Box::new(typed_graph::PlaceRef {
+                    ref_field: target_h.clone(),
+                    ..typed_graph::PlaceRef::default()
+                }),
+            })
+            .unwrap();
+    }
+
+    /// Create a citation referenced by a person (PersonCitation).
+    fn citation_from_person(graph: &mut Graph, handle: &str, person: &Handle) -> Handle {
+        let h = handle.to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Citation(typed_graph::CitationData {
+                    handle: h.clone(),
+                    ..typed_graph::CitationData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonCitation {
+                source: person.clone(),
+                target: h.clone(),
+            })
+            .unwrap();
+        h
+    }
+
+    /// Create a citation referenced by an event (EventCitation).
+    fn citation_from_event(graph: &mut Graph, handle: &str, event: &Handle) -> Handle {
+        let h = handle.to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Citation(typed_graph::CitationData {
+                    handle: h.clone(),
+                    ..typed_graph::CitationData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::EventCitation {
+                source: event.clone(),
+                target: h.clone(),
+            })
+            .unwrap();
+        h
+    }
+
+    /// Create a citation referenced by a family (FamilyCitation).
+    fn citation_from_family(graph: &mut Graph, handle: &str, family: &Handle) -> Handle {
+        let h = handle.to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Citation(typed_graph::CitationData {
+                    handle: h.clone(),
+                    ..typed_graph::CitationData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::FamilyCitation {
+                source: family.clone(),
+                target: h.clone(),
+            })
+            .unwrap();
+        h
+    }
+
+    /// Create a citation referenced by a place (PlaceCitation).
+    fn citation_from_place(graph: &mut Graph, handle: &str, place: &Handle) -> Handle {
+        let h = handle.to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Citation(typed_graph::CitationData {
+                    handle: h.clone(),
+                    ..typed_graph::CitationData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::PlaceCitation {
+                source: place.clone(),
+                target: h.clone(),
+            })
+            .unwrap();
+        h
+    }
+
+    /// Create a source referenced by a citation (CitationSource).
+    fn source_from_citation(graph: &mut Graph, handle: &str, citation: &Handle) -> Handle {
+        let h = handle.to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Source(typed_graph::SourceData {
+                    handle: h.clone(),
+                    ..typed_graph::SourceData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::CitationSource {
+                source: citation.clone(),
+                target: h.clone(),
+            })
+            .unwrap();
+        h
+    }
+
+    /// Create a repository referenced by a source (SourceRepoRef).
+    fn repository_from_source(graph: &mut Graph, handle: &str, source: &Handle) -> Handle {
+        let h = handle.to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Repository(typed_graph::RepositoryData {
+                    handle: h.clone(),
+                    ..typed_graph::RepositoryData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::SourceRepoRef {
+                source: source.clone(),
+                target: h.clone(),
+                metadata: Box::new(typed_graph::RepoRef {
+                    ref_field: h.clone(),
+                    ..typed_graph::RepoRef::default()
+                }),
+            })
+            .unwrap();
+        h
+    }
+
+    /// Create a media object referenced by a person (PersonMediaRef).
+    fn media_from_person(graph: &mut Graph, handle: &str, person: &Handle) -> Handle {
+        let h = handle.to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Media(typed_graph::MediaData {
+                    handle: h.clone(),
+                    ..typed_graph::MediaData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonMediaRef {
+                source: person.clone(),
+                target: h.clone(),
+                metadata: Box::new(typed_graph::MediaRef {
+                    ref_field: h.clone(),
+                    ..typed_graph::MediaRef::default()
+                }),
+            })
+            .unwrap();
+        h
+    }
+
+    /// Create a media object referenced by a citation (CitationMediaRef).
+    fn media_from_citation(graph: &mut Graph, handle: &str, citation: &Handle) -> Handle {
+        let h = handle.to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Media(typed_graph::MediaData {
+                    handle: h.clone(),
+                    ..typed_graph::MediaData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::CitationMediaRef {
+                source: citation.clone(),
+                target: h.clone(),
+                metadata: Box::new(typed_graph::MediaRef {
+                    ref_field: h.clone(),
+                    ..typed_graph::MediaRef::default()
+                }),
+            })
+            .unwrap();
+        h
+    }
+
+    /// Create a media object referenced by a source (SourceMediaRef).
+    fn media_from_source(graph: &mut Graph, handle: &str, source: &Handle) -> Handle {
+        let h = handle.to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Media(typed_graph::MediaData {
+                    handle: h.clone(),
+                    ..typed_graph::MediaData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::SourceMediaRef {
+                source: source.clone(),
+                target: h.clone(),
+                metadata: Box::new(typed_graph::MediaRef {
+                    ref_field: h.clone(),
+                    ..typed_graph::MediaRef::default()
+                }),
+            })
+            .unwrap();
+        h
+    }
+
+    /// Create a note referenced by a person (PersonNote).
+    fn note_from_person(graph: &mut Graph, handle: &str, person: &Handle) -> Handle {
+        let h = handle.to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Note(typed_graph::NoteData {
+                    handle: h.clone(),
+                    ..typed_graph::NoteData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonNote {
+                source: person.clone(),
+                target: h.clone(),
+            })
+            .unwrap();
+        h
+    }
+
+    /// Create a note referenced by a citation (CitationNote).
+    fn note_from_citation(graph: &mut Graph, handle: &str, citation: &Handle) -> Handle {
+        let h = handle.to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Note(typed_graph::NoteData {
+                    handle: h.clone(),
+                    ..typed_graph::NoteData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::CitationNote {
+                source: citation.clone(),
+                target: h.clone(),
+            })
+            .unwrap();
+        h
+    }
+
+    /// Create a tag referenced by a person (PersonTag).
+    fn tag_from_person(graph: &mut Graph, handle: &str, person: &Handle) -> Handle {
+        let h = handle.to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Tag(typed_graph::TagData {
+                    handle: h.clone(),
+                    ..typed_graph::TagData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::PersonTag {
+                source: person.clone(),
+                target: h.clone(),
+            })
+            .unwrap();
+        h
+    }
+
+    /// Create a tag referenced by an event (EventTag).
+    fn tag_from_event(graph: &mut Graph, handle: &str, event: &Handle) -> Handle {
+        let h = handle.to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Tag(typed_graph::TagData {
+                    handle: h.clone(),
+                    ..typed_graph::TagData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::EventTag {
+                source: event.clone(),
+                target: h.clone(),
+            })
+            .unwrap();
+        h
+    }
+
+    /// Create a TagTag edge from source to target.
+    fn tag_tag(graph: &mut Graph, source_h: &Handle, target_h: &Handle) {
+        graph
+            .add_edge(Edge::TagTag {
+                source: source_h.clone(),
+                target: target_h.clone(),
+            })
+            .unwrap();
+    }
+
+    // -----------------------------------------------------------------------
     // Cascade engine tests
     // -----------------------------------------------------------------------
 
