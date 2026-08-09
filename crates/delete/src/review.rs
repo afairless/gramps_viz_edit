@@ -86,7 +86,10 @@ pub fn run_interactive_review(
     ];
 
     let mut confirmed: HashMap<String, HashSet<Handle>> = HashMap::new();
-    let total_types = type_order.len();
+    let total_types = type_order
+        .iter()
+        .filter(|nk| plan.per_type.get(nk).is_some_and(|h| !h.is_empty()))
+        .count();
     let mut current_step = 0;
 
     for node_kind in &type_order {
@@ -1615,6 +1618,97 @@ mod tests {
         let (desc, gramps_id) = describe_node(&graph, &handle);
         assert_eq!(desc, "Note: \"Hello\"");
         assert_eq!(gramps_id, None);
+    }
+
+    // -----------------------------------------------------------------------
+    // Step counter tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn step_counter_dynamic_total() {
+        // Set up a plan with only 3 types having candidates (out of 10)
+        let mut graph = Graph::new();
+        let mut per_type = HashMap::new();
+        let mut seed_people = HashSet::new();
+        let mut pre_connectivity = HashMap::new();
+
+        // Add a person
+        let p_h = "p0001".to_string();
+        graph
+            .add_node(
+                p_h.clone(),
+                Node::Person(typed_graph::PersonData {
+                    handle: p_h.clone(),
+                    gramps_id: Some("I0001".to_string()),
+                    primary_name: typed_graph::Name {
+                        first_name: Some("John".to_string()),
+                        surname_list: vec![typed_graph::Surname {
+                            surname: Some("Smith".to_string()),
+                            ..typed_graph::Surname::default()
+                        }],
+                        ..typed_graph::Name::default()
+                    },
+                    ..typed_graph::PersonData::default()
+                }),
+            )
+            .unwrap();
+        seed_people.insert(p_h.clone());
+        pre_connectivity.insert(p_h.clone(), 1usize);
+
+        // 3 types with candidates
+        per_type.insert(
+            NodeKindLabel::Person,
+            vec![p_h.clone()],
+        );
+        per_type.insert(
+            NodeKindLabel::Event,
+            vec!["e0001".to_string()],
+        );
+        per_type.insert(
+            NodeKindLabel::Place,
+            vec!["pl0001".to_string()],
+        );
+
+        let plan = DeletePlan {
+            to_delete: seed_people.clone(),
+            pre_connectivity,
+            seed_people,
+            per_type,
+        };
+
+        // Feed 'y' for each type to confirm
+        let input_data = b"y\ny\ny\n";
+        let mut input = std::io::BufReader::new(&input_data[..]);
+        let mut output = Vec::new();
+
+        let result = run_interactive_review(&plan, &graph, false, &mut input, &mut output);
+        let output_str = String::from_utf8(output).unwrap();
+
+        // Verify the step counter shows dynamic total (3, not 10)
+        assert!(
+            output_str.contains("Step 1/3"),
+            "Expected 'Step 1/3' in output, got: {}",
+            output_str
+        );
+        assert!(
+            output_str.contains("Step 2/3"),
+            "Expected 'Step 2/3' in output"
+        );
+        assert!(
+            output_str.contains("Step 3/3"),
+            "Expected 'Step 3/3' in output"
+        );
+        assert!(
+            !output_str.contains("Step 4/"),
+            "Should not have a Step 4"
+        );
+
+        match result {
+            ReviewResult::Confirmed(confirmed) => {
+                assert_eq!(confirmed.len(), 3, "Expected 3 confirmed types");
+            }
+            ReviewResult::Aborted => panic!("Expected confirmed"),
+        }
     }
 
     // -----------------------------------------------------------------------
