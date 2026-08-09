@@ -304,7 +304,6 @@ fn format_gramps_id(gramps_id: &Option<String>) -> String {
 }
 
 /// Build a fallback description string when a Source has no title or author.
-#[allow(dead_code)]
 fn fallback_source(data: &typed_graph::SourceData) -> String {
     if let Some(ref pubinfo) = data.pubinfo {
         if !pubinfo.is_empty() {
@@ -452,10 +451,16 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
             (desc, data.gramps_id.clone())
         }
         Some(Node::Source(data)) => {
-            let desc = if data.title.is_empty() {
-                "Unnamed Source".to_string()
-            } else {
+            let desc = if !data.title.is_empty() {
                 data.title.clone()
+            } else if let Some(ref author) = data.author {
+                if !author.is_empty() {
+                    format!("Source by {}", author)
+                } else {
+                    fallback_source(data)
+                }
+            } else {
+                fallback_source(data)
             };
             (desc, data.gramps_id.clone())
         }
@@ -500,16 +505,37 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
             (desc, data.gramps_id.clone())
         }
         Some(Node::Media(data)) => {
-            let desc = data
-                .desc
-                .as_deref()
-                .unwrap_or("Unnamed Media")
-                .to_string();
+            if let Some(ref desc) = data.desc {
+                if !desc.is_empty() {
+                    return (desc.clone(), data.gramps_id.clone());
+                }
+            };
+            let desc = if let Some(ref path) = data.path {
+                if !path.is_empty() {
+                    format!("Media: {}", path)
+                } else if let Some(ref date) = data.date {
+                    let d = date.text.clone().unwrap_or_else(|| format!("{:04}", date.year));
+                    format!("Media from {}", d)
+                } else {
+                    "Unnamed Media".to_string()
+                }
+            } else if let Some(ref date) = data.date {
+                let d = date.text.clone().unwrap_or_else(|| format!("{:04}", date.year));
+                format!("Media from {}", d)
+            } else {
+                "Unnamed Media".to_string()
+            };
             (desc, data.gramps_id.clone())
         }
         Some(Node::Note(data)) => {
-            let text_preview = if data.text.len() > 60 {
-                format!("{}...", &data.text[..57])
+            let text_preview = if data.text.len() > 150 {
+                let trunc = &data.text[..150];
+                // Break at last space within the 150-char window if possible
+                if let Some(last_space) = trunc.rfind(' ') {
+                    format!("{}...", &trunc[..last_space])
+                } else {
+                    format!("{}...", trunc)
+                }
             } else if data.text.is_empty() {
                 "empty note".to_string()
             } else {
@@ -1367,6 +1393,227 @@ mod tests {
         );
         let (desc, gramps_id) = describe_node(&graph, &handle);
         assert!(desc.contains("Census Record"));
+        assert_eq!(gramps_id, None);
+    }
+
+    // -----------------------------------------------------------------------
+    // Enhanced Source description tests
+    // -----------------------------------------------------------------------
+
+    /// Helper: create a graph with a Source node.
+    fn source_data(
+        gramps_id: Option<&str>,
+        title: &str,
+        author: Option<&str>,
+        pubinfo: Option<&str>,
+    ) -> (Graph, Handle) {
+        let mut graph = Graph::new();
+        let h = "s0001".to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Source(typed_graph::SourceData {
+                    handle: h.clone(),
+                    gramps_id: gramps_id.map(|s| s.to_string()),
+                    title: title.to_string(),
+                    author: author.map(|s| s.to_string()),
+                    pubinfo: pubinfo.map(|s| s.to_string()),
+                    ..typed_graph::SourceData::default()
+                }),
+            )
+            .unwrap();
+        (graph, h)
+    }
+
+    #[test]
+    fn describe_source_with_title() {
+        let (graph, handle) = source_data(Some("S0001"), "Census Record", None, None);
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(desc, "Census Record");
+        assert_eq!(gramps_id, Some("S0001".to_string()));
+    }
+
+    #[test]
+    fn describe_source_fallback_to_author() {
+        let (graph, handle) = source_data(Some("S0002"), "", Some("John Doe"), None);
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(desc, "Source by John Doe");
+        assert_eq!(gramps_id, Some("S0002".to_string()));
+    }
+
+    #[test]
+    fn describe_source_fallback_to_pubinfo() {
+        let (graph, handle) = source_data(Some("S0003"), "", None, Some("Genealogical Society"));
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(desc, "Source: Genealogical Society");
+        assert_eq!(gramps_id, Some("S0003".to_string()));
+    }
+
+    #[test]
+    fn describe_source_all_fallbacks_empty() {
+        let (graph, handle) = source_data(Some("S0004"), "", None, None);
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(desc, "Unnamed Source");
+        assert_eq!(gramps_id, Some("S0004".to_string()));
+    }
+
+    #[test]
+    fn describe_source_no_gramps_id() {
+        let (graph, handle) = source_data(None, "Census Record", None, None);
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(desc, "Census Record");
+        assert_eq!(gramps_id, None);
+    }
+
+    // -----------------------------------------------------------------------
+    // Enhanced Media description tests
+    // -----------------------------------------------------------------------
+
+    /// Helper: create a graph with a Media node.
+    fn media_data(
+        gramps_id: Option<&str>,
+        desc: Option<&str>,
+        path: Option<&str>,
+        date_year: Option<i32>,
+    ) -> (Graph, Handle) {
+        let mut graph = Graph::new();
+        let h = "m0001".to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Media(typed_graph::MediaData {
+                    handle: h.clone(),
+                    gramps_id: gramps_id.map(|s| s.to_string()),
+                    desc: desc.map(|s| s.to_string()),
+                    path: path.map(|s| s.to_string()),
+                    date: date_year.map(|y| typed_graph::DateValue {
+                        year: y,
+                        text: Some(format!("{:04}", y)),
+                        ..typed_graph::DateValue::default()
+                    }),
+                    ..typed_graph::MediaData::default()
+                }),
+            )
+            .unwrap();
+        (graph, h)
+    }
+
+    #[test]
+    fn describe_media_with_desc() {
+        let (graph, handle) = media_data(Some("M0001"), Some("Wedding photo"), None, None);
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(desc, "Wedding photo");
+        assert_eq!(gramps_id, Some("M0001".to_string()));
+    }
+
+    #[test]
+    fn describe_media_fallback_to_path() {
+        let (graph, handle) = media_data(Some("M0002"), None, Some("photos/wedding.jpg"), None);
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(desc, "Media: photos/wedding.jpg");
+        assert_eq!(gramps_id, Some("M0002".to_string()));
+    }
+
+    #[test]
+    fn describe_media_fallback_to_date() {
+        let (graph, handle) = media_data(Some("M0003"), None, None, Some(1980));
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(desc, "Media from 1980");
+        assert_eq!(gramps_id, Some("M0003".to_string()));
+    }
+
+    #[test]
+    fn describe_media_all_fallbacks_empty() {
+        let (graph, handle) = media_data(Some("M0004"), None, None, None);
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(desc, "Unnamed Media");
+        assert_eq!(gramps_id, Some("M0004".to_string()));
+    }
+
+    #[test]
+    fn describe_media_no_gramps_id() {
+        let (graph, handle) = media_data(None, Some("Portrait"), None, None);
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(desc, "Portrait");
+        assert_eq!(gramps_id, None);
+    }
+
+    // -----------------------------------------------------------------------
+    // Enhanced Note description tests
+    // -----------------------------------------------------------------------
+
+    /// Helper: create a graph with a Note node.
+    fn note_data(gramps_id: Option<&str>, text: &str) -> (Graph, Handle) {
+        let mut graph = Graph::new();
+        let h = "n0001".to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Note(typed_graph::NoteData {
+                    handle: h.clone(),
+                    gramps_id: gramps_id.map(|s| s.to_string()),
+                    text: text.to_string(),
+                    ..typed_graph::NoteData::default()
+                }),
+            )
+            .unwrap();
+        (graph, h)
+    }
+
+    #[test]
+    fn describe_note_short_text() {
+        let (graph, handle) = note_data(Some("N0001"), "Short note");
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(desc, "Note: \"Short note\"");
+        assert_eq!(gramps_id, Some("N0001".to_string()));
+    }
+
+    #[test]
+    fn describe_note_empty_text() {
+        let (graph, handle) = note_data(Some("N0002"), "");
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert!(desc.contains("empty note"));
+        assert_eq!(gramps_id, Some("N0002".to_string()));
+    }
+
+    #[test]
+    fn describe_note_long_text_word_boundary() {
+        // Create a note longer than 150 chars with a space at the boundary
+        let long_text = "Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam quis nostrud.";
+        assert!(long_text.len() > 150); // verify it triggers truncation
+        let (graph, handle) = note_data(Some("N0003"), long_text);
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert!(desc.ends_with("...\""));
+        assert!(desc.len() < long_text.len() + 15);
+        assert!(desc.len() > 20);
+        assert_eq!(gramps_id, Some("N0003".to_string()));
+    }
+
+    #[test]
+    fn describe_note_long_text_no_space() {
+        // Create a 160-char string with no spaces in first 150 chars
+        let long_text = "a".repeat(160);
+        let (graph, handle) = note_data(Some("N0004"), &long_text);
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert!(desc.ends_with("...\""));
+        assert_eq!(gramps_id, Some("N0004".to_string()));
+    }
+
+    #[test]
+    fn describe_note_exact_150_chars() {
+        let exact_text = "x".repeat(150);
+        let (graph, handle) = note_data(Some("N0005"), &exact_text);
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert!(!desc.ends_with("...\"")); // no truncation needed
+        assert!(desc.contains("Note:"));
+        assert_eq!(gramps_id, Some("N0005".to_string()));
+    }
+
+    #[test]
+    fn describe_note_no_gramps_id() {
+        let (graph, handle) = note_data(None, "Hello");
+        let (desc, gramps_id) = describe_node(&graph, &handle);
+        assert_eq!(desc, "Note: \"Hello\"");
         assert_eq!(gramps_id, None);
     }
 
