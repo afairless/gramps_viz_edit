@@ -199,12 +199,16 @@ fn type_specific_orphan_rule(handle: &Handle, graph: &Graph, to_delete: &HashSet
         None => return false,
     };
 
+    // Hard invariant: non-seed people are never deleted by cascade.
+    // Seed people are placed in to_delete before the cascade starts, so
+    // this function is never called for them — only for non-seed people
+    // who are neighbors of deleted nodes. Such people must never be
+    // flagged as orphaned, regardless of their connectivity.
+    if matches!(node, Node::Person(_)) {
+        return false;
+    }
+
     match node {
-        Node::Person(_) => {
-            // People are only in the deletion set if they were in the seed
-            // (selected by the user). Unselected people are never deleted.
-            false
-        }
         Node::Family(_) => {
             // A family is orphaned if it has NO remaining connections to
             // non-deleted people (father, mother, OR children).
@@ -374,6 +378,9 @@ fn type_specific_orphan_rule(handle: &Handle, graph: &Graph, to_delete: &HashSet
             });
             !has_live_tag_ref
         }
+        // Catch-all: Person is handled by the guard at the top of this function;
+        // any other unexpected node type is also kept alive.
+        _ => false,
     }
 }
 
