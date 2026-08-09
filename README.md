@@ -197,6 +197,7 @@ See [Visualization](#visualization) for details on the force-directed graph.
 | `schema download` | Download a schema from Gramps GitHub |
 | `diff <file_a> <file_b>` | Compare two Gramps XML files and produce a structured diff report |
 | `integrate diff-viz --diff <CSV> --selections <JSON>` | Merge diff CSV with visualizer selections (CSV/JSON output) |
+| `delete <FILE> --selections <JSON>` | Delete selected people and their orphaned dependencies from a .gramps file |
 
 The `visualize` subcommand opens a native desktop window with an interactive
 force-directed graph of the family tree. It uses **Tauri v2** for the desktop
@@ -323,6 +324,7 @@ Generate → Validate (Gate 1) → Adversarial Transform → Validate (Gate 2) �
 | `visualize` | `crates/visualize/` | Tauri v2 desktop app with D3.js force-directed graph visualization (gated behind the `visualize` Cargo feature) |
 | `integrate` | `crates/integrate/` | Merge `gramps-gen diff` CSV output with visualizer selection JSON (full outer join by handle) |
 | `diff` | `crates/diff/` | Gramps XML diff analyzer: compare two `.gramps` files, produce structured diff report |
+| `delete` | `crates/delete/` | Deletion cascade engine: remove selected people and compute orphaned dependencies for removal |
 
 ## Documentation
 

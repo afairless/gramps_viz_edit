@@ -117,10 +117,18 @@ gramps_viz_edit/
 │       │       ├── stats/        # Streaming count & report (stats command)
 │       │       ├── validate.rs   # Minimal XML structure check
 │       │       ├── visualize.rs  # Spawns gramps-gen-visualize binary
+│       │       ├── delete.rs     # Delete selected people and orphaned dependencies
 │       │       ├── diff.rs       # Compare two Gramps XML files
 │       └── tests/
 │           ├── e2e.rs              # Subprocess-based E2E tests
 │           └── integration.rs    # Integration tests
+│   ├── delete/                     # Deletion cascade engine: remove people and orphaned dependencies
+│       └── src/
+│           ├── lib.rs              # Library root, re-exports
+│           ├── types.rs            # DeletePlan, DeleteManifest, DeleteCandidate, TypePlan, ReviewState
+│           ├── cascade.rs          # Fixed-point cascade engine (read-only on graph)
+│           ├── review.rs           # Interactive terminal review loop
+│           └── manifest.rs         # Save/load/validate deletion manifests (JSON)
 ```
 
 ## Key Design Rules

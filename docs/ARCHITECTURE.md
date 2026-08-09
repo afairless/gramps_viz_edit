@@ -13,6 +13,7 @@ The system is a **Rust workspace** with eight crates:
 | `gramps-reader` | Shared library for streaming `.gramps` XML parsing, DSU, generation computation, `compute_generation_table` for FamilyGroupGenerationTable |
 | `integrate` | Diff-viz merge: full outer join of diff CSV and visualizer selections by handle |
 | `diff` | Gramps XML diff analyzer — compare and match entities across two family trees |
+| `delete` | Deletion cascade engine — remove seed people and compute orphaned dependencies |
 | `cli` | CLI binary (`gramps-gen`), scenario parsing, pipeline wiring |
 | `visualize` | Tauri v2 desktop app with D3.js force-directed graph visualization (optional, gated behind `--features visualize`) |
 
@@ -113,6 +114,18 @@ A **Python extractor** (`extract/extract_schema.py`) introspects Gramps Python c
 │  gramps-gen schema list/download ── Schema management          │
 │  gramps-gen visualize ──────── Spawns gramps-gen-visualize     │
 │  gramps-gen diff <file_a> <file_b> ── Diff analysis            │
+│  gramps-gen integrate diff-viz ── Merge diff + viz selections  │
+│  gramps-gen delete <file> ───── Delete cascade from selections │
+└────────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────┼─────────────────────────────────────┐
+│  delete  (Rust crate)    │  consumes Graph + selections JSON    │
+│                          ▼                                     │
+│  Cascade engine ──────────── cascade.rs (fixed-point)          │
+│  Interactive review ──────── review.rs (terminal TUI)          │
+│  Manifest  ────────────────── manifest.rs (save/load JSON)     │
+│  Types     ────────────────── types.rs (DeletePlan, Manifest)  │
 └────────────────────────────────────────────────────────────────┘
                            │
                            ▼
@@ -545,6 +558,7 @@ Future: plan describes extracting this from the Gramps RelaxNG schema at build t
 | `gramps-gen schema download [VERSION]` | Download a schema from Gramps GitHub |
 | `gramps-gen diff <file_a> <file_b>` | Compare two Gramps XML files and produce a structured diff report |
 | `gramps-gen integrate diff-viz` | Merge diff CSV and visualizer selections into a combined report |
+| `gramps-gen delete <file>` | Remove selected people and orphaned dependencies from a .gramps file |
 
 ### Generate flags
 
@@ -756,6 +770,68 @@ gender, family group) with a `row_kind` column indicating the match status.
 
 The `gramps-gen integrate diff-viz` CLI subcommand wires the pipeline:
 `parse diff CSV → parse selections JSON → merge → format output`.
+
+---
+
+## Delete Tool
+
+The `delete` crate provides a deletion cascade engine that safely removes
+selected people and all orphaned dependencies from a Gramps graph.
+
+### Purpose
+
+Remove seed people (specified via visualizer selection JSON) and compute the
+full cascade of orphaned dependencies: when a person is deleted, families,
+events, places, citations, sources, repositories, media, notes, and tags that
+become unreachable are also marked for deletion.
+
+### Architecture
+
+The cascade runs in three phases on a **read-only** Graph:
+
+1. **Phase A — Pre-connectivity recording**: Record all edges before any removal
+2. **Phase B — Fixed-point orphan detection**: Iteratively detect nodes that
+   become orphaned (no incoming edges from surviving nodes) after removing seed
+   people and previously detected orphans
+3. **Phase C — Per-type rules**: Apply type-specific orphan rules following the
+   dependency chain: People → Families → Events → Places → Citations →
+   Sources → Repositories → Media → Notes → Tags
+
+### Per-Type Orphan Rules
+
+| Type | Orphaned when... |
+|---|---|
+| Person | Explicitly selected as a seed for deletion |
+| Family | No remaining father/mother connections to surviving people, and no remaining children |
+| Event | No remaining EventRef edges from surviving people or families |
+| Place | No remaining PlaceRef edges and no place_handle references from surviving nodes |
+| Citation | No remaining CitationRef edges from surviving nodes |
+| Source | No remaining source_handle references from surviving citations |
+| Repository | No remaining repo_handle references from surviving sources |
+| Media | No remaining MediaRef edges from surviving nodes |
+| Note | No remaining NoteRef edges from surviving nodes |
+| Tag | No remaining TagRef edges from surviving nodes |
+
+### Interactive Review
+
+The `review.rs` module provides a terminal TUI for reviewing deletion candidates
+type-by-type (People, Families, Events, etc.) with 6 actions: `y` (delete), `n`
+(keep), `l` (list), `r` (review details), `s` (skip type), `q` (quit).
+
+### Manifest Format
+
+Deletion manifests are version-1 JSON files with: `version`, `source_file`,
+`selections_file`, `created_at`, `seed_people`, and `plan` (per-type `to_delete`
+- `kept` arrays). Manifests support audit trail workflows and can be saved/loaded
+via `--save-manifest` / `--load-manifest`.
+
+### Integration
+
+The `gramps-gen delete <file>` CLI subcommand supports flags: `--selections`
+(required), `--output`, `--yes` (skip review), `--dry-run` (compute only),
+`--save-manifest`, `--load-manifest`. The cascade engine reads the Graph
+via `gramps-reader`, computes orphaned dependencies, and writes filtered
+XML via the `output` crate.
 
 ---
 
