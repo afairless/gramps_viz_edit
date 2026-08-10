@@ -939,7 +939,11 @@ impl GraphXmlWriter {
             Node::Note(n) => match field_name {
                 "handle" => Some(n.handle.clone()),
                 "gramps_id" => n.gramps_id.clone(),
-                "type" => n.type_field.clone(),
+                "type" => Some(
+                    n.type_field
+                        .clone()
+                        .unwrap_or_else(|| "General".to_string()),
+                ),
                 "format" => n.format.map(|v| v.to_string()),
                 _ => None,
             },
@@ -1622,6 +1626,44 @@ mod tests {
 
         assert!(xml.contains(r#"<note handle="n1""#));
         assert!(xml.contains("<text>Some notes here</text>"));
+    }
+
+    #[test]
+    fn serialize_note_defaults_missing_type_to_general() {
+        // Regression: a bare <note> (type_field: None) must never be emitted
+        // without a type attribute on the delete round-trip path, because
+        // Gramps drops the note on import if <note> has no type.
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map, "5.2.0");
+        let mut graph = Graph::new();
+        graph
+            .add_node("n1".to_string(), make_note("n1", "Untyped note"))
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"<note handle="n1" type="General""#));
+        assert!(!xml.contains(r#"<note handle="n1" id="""#));
+    }
+
+    #[test]
+    fn serialize_note_preserves_explicit_type() {
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map, "5.2.0");
+        let mut graph = Graph::new();
+        let mut note = make_note("n1", "Research note");
+        if let Node::Note(ref mut n) = note {
+            n.type_field = Some("Research".to_string());
+        }
+        graph.add_node("n1".to_string(), note).unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"<note handle="n1" type="Research""#));
     }
 
     #[test]
