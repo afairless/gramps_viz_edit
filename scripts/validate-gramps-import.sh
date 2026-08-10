@@ -10,6 +10,18 @@
 # Usage:
 #   ./scripts/validate-gramps-import.sh <file.gramps>
 #
+# Stale-artifact guard note:
+#   Before running the delete round-trip / import tests, always run
+#   `cargo clean -p typed-graph` so the generated $OUT_DIR code matches the
+#   current schema files.  Stale $OUT_DIR artifacts (e.g. an old NoteData
+#   without `type_field: Option<String>`) can mask the note-type default fix
+#   on the delete round-trip path.
+#
+# CI wiring is intentionally deferred: there is no `.github/workflows/`
+# directory in this repo yet, so this script is not yet wired into a
+# workflow.  When one is added (with Gramps in the runner image), call this
+# script after a `cargo clean -p typed-graph` in the same job.
+#
 # Exit code:
 #   0 — import completed with no error patterns in output
 #   1 — usage error, or import failed / emitted error patterns
