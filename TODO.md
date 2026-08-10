@@ -1,162 +1,227 @@
-# Implementation Plan: Fix missing `type` attribute on `<note>` elements (Gramps import crash)
+# Implementation Plan: Delete Tool Output Round-Trip Fidelity
 
-Source: [`docs/research/note-type-attribute-roundtrip-bug.md`](docs/research/note-type-attribute-roundtrip-bug.md)
+Source: [`docs/research/delete-output-roundtrip.md`](docs/research/delete-output-roundtrip.md)
 
-**Problem**: Gramps crashes on import (`TypeError: __str__ returned non-string (type int)`) because `<note>` elements produced by the `delete` tool are missing the `type` attribute. The two-sided round-trip gap is in **both** the parser (`gramps-reader`) and the serializer (`output`).
+**Problem**: `gramps-gen delete` output is not byte-faithful to its input.
+Four classes of fidelity gaps remain after the already-committed note-type
+fix (76ed57e…c098134): (1) no crash-prevention default when a `<note>` has no
+`type` on input, (2) dates are truncated to year-only (with a **year-stored-
+in-`day`** bug), (3) the output mixes a 5.1 namespace with 5.2-style content
+(e.g. nested `<eventtype>`), and (4) the `change` attribute is dropped
+(deliberate, needs documenting).
 
-**Strategy**: Round-trip fix through the whole pipeline — change the schema field type to a lossless `String` (no enum-mapping), then fix parser → serializer → diff consumer, then lock it in with unit, property-based, round-trip, and E2E tests.
+**Strategy**: Defense-in-depth for the note-type default → fix date
+truncation (structured + raw text) → make output version-aware so content
+format matches the preserved namespace → expand round-trip/E2E coverage →
+harden CI against stale build artifacts.
+
+> Prior note-type plan (committed): see `git log 76ed57e..c098134`. This
+> plan is a fresh sequence for the delete-output-roundtrip research doc.
 
 ## Impact summary
 
-| Component | Change |
-|---|---|
-| `schemas/schema-5.2.json` | `NoteData.type` field: `enum_ref` → `string` (breaking) |
-| `schemas/schema-5.1.json` | **No change** (build-time converter keeps integer→name mapping) |
-| `crates/diff/src/compare.rs` | `compare_note` `FieldKind::Enum` → `FieldKind::Text`; update `make_note`/`note_change_type` tests |
-| `crates/gramps-reader/src/xml.rs` | Add generic `read_attr` helper |
-| `crates/gramps-reader/src/xml/graph.rs` | Parse `type` and `format` attrs on `<note>` |
-| `crates/output/src/serialization_map.rs` | Add `type`/`format` attributes; remove `format` from Note children |
-| `crates/output/src/xml.rs` | Handle `type`/`format` in `get_field_value`; remove dead `format` inline-struct handlers |
-| `scripts/validate-gramps-import.sh` | New CI-validation script (gated on Gramps; CI deferred — no `.github/workflows/`) |
+| Phase | Component | Change |
+|---|---|---|
+| 1 — Crash-free output | `crates/output/src/xml.rs` | `get_field_value` Note arm defaults `type` → `"General"` |
+| 1 — Crash-free output | `crates/typed-graph/src/generate/builder.rs` | `NoteBuilder::build` defaults `type_field` → `"General"` |
+| 2 — Date fidelity | `crates/gramps-reader/src/xml/graph.rs` | `parse_year_from_val` → `parse_date_from_val` (year/month/day + raw text) |
+| 2 — Date fidelity | `crates/output/src/xml.rs` | `write_date_element` serializes `text` when present |
+| 3 — Version-aware | `crates/output/src/xml.rs` | `gramps_xml_version` field; `namespace_to_version()`; 5.1-flat vs 5.2-nested event types |
+| 3 — Version-aware | `crates/cli/src/commands/delete.rs` | use input version instead of hardcoded `"5.2"` |
+| 4 — Tests | `crates/*/tests/` | 5.1 fixture round-trip, note default/format, import golden |
+| 5 — CI | `.github/workflows/` (deferred), `scripts/` | stale-artifact guard, wire `validate-gramps-import.sh` |
 
-> **Design decision**: Store note type as `Option<String>` rather than `Option<NoteType>`. The `NoteType` enum variant names do not match Gramps XML string values, so enum mapping would break round-tripping. `String` makes the output byte-for-byte faithful to the input. The `NoteType` enum stays in the schema (unused by `NoteData`) for potential future use.
+> **Design decisions** (from source doc): default note type `"General"`;
+> Option A version-aware output; structured + raw-text date fidelity; keep
+> `NoteData.type_field` as `Option<String>` (already merged).
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `fix(schema): change NoteData type field from enum to string` | Schema change + diff consumer ripple | `schemas/schema-5.2.json`, `crates/diff/src/compare.rs` | Unit, smoke |
-| 2 | `feat(gramps-reader): add generic read_attr XML attribute helper` | Generic attribute reader | `crates/gramps-reader/src/xml.rs` | Unit |
-| 3 | `fix(gramps-reader): parse note type and format attributes` | Note builder + parser | `crates/gramps-reader/src/xml/graph.rs` | Unit, integration |
-| 4 | `fix(output): add type/format attributes to note, drop format child` | Serialization map | `crates/output/src/serialization_map.rs` | Unit |
-| 5 | `fix(output): serialize note type/format fields, remove dead handlers` | Field-value writer | `crates/output/src/xml.rs` | Unit |
-| 6 | `test: add note type/format round-trip and property tests` | Round-trip coverage | `crates/typed-graph/tests/`, `crates/cli/tests/` | Unit, property |
-| 7 | `test: add gramps import E2E with fixture notes` | Gramps-gated E2E | `crates/cli/tests/e2e.rs` | Integration (E2E) |
-| 8 | `chore: add CI gramps import validation script` | CI validation | `scripts/validate-gramps-import.sh` | — |
+| 1 | `fix(output): default missing note type to "General" at serialization` | Serialization default | `crates/output/src/xml.rs` | Unit |
+| 2 | `fix(typed-graph): default note type to "General" in builder` | Builder default | `crates/typed-graph/src/generate/builder.rs` | Unit |
+| 3 | `fix(gramps-reader): parse full date into year/month/day/raw text` | Date parser | `crates/gramps-reader/src/xml/graph.rs` | Unit |
+| 4 | `fix(output): serialize original date text when present` | Date serializer | `crates/output/src/xml.rs` | Unit |
+| 5 | `docs(output): document intentional change attribute omission` | Doc contract | `crates/output/src/serialization_map.rs` | — |
+| 6 | `test: add date round-trip and property-based fidelity tests` | Date round-trip coverage | `crates/gramps-reader/tests/`, `crates/output/tests/` | Unit, property |
+| 7 | `feat(output): derive XML format version from namespace` | Version derivation | `crates/output/src/xml.rs` | Unit |
+| 8 | `feat(output): version-aware event type serialization (5.1 flat / 5.2 nested)` | Format switch-points | `crates/output/src/xml.rs` | Unit |
+| 9 | `fix(delete): use input Gramps version for output XML format` | Delete wiring | `crates/cli/src/commands/delete.rs` | Integration |
+| 10 | `test: add Gramps 5.1 fixture round-trip import test` | 5.1 E2E | `crates/cli/tests/e2e.rs` | Integration (E2E) |
+| 11 | `test: note default type and format attribute round-trip` | Note fidelity tests | `crates/cli/tests/`, `crates/output/tests/` | Unit, integration |
+| 12 | `chore: add Gramps import golden test with committed fixture` | Import golden | `crates/cli/tests/e2e.rs`, fixture | Integration (E2E) |
+| 13 | `chore: harden CI against stale build artifacts` | CI guardrail | `.github/workflows/` (if created), `scripts/` | — |
+
+> After steps 1 and 2, run `cargo clean -p typed-graph && cargo test` once to
+> confirm the freshly-generated `NoteData` (with `type_field: Option<String>`)
+> — stale `$OUT_DIR` artifacts can mask the note-type fix.
 
 ## Step details
 
-### Step 1 — Schema change + downstream consumer ripple
+### Step 1 — Serialization default for missing note type
 
-**`schemas/schema-5.2.json`** — change Note `type` field (under `primary_types.Note.fields.type`):
-
-```json
-// Before
-"type": { "type": "enum_ref", "target": "NoteType", "required": false }
-// After
-"type": { "type": "string", "required": false }
-```
-
-Generated `NoteData.type_field` becomes `Option<String>`. `NoteType` enum remains in the schema.
-
-**Do not** touch `schemas/schema-5.1.json` (build-time converter maps integer→name; a raw `string` field would conflict).
-
-**Verify merge**: run `cargo check --features schema-5-2` (single-version) first, then `cargo check --all-features` (merged 5.1+5.2). The `diff` crate is the only typed consumer of `NoteData.type_field`. If the all-features merge emits a build error (5.1 `enum_ref` vs 5.2 `string` differ), apply a fallback:
-
-1. Merge treats `enum_ref`→`string` as a compatible promotion (store as `String`).
-2. Change both schema files to `string` (updates `schema_convert.rs`).
-3. Accept single-schema `--features` selection for this field.
-
-Do not proceed until `cargo check --all-features` passes.
-
-**`crates/diff/src/compare.rs`** — `compare_note()` (line ~1350): change `FieldKind::Enum` + `format!("{v:?}")` to `FieldKind::Text` + raw clone:
+**`crates/output/src/xml.rs`** — in `get_field_value`'s `Node::Note` arm,
+change the `"type"` arm so a `None` `type_field` emits `"General"`:
 
 ```rust
-// After
-field_kind: FieldKind::Text,
-old_value: a.type_field.clone(),
-new_value: b.type_field.clone(),
+"type" => Some(n.type_field.clone().unwrap_or_else(|| "General".to_string())),
 ```
 
-Update `make_note()` test helper (line ~2338) and `note_change_type` test (line ~2384): `NoteType::General`/`Research` → `"General".to_string()`/`"Research".to_string()`.
+This is the **primary** guard ensuring Gramps never receives a `<note>`
+without a `type` attribute on the delete round-trip path.
 
-`crates/diff/src/matcher.rs` `NoteData { type_field: None, .. }` (line ~1012) is compatible — no change.
+**Tests** (existing xml.rs test module): `type_field: Some("Research")` →
+`type="Research"`; `type_field: None` → `type="General"` (regression: no
+bare `<note>` ever emitted).
 
-**Verify**: `cargo check --workspace --all-targets` compiles. **Acceptance**: merged `--all-features` build passes.
+### Step 2 — Builder default for note type (generation path only)
 
-### Step 2 — Generic `read_attr` attribute reader
+**`crates/typed-graph/src/generate/builder.rs`** — in `NoteBuilder::build()`
+(and/or the `GraphBuilder::add_note` initializer), set `type_field` to
+`Some("General".to_string())` when the caller left it `None`. Do **not**
+change the generated `NoteData::default()` — keep that `None` for all other
+consumers (build.rs untouched).
 
-**`crates/gramps-reader/src/xml.rs`** — add, following the existing `read_handle_attr`/`read_id_attr`/`read_hlink_attr` pattern:
+**Tests**: `add_note().with_text("x").build()` yields a note with
+`type_field == Some("General")`; explicit `.with_type("Research")` (if such
+a setter exists / add one) is preserved.
 
-```rust
-/// Read an arbitrary string attribute from an element.
-///
-/// Returns `None` when the element has no attribute with the given name
-/// (whether namespaced or bare).
-pub fn read_attr(e: &quick_xml::events::BytesStart, name: &[u8]) -> Option<String> {
-    for attr in e.attributes().flatten() {
-        let key = attr.key.as_ref();
-        if key == name || key.ends_with(name) {
-            return Some(String::from_utf8_lossy(&attr.value).to_string());
-        }
-    }
-    None
-}
-```
-
-**Tests** (existing `mod tests` in xml.rs): present → `Some("value")`; missing → `None`; namespaced (`ns:type`) → matches.
-
-> Note: `ends_with(b"type")` also matches a hypothetical `mimetype`; Gramps XML has none, so this matches the existing helper pattern.
-
-### Step 3 — Parser reads `type` and `format` on `<note>`
+### Step 3 — Full date parsing (fixes year-as-day + truncation)
 
 **`crates/gramps-reader/src/xml/graph.rs`**:
 
-- Add fields to `NoteBuilder`: `note_type: Option<String>`, `note_format: Option<i32>`.
-- `into_data()`: pass through both into `NoteData { type_field, format, .. }`.
-- Import `read_attr` alongside `read_handle_attr`/`read_id_attr`/`read_hlink_attr`.
-- In the `b"note"` parser arm (line ~327), read both attributes; **filter empty `""` to `None`** (semantically equivalent to missing):
+- Replace `parse_year_from_val` with `parse_date_from_val` returning a small
+  `ParsedDate { year: i32, month: Option<i32>, day: Option<i32>, raw_text: Option<String> }`.
+  Split the `val` string on `-` for year/month/day; capture the entire raw
+  `val` as `raw_text` (reuse the existing `read_dateval_val` helper).
+- Update the `b"dateval"` arm (~line 1250) to build
+  `DateValue { quality: None, modifier: None, day: parsed.day, month: parsed.month, year: parsed.year, text: parsed.raw_text }`.
+  This removes the `day: Some(year as i32)` bug and preserves month/day/text.
+
+**Tests** (xml.rs/graph.rs unit tests): `"1868-09-20"` → `{year:1868,
+month:Some(9), day:Some(20)}`; `"1868"` → `{year:1868, month:None, day:None}`;
+`"1868-09"` → day `None`; a modifier/range `val` string preserved verbatim in
+`text`.
+
+### Step 4 — Serialize original date text when present
+
+**`crates/output/src/xml.rs`** — in `write_date_element`, when `d.text` is
+`Some` and non-empty, use it directly as the `val` attribute instead of
+reconstructing from year/month/day:
 
 ```rust
-let note_type = read_attr(e, b"type").filter(|s| !s.is_empty());
-let note_format = read_attr(e, b"format").and_then(|s| s.parse::<i32>().ok());
+let date_str = match &d.text {
+    Some(t) if !t.is_empty() => t.clone(),
+    _ => { /* existing year/month/day reconstruction */ }
+};
 ```
 
-**Tests** (in `crates/gramps-reader/tests/`): `type="Research"` → `Some("Research")`; missing `type` → `None`; `type=""` → `None`; `format="1"` → `Some(1)`; missing `format` → `None`.
+**Tests**: a `DateValue` with `text` set round-trips to the exact `val`
+string; a `DateValue` constructed via `new_ymd` (with `text: None`) still
+emits `YYYY-MM-DD`.
 
-### Step 4 — Serializer attribute map: add `type`/`format`, remove `format` child
+### Step 5 — Document intentional `change` attribute omission
 
-**`crates/output/src/serialization_map.rs`** Note `XmlTypeInfo`:
+**`crates/output/src/serialization_map.rs`** — add a doc/`//` comment at the
+`type_map` definition (near the Note/Primary entries) explaining that the
+`change` timestamp attribute is **deliberately** excluded from the
+serialization map on all primary types because Gramps auto-generates the
+timestamp on import. Prevents future devs treating it as a bug.
 
-- Add to `attributes`: `{ field: "type", attr_name: "type" }`, `{ field: "format", attr_name: "format" }`.
-- Remove the `format` child entry (`XmlChildSource::InlineStruct("format")`) from `children` so `format` is not emitted twice.
+No tests. (`—`)
 
-**Tests**: mapping test asserting the Note attributes include `type`/`format` and the `format` child is gone.
+### Step 6 — Date round-trip + property-based tests
 
-### Step 5 — Serializer field writer + dead-code removal
+Add round-trip tests across `gramps-reader` and `output`:
+
+- `"1868-09-20"` survives parse→serialize→parse unchanged (the original
+  Bug 2 regression).
+- Year-only, year-month, full YMD, and modifier/range/spans ("before
+  ...", ranges) each survive round-trip.
+- **Property-based** invariant for all valid `DateValue` inputs:
+  `parse_xml(serialize_xml(date))` yields an equivalent `DateValue` —
+  catches leap days, month boundaries, and modifier text single-example
+  tests miss.
+
+### Step 7 — Derive XML format version from namespace
 
 **`crates/output/src/xml.rs`**:
 
-- `get_field_value()` `Node::Note` arm: add `"type" => n.type_field.clone()` and `"format" => n.format.map(|v| v.to_string())`.
-- Remove the `"format"` arm for `Node::Note` in both `has_inline_struct_value` (line ~433) and `write_inline_struct` (line ~661) — dead after Step 4, prevents double-emission if re-added later.
+- Add `namespace_to_version(ns)` helper reading the namespace URI
+  (`.../xml/1.7.1/` → `"5.1"`, `.../xml/1.7.2/` → `"5.2"`).
+- Add a `gramps_xml_version: String` field to `GraphXmlWriter` (distinct
+  from the schema `gramps_version` used for the header).
+- Have `with_namespace` derive and store the format version from the passed
+  namespace (internal consistency with the preserved namespace).
 
-**Tests** (existing xml.rs test module): `type_field: Some("Research")` → `type="Research"` on `<note>`; `None` → no `type` attr; `format: Some(1)` → `format="1"`.
+**Tests**: `namespace_to_version` maps known URIs correctly and falls back
+safely for unknown ones.
 
-### Step 6 — Round-trip + property-based regression tests
+### Step 8 — Version-aware event-type serialization
 
-**Property-based round-trip** (in `crates/typed-graph/tests/` or `crates/cli/tests/`):
+**`crates/output/src/xml.rs`** — audit all format switch points where 5.2
+nesting is hardcoded (document findings in a code comment):
 
-- Known note-type strings (`"General"`, `"Research"`, `"Transcript"`, `"Citation"`, `"Report"`, `"Html code"`, `"To Do"`, `"Source text"`, `"Link"`, `"Unknown"`, `"LDS"`, `"Person Name"`) each survive parse→serialize→parse unaltered.
-- Known `format` values (`0`, `1`) survive the same round-trip.
-- Assert `format` appears only as an attribute on `<note>`, never a child element (regression for Step 4).
+- Event type: currently `<eventtype><type>Birth</type></eventtype>` →
+  for `gramps_xml_version == "5.1"` emit flat `<type>Birth</type>`.
+- Ensure the `<created>` header uses `version` matching the derived format.
 
-**Round-trip test** (`crates/cli/tests/`): parse a `.gramps` file with notes → serialize → parse → note types intact.
+For each switch point emit the 5.1-flat or 5.2-nested form per
+`gramps_xml_version`. **Tests**: event type serializes flat for 5.1, nested
+for 5.2.
 
-### Step 7 — Gramps-gated E2E
+### Step 9 — Delete uses input version
 
-**`crates/cli/tests/e2e.rs`** (gated on Gramps being installed): run `gramps-gen delete` on a fixture with notes → import output via `timeout 15 gramps -y -q -i output.gramps 2>&1` → assert no `ERROR:`, `Traceback`, `TypeError`, or `Failed to import`. Key regression assertion: every `<note>` element carries a `type` attribute.
+**`crates/cli/src/commands/delete.rs`** — replace the hardcoded
+`let gramps_version = "5.2";` with the version derived from the parsed
+`namespace` (via `namespace_to_version`), so the writer's content format and
+header match the input. **Tests**: integration test that delete output for a
+5.1-namespace input emits 5.1-flat event types.
 
-### Step 8 — CI validation script
+### Step 10 — Gramps 5.1 fixture round-trip import test
 
-**`scripts/validate-gramps-import.sh`** — takes a `.gramps` file, runs `gramps -y -q -i` under a 15s timeout, scans combined stdio for `ERROR:|Traceback|TypeError|Failed to import`, exit 0 on success / 1 on failure (treating timeout-124 as success since Gramps stays open). Add to CI only if `.github/workflows/` exists and Gramps is in the runner image — **deferred** here (no workflow directory currently present).
+**`crates/cli/tests/e2e.rs`** — add a gated test: a real (or representative
+synthetic) 5.1-namespace/5.1-format `.gramps` fixture → `gramps-gen delete`
+→ `timeout 15 gramps -y -q -i output.gramps` → assert no `ERROR:`,
+`Traceback`, `TypeError`, or `Failed to import`. This covers the user's
+actual 5.1 input path that the existing 5.2-only note test misses.
+
+### Step 11 — Note default-type and `format` attribute tests
+
+- Assert a `<note>` with **no** `type` in input receives `type="General"` in
+  output (lock in Step 1).
+- Assert the `format` attribute (e.g. `format="1"` HTML notes) survives the
+  round-trip — fidelity gap (not crash) regression for the Note `XmlTypeInfo`
+  added in the prior plan.
+
+### Step 12 — Gramps import golden test
+
+Add a committed fixture of the smallest possible real Gramps export;
+test: parse → serialize → `gramps -y -q -i` → no errors on stdout/stderr.
+Guard on Gramps availability next to the other gated E2E tests.
+
+### Step 13 — CI stale-artifact hardening
+
+- CI runs `cargo clean -p typed-graph` before the delete round-trip tests so
+  generated `$OUT_DIR` code always matches the current schema files.
+- Wire `scripts/validate-gramps-import.sh` into CI **only if** `.github/
+  workflows/` exists and Gramps is in the runner image — **deferred** here
+  (no workflow directory present).
+
+## Repository health / pre-work
+
+Before implementing, satisfy the incremental-development pre-work gate:
+`git status` clean, `cargo test --workspace` green, `git branch --show-current`
+on `main`. Create a feature branch (e.g. `agent/delete-output-roundtrip`) per
+git-workflow before the first step commit.
 
 ## Test commands
 
 ```bash
-cargo check --features schema-5-2          # Step 1 single-version
-cargo check --all-features                  # Step 1 merged
-cargo check --workspace --all-targets      # Step 1 ripple
-cargo test -p gramps-reader                 # Steps 2–3
-cargo test -p output                        # Steps 4–5
-cargo test -p cli                           # Steps 6–7
-cargo test -p typed-graph                   # Step 6 property tests
-cargo clippy --all-targets --all-features -- -D warnings   # final
+cargo test -p output                                   # Steps 1, 4, 7, 8, 11
+cargo test -p typed-graph                              # Step 2
+cargo test -p gramps-reader                            # Steps 3, 6
+cargo test -p cli                                      # Steps 9-12
+cargo test --workspace                                 # full suite before each commit
+cargo clippy --all-targets --all-features -- -D warnings   # final gate
+cargo clean -p typed-graph && cargo test               # stale-artifact verification
 ```
