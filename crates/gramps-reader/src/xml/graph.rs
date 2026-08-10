@@ -328,8 +328,8 @@ impl GraphParser {
                             let handle = read_handle_attr(e).unwrap_or_default();
                             let gramps_id = read_id_attr(e);
                             let note_type = read_attr(e, b"type").filter(|s| !s.is_empty());
-                            let note_format = read_attr(e, b"format")
-                                .and_then(|s| s.parse::<i32>().ok());
+                            let note_format =
+                                read_attr(e, b"format").and_then(|s| s.parse::<i32>().ok());
                             current_note = Some(NoteBuilder {
                                 handle,
                                 gramps_id,
@@ -1247,16 +1247,17 @@ impl GraphParser {
                             }
                         }
                         b"dateval" => {
-                            // Parse date from empty element attributes
-                            let year = parse_year_from_val(e);
+                            // Parse date into structured year/month/day plus the
+                            // raw val text so the original value round-trips.
+                            let parsed = parse_date_from_val(e);
                             if let Some(ref mut ev) = current_event {
                                 ev.date = Some(DateValue {
                                     quality: None,
                                     modifier: None,
-                                    day: Some(year as i32),
-                                    month: None,
-                                    year: year as i32,
-                                    text: None,
+                                    day: parsed.day,
+                                    month: parsed.month,
+                                    year: parsed.year,
+                                    text: parsed.raw_text,
                                 });
                             }
                         }
@@ -1694,7 +1695,6 @@ impl TagBuilder {
 // ---------------------------------------------------------------------------
 
 /// Read the `val` attribute from a `<dateval>` element.
-#[allow(dead_code)]
 fn read_dateval_val(e: &quick_xml::events::BytesStart) -> String {
     for attr in e.attributes().flatten() {
         let key = attr.key.as_ref();
@@ -1705,21 +1705,46 @@ fn read_dateval_val(e: &quick_xml::events::BytesStart) -> String {
     String::new()
 }
 
-/// Parse the year from a `<dateval>` element's `val` attribute.
-fn parse_year_from_val(e: &quick_xml::events::BytesStart) -> i64 {
-    for attr in e.attributes().flatten() {
-        let key = attr.key.as_ref();
-        if key == b"val" || key.ends_with(b":val") {
-            let val = String::from_utf8_lossy(&attr.value);
-            // Format is typically "YYYY-MM-DD" or "YYYY-MM-DD (optional parts)"
-            if let Some(year_str) = val.split('-').next() {
-                if let Ok(year) = year_str.parse::<i64>() {
-                    return year;
-                }
-            }
-        }
+/// Structured date parsed from a `<dateval>` element's `val` attribute.
+///
+/// `raw_text` preserves the original `val` string verbatim (including
+/// modifier prefixes and ranges) so serialization can round-trip it exactly.
+#[derive(Debug, PartialEq)]
+struct ParsedDate {
+    year: i32,
+    month: Option<i32>,
+    day: Option<i32>,
+    raw_text: Option<String>,
+}
+
+/// Parse a `<dateval>` element's `val` attribute into structured fields.
+///
+/// The value is typically `"YYYY-MM-DD"` (or `"YYYY"`/`"YYYY-MM"`). The
+/// full value is also captured as `raw_text` so modifiers and ranges are
+/// preserved verbatim. Non-numeric (modifier/range) values fall back to a
+/// year of `0` in the structured fields but keep their text intact.
+fn parse_date_from_val(e: &quick_xml::events::BytesStart) -> ParsedDate {
+    let val = read_dateval_val(e);
+    let raw_text = if val.is_empty() {
+        None
+    } else {
+        Some(val.clone())
+    };
+
+    let mut parts = val.split('-');
+    let year = parts
+        .next()
+        .and_then(|y| y.trim().parse::<i32>().ok())
+        .unwrap_or(0);
+    let month = parts.next().and_then(|m| m.parse::<i32>().ok());
+    let day = parts.next().and_then(|d| d.parse::<i32>().ok());
+
+    ParsedDate {
+        year,
+        month,
+        day,
+        raw_text,
     }
-    0
 }
 
 // ---------------------------------------------------------------------------
@@ -1873,6 +1898,58 @@ mod tests {
         let (graph2, _ns2) = parse_gramps_xml(&output_str).unwrap();
         assert_eq!(graph2.node_count(), graph.node_count());
         assert_eq!(graph2.edge_count(), graph.edge_count());
+    }
+
+    #[test]
+    fn parse_date_from_full_ymd() {
+        let e = quick_xml::events::BytesStart::from_content(
+            "dateval val=\"1868-09-20\"",
+            b"dateval".len(),
+        );
+        let d = parse_date_from_val(&e);
+        assert_eq!(d.year, 1868);
+        assert_eq!(d.month, Some(9));
+        assert_eq!(d.day, Some(20));
+        assert_eq!(d.raw_text.as_deref(), Some("1868-09-20"));
+    }
+
+    #[test]
+    fn parse_date_from_year_only() {
+        let e =
+            quick_xml::events::BytesStart::from_content("dateval val=\"1868\"", b"dateval".len());
+        let d = parse_date_from_val(&e);
+        assert_eq!(d.year, 1868);
+        assert_eq!(d.month, None);
+        assert_eq!(d.day, None);
+        assert_eq!(d.raw_text.as_deref(), Some("1868"));
+    }
+
+    #[test]
+    fn parse_date_from_year_month() {
+        let e = quick_xml::events::BytesStart::from_content(
+            "dateval val=\"1868-09\"",
+            b"dateval".len(),
+        );
+        let d = parse_date_from_val(&e);
+        assert_eq!(d.year, 1868);
+        assert_eq!(d.month, Some(9));
+        assert_eq!(d.day, None);
+        assert_eq!(d.raw_text.as_deref(), Some("1868-09"));
+    }
+
+    #[test]
+    fn parse_date_modifier_preserves_raw_text() {
+        // A modifier val like "abt 1868" cannot be mapped to structured fields,
+        // but its raw text must be preserved verbatim for round-trip.
+        let e = quick_xml::events::BytesStart::from_content(
+            "dateval val=\"abt 1868\"",
+            b"dateval".len(),
+        );
+        let d = parse_date_from_val(&e);
+        assert_eq!(d.year, 0);
+        assert_eq!(d.month, None);
+        assert_eq!(d.day, None);
+        assert_eq!(d.raw_text.as_deref(), Some("abt 1868"));
     }
 
     #[test]
