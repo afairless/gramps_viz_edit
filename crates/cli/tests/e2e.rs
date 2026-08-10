@@ -1391,3 +1391,80 @@ fn e2e_delete_notes_import_roundtrip() {
     let _ = std::fs::remove_file(&sel_path);
     let _ = std::fs::remove_file(&out_path);
 }
+
+#[test]
+fn e2e_delete_51_namespace_emits_flat_event_type() {
+    // A 5.1-namespace input must round-trip with the same namespace and 5.1-flat
+    // event-type serialization (<type>Birth</type>), not the 5.2 nested form.
+    let pid = std::process::id();
+    let input_path = format!("/tmp/gramps_gen_e2e_51_in_{}.gramps", pid);
+    let sel_path = format!("/tmp/gramps_gen_e2e_51_sel_{}.json", pid);
+    let out_path = format!("/tmp/gramps_gen_e2e_51_out_{}.gramps", pid);
+
+    let fixture = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.1/">
+  <header><created date="2024-01-01" version="5.1"/></header>
+  <people>
+    <person handle="P0001">
+      <gender>M</gender>
+      <name>
+        <first>John</first>
+        <surname>
+          <surname>Smith</surname>
+          <primary>1</primary>
+        </surname>
+      </name>
+    </person>
+  </people>
+  <events>
+    <event handle="E0001">
+      <type>Birth</type>
+    </event>
+  </events>
+</database>
+"#;
+    // Delete P0001 only; the standalone event is unrelated and must survive.
+    let selections = r#"{
+  "selections": [
+    {"handle":"P0001","name":"John Smith","birth_date":null,"death_date":null,"gender":"male","family_group":0}
+  ]
+}"#;
+
+    std::fs::write(&input_path, fixture).unwrap();
+    std::fs::write(&sel_path, selections).unwrap();
+
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "delete",
+        &input_path,
+        "--selections",
+        &sel_path,
+        "--yes",
+        "--output",
+        &out_path,
+    ]);
+    assert_eq!(code, Some(0), "delete should succeed, stderr: {}", stderr);
+
+    let output = std::fs::read_to_string(&out_path).expect("output file should exist");
+
+    // The preserved 5.1 namespace must remain.
+    assert!(
+        output.contains("http://gramps-project.org/xml/1.7.1/"),
+        "5.1 namespace should be preserved, got: {}",
+        output
+    );
+    // 5.1 flat event type, with no 5.2 nested <eventtype> wrapper.
+    assert!(
+        output.contains("<type>Birth</type>"),
+        "5.1 event type should serialize flat, got: {}",
+        output
+    );
+    assert!(
+        !output.contains("<eventtype>"),
+        "5.1 output must not contain nested <eventtype>, got: {}",
+        output
+    );
+
+    let _ = std::fs::remove_file(&input_path);
+    let _ = std::fs::remove_file(&sel_path);
+    let _ = std::fs::remove_file(&out_path);
+}

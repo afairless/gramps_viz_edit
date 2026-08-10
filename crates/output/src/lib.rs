@@ -14,5 +14,6 @@ pub mod serialization_map;
 pub mod xml;
 
 pub use serialization_map::SerializationMap;
+pub use xml::namespace_to_version;
 pub use xml::GraphXmlWriter;
 pub use xml::SerializationError;

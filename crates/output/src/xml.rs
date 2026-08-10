@@ -995,7 +995,7 @@ impl GraphXmlWriter {
 /// serializing (e.g. flat-vs-nested event types) matches a namespace that was
 /// preserved from an input file. Falls back safely to `"5.2"` with a warning
 /// for unknown namespaces.
-fn namespace_to_version(namespace: &str) -> String {
+pub fn namespace_to_version(namespace: &str) -> String {
     match namespace {
         n if n.ends_with("/1.7.0/") => "5.0".to_string(),
         n if n.ends_with("/1.7.1/") => "5.1".to_string(),

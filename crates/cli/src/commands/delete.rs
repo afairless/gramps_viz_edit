@@ -247,8 +247,11 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
 
     // Build the writer with filter and namespace preservation
     let serialization_map = SerializationMap::new();
-    let gramps_version = "5.2"; // Use the version from the parsed namespace
-    let writer = GraphXmlWriter::new(serialization_map, gramps_version)
+    // Derive the output format version from the input namespace so the
+    // serialized content format (flat vs nested) and header match the input
+    // rather than always assuming 5.2.
+    let gramps_version = output::namespace_to_version(&namespace);
+    let writer = GraphXmlWriter::new(serialization_map, &gramps_version)
         .with_filter(final_to_delete.clone())
         .with_namespace(&namespace)
         .with_researcher_note("Cleaned by gramps-gen delete");
