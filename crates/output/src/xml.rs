@@ -72,6 +72,10 @@ pub struct GraphXmlWriter {
     gramps_version: String,
     /// XML namespace URI (e.g. "http://gramps-project.org/xml/1.7.2/").
     namespace: String,
+    /// Derived XML format version (e.g. "5.1"/"5.2") used to select flat
+    /// vs nested serialization of version-sensitive elements such as event
+    /// types. This is distinct from the header `gramps_version`.
+    gramps_xml_version: String,
     /// Optional set of handles to exclude from serialization (filter-during-serialization).
     to_delete: Option<std::collections::HashSet<Handle>>,
     /// Optional researcher note for the header (e.g. "Cleaned by gramps-gen delete").
@@ -83,11 +87,13 @@ impl GraphXmlWriter {
     pub fn new(map: SerializationMap, gramps_version: &str) -> Self {
         let creation_date = Self::current_date_string();
         let namespace = Self::derive_namespace(gramps_version);
+        let gramps_xml_version = namespace_to_version(&namespace);
         GraphXmlWriter {
             map,
             creation_date,
             gramps_version: gramps_version.to_string(),
             namespace,
+            gramps_xml_version,
             to_delete: None,
             researcher_note: None,
         }
@@ -101,8 +107,11 @@ impl GraphXmlWriter {
 
     /// Override the XML namespace URI explicitly (instead of deriving from version).
     /// This is used when the input file's namespace is preserved in the output.
+    /// Re-derives the XML format version from the namespace so serialization
+    /// format (flat vs nested) matches the preserved namespace.
     pub fn with_namespace(mut self, namespace: &str) -> Self {
         self.namespace = namespace.to_string();
+        self.gramps_xml_version = namespace_to_version(namespace);
         self
     }
 
@@ -967,6 +976,28 @@ impl GraphXmlWriter {
 // ---------------------------------------------------------------------------
 // Helper functions
 // ---------------------------------------------------------------------------
+
+/// Infer the Gramps XML schema version from a namespace URI.
+///
+/// This inverts [`GraphXmlWriter::derive_namespace`], so the format used when
+/// serializing (e.g. flat-vs-nested event types) matches a namespace that was
+/// preserved from an input file. Falls back safely to `"5.2"` with a warning
+/// for unknown namespaces.
+fn namespace_to_version(namespace: &str) -> String {
+    match namespace {
+        n if n.ends_with("/1.7.0/") => "5.0".to_string(),
+        n if n.ends_with("/1.7.1/") => "5.1".to_string(),
+        n if n.ends_with("/1.7.2/") => "5.2".to_string(),
+        n if n.ends_with("/1.8.0/") => "6.0".to_string(),
+        _ => {
+            eprintln!(
+                "warning: unknown Gramps XML namespace '{}', format version defaults to 5.2",
+                namespace
+            );
+            "5.2".to_string()
+        }
+    }
+}
 
 /// Return the XML element name for a node, based on its type.
 fn node_type_name(node: &Node) -> Option<&'static str> {
@@ -2373,6 +2404,47 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+
+    #[test]
+    fn namespace_to_version_maps_known_uris() {
+        assert_eq!(
+            namespace_to_version("http://gramps-project.org/xml/1.7.0/"),
+            "5.0"
+        );
+        assert_eq!(
+            namespace_to_version("http://gramps-project.org/xml/1.7.1/"),
+            "5.1"
+        );
+        assert_eq!(
+            namespace_to_version("http://gramps-project.org/xml/1.7.2/"),
+            "5.2"
+        );
+        assert_eq!(
+            namespace_to_version("http://gramps-project.org/xml/1.8.0/"),
+            "6.0"
+        );
+    }
+
+    #[test]
+    fn namespace_to_version_falls_back_safely_for_unknown() {
+        // Unknown namespace must not panic; it falls back to 5.2 with a warning.
+        assert_eq!(
+            namespace_to_version("http://example.org/not-gramps/"),
+            "5.2"
+        );
+        assert_eq!(namespace_to_version(""), "5.2");
+    }
+
+    #[test]
+    fn with_namespace_derives_format_version() {
+        let writer = GraphXmlWriter::new(SerializationMap::new(), "5.2.0");
+        assert_eq!(writer.gramps_xml_version, "5.2");
+
+        // Overriding the namespace to a 5.1 URI re-derives the format version.
+        let writer = writer.with_namespace("http://gramps-project.org/xml/1.7.1/");
+        assert_eq!(writer.gramps_xml_version, "5.1");
+        assert_eq!(writer.namespace, "http://gramps-project.org/xml/1.7.1/");
+    }
 
     #[cfg(not(feature = "schema-5-1"))]
     mod schema_5_2_tests {
