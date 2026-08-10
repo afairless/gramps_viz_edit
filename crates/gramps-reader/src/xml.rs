@@ -61,6 +61,20 @@ pub fn read_hlink_attr(e: &quick_xml::events::BytesStart) -> Option<String> {
     None
 }
 
+/// Read an arbitrary string attribute from an element.
+///
+/// Returns `None` when the element has no attribute with the given name
+/// (whether namespaced or bare).
+pub fn read_attr(e: &quick_xml::events::BytesStart, name: &[u8]) -> Option<String> {
+    for attr in e.attributes().flatten() {
+        let key = attr.key.as_ref();
+        if key == name || key.ends_with(name) {
+            return Some(String::from_utf8_lossy(&attr.value).to_string());
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,5 +200,33 @@ mod tests {
     fn read_hlink_attr_missing() {
         let e = start_event(r#"<father/>"#);
         assert_eq!(read_hlink_attr(&e), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // read_attr
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn read_attr_present() {
+        let e = start_event(r#"<note type="Research"/>"#);
+        assert_eq!(read_attr(&e, b"type").as_deref(), Some("Research"));
+    }
+
+    #[test]
+    fn read_attr_missing() {
+        let e = start_event(r#"<note handle="n0001"/>"#);
+        assert_eq!(read_attr(&e, b"type"), None);
+    }
+
+    #[test]
+    fn read_attr_namespace_prefixed() {
+        let e = start_event(r#"<ns:note ns:type="Research"/>"#);
+        assert_eq!(read_attr(&e, b"type").as_deref(), Some("Research"));
+    }
+
+    #[test]
+    fn read_attr_empty_string() {
+        let e = start_event(r#"<note type=""/>"#);
+        assert_eq!(read_attr(&e, b"type").as_deref(), Some(""));
     }
 }
