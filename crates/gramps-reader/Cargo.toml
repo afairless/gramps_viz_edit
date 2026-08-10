@@ -14,3 +14,4 @@ typed-graph = { path = "../typed-graph" }
 tempfile = "3"
 output = { path = "../output" }
 serde_json = { workspace = true }
+rand = { workspace = true }
