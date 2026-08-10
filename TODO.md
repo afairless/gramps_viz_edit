@@ -1,109 +1,162 @@
-# Implementation Plan: Fix Delete Cascade v2
+# Implementation Plan: Fix missing `type` attribute on `<note>` elements (Gramps import crash)
 
-Source: [`docs/research/fix-delete-cascade-v2.md`](docs/research/fix-delete-cascade-v2.md)
+Source: [`docs/research/note-type-attribute-roundtrip-bug.md`](docs/research/note-type-attribute-roundtrip-bug.md)
 
-Two bug classes remain in the deletion cascade engine:
+**Problem**: Gramps crashes on import (`TypeError: __str__ returned non-string (type int)`) because `<note>` elements produced by the `delete` tool are missing the `type` attribute. The two-sided round-trip gap is in **both** the parser (`gramps-reader`) and the serializer (`output`).
 
-1. **False negatives** (items that should be deleted are kept) — root cause: the `evaluated` set prevents re-evaluation when a node's connectivity state changes mid-cascade.
-2. **False positives** (items incorrectly flagged for deletion) — to be diagnosed via comprehensive tests.
+**Strategy**: Round-trip fix through the whole pipeline — change the schema field type to a lossless `String` (no enum-mapping), then fix parser → serializer → diff consumer, then lock it in with unit, property-based, round-trip, and E2E tests.
 
-## Strategy
+## Impact summary
 
-Write the full test matrix (49 new tests + helpers) first against the current code to establish a baseline, then apply algorithmic fixes and verify previously-failing tests turn green.
+| Component | Change |
+|---|---|
+| `schemas/schema-5.2.json` | `NoteData.type` field: `enum_ref` → `string` (breaking) |
+| `schemas/schema-5.1.json` | **No change** (build-time converter keeps integer→name mapping) |
+| `crates/diff/src/compare.rs` | `compare_note` `FieldKind::Enum` → `FieldKind::Text`; update `make_note`/`note_change_type` tests |
+| `crates/gramps-reader/src/xml.rs` | Add generic `read_attr` helper |
+| `crates/gramps-reader/src/xml/graph.rs` | Parse `type` and `format` attrs on `<note>` |
+| `crates/output/src/serialization_map.rs` | Add `type`/`format` attributes; remove `format` from Note children |
+| `crates/output/src/xml.rs` | Handle `type`/`format` in `get_field_value`; remove dead `format` inline-struct handlers |
+| `scripts/validate-gramps-import.sh` | New CI-validation script (gated on Gramps; CI deferred — no `.github/workflows/`) |
+
+> **Design decision**: Store note type as `Option<String>` rather than `Option<NoteType>`. The `NoteType` enum variant names do not match Gramps XML string values, so enum mapping would break round-tripping. `String` makes the output byte-for-byte faithful to the input. The `NoteType` enum stays in the schema (unused by `NoteData`) for potential future use.
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `test: add test helper functions for cascade tests` | Test helpers | `crates/delete/src/cascade.rs` (`#[cfg(test)] mod tests`) | — (test-only scaffolding) |
-| 2 | `test: add Category A cascade tests — isolated direct cascades` | Direct cascade A1–A18 | `crates/delete/src/cascade.rs` | Unit (18 tests) |
-| 3 | `test: add Category B–D cascade tests — shared refs kept alive` | Direct/indirect kept-alive B1–B12, C1–C2, D1 | `crates/delete/src/cascade.rs` | Unit (15 tests) |
-| 4 | `test: add Category E–G cascade tests — unrelated and regression` | Unrelated E1–E6, distant-relative F1–F3, evaluated-set G1–G3 | `crates/delete/src/cascade.rs` | Unit (12 tests) |
-| 5 | `test: add Category H property invariants for cascade` | Property invariants H6–H9 (+ preserve H1–H5) | `crates/delete/src/cascade.rs` | Unit, property (4 new + 5 existing) |
-| 6 | `fix: remove evaluated set and sort frontier for deterministic cascade` | Core bug fix | `crates/delete/src/cascade.rs` | Unit (all 54 pass) |
-| 7 | `fix: add non-seed person guard to type_specific_orphan_rule` | Person guard | `crates/delete/src/cascade.rs` | Unit (all 54 pass) |
-| 8 | `fix: diagnose and resolve remaining cascade failures` | Iterative fix loop | `crates/delete/src/cascade.rs` | Unit (all 54 pass) |
-| 9 | `chore: run full workspace tests and lint after cascade fixes` | Final verification | — (no source changes) | Integration, lint |
+| 1 | `fix(schema): change NoteData type field from enum to string` | Schema change + diff consumer ripple | `schemas/schema-5.2.json`, `crates/diff/src/compare.rs` | Unit, smoke |
+| 2 | `feat(gramps-reader): add generic read_attr XML attribute helper` | Generic attribute reader | `crates/gramps-reader/src/xml.rs` | Unit |
+| 3 | `fix(gramps-reader): parse note type and format attributes` | Note builder + parser | `crates/gramps-reader/src/xml/graph.rs` | Unit, integration |
+| 4 | `fix(output): add type/format attributes to note, drop format child` | Serialization map | `crates/output/src/serialization_map.rs` | Unit |
+| 5 | `fix(output): serialize note type/format fields, remove dead handlers` | Field-value writer | `crates/output/src/xml.rs` | Unit |
+| 6 | `test: add note type/format round-trip and property tests` | Round-trip coverage | `crates/typed-graph/tests/`, `crates/cli/tests/` | Unit, property |
+| 7 | `test: add gramps import E2E with fixture notes` | Gramps-gated E2E | `crates/cli/tests/e2e.rs` | Integration (E2E) |
+| 8 | `chore: add CI gramps import validation script` | CI validation | `scripts/validate-gramps-import.sh` | — |
 
 ## Step details
 
-### Step 1 — Test helper functions
+### Step 1 — Schema change + downstream consumer ripple
 
-Write all graph-construction helper functions in `crates/delete/src/cascade.rs` `#[cfg(test)] mod tests`. Each helper builds a minimal graph fragment and returns handles for assertions:
+**`schemas/schema-5.2.json`** — change Note `type` field (under `primary_types.Note.fields.type`):
 
-```
-make_person, make_family_with_parents, make_family_with_parents_and_child,
-make_event, make_event_with_place, make_place, make_place_with_place_ref,
-citation_from_person, citation_from_event, citation_from_family, citation_from_place,
-source_from_citation, repository_from_source,
-media_from_person, media_from_citation, media_from_source,
-note_from_person, note_from_citation,
-tag_from_person, tag_from_event, tag_tag
+```json
+// Before
+"type": { "type": "enum_ref", "target": "NoteType", "required": false }
+// After
+"type": { "type": "string", "required": false }
 ```
 
-No tests yet — helpers are used by Steps 2–5.
+Generated `NoteData.type_field` becomes `Option<String>`. `NoteType` enum remains in the schema.
 
-### Step 2 — Category A: isolated direct cascades → DELETED
+**Do not** touch `schemas/schema-5.1.json` (build-time converter maps integer→name; a raw `string` field would conflict).
 
-18 tests (A1–A18): seed person → family, event, citation, source, repository, media, note, tag, place — all single-path cascades where every referent is deleted. All should pass against current code.
+**Verify merge**: run `cargo check --features schema-5-2` (single-version) first, then `cargo check --all-features` (merged 5.1+5.2). The `diff` crate is the only typed consumer of `NoteData.type_field`. If the all-features merge emits a build error (5.1 `enum_ref` vs 5.2 `string` differ), apply a fallback:
 
-### Step 3 — Categories B–D: shared references kept alive → KEPT
+1. Merge treats `enum_ref`→`string` as a compatible promotion (store as `String`).
+2. Change both schema files to `string` (updates `schema_convert.rs`).
+3. Accept single-schema `--features` selection for this field.
 
-15 tests: B1–B12 (directly associated but kept by a second referent), C1–C2 (indirect cascade through events/places to citations, isolated → DELETED), D1 (indirect cascade kept alive). All should pass against current code.
+Do not proceed until `cargo check --all-features` passes.
 
-### Step 4 — Categories E–G: unrelated, distant-relative, regression
-
-12 tests: E1–E6 (unrelated subgraphs never touched → KEPT), F1–F3 (distant-relative shared items kept alive), G1–G3 (evaluated-set false-negative scenarios → currently fail due to `evaluated` set bug, expected to fail).
-
-### Step 5 — Category H: property invariants
-
-4 new property tests + preserve 5 existing (H1–H5):
-
-| Test | Description |
-|---|---|
-| H6 `non_seed_people_never_deleted` | People not in seeds are never in `to_delete` |
-| H7 `unrelated_subgraph_untouched` | Nodes with no path to seeds never deleted |
-| H8 `deterministic_output` | Same graph + seeds = same `to_delete` set |
-| H9 `monotonic_growth` | `to_delete` only grows; nothing removed once added |
-
-After writing H6–H9, run `cargo test -p delete` to record the baseline of passing/failing tests before the algorithmic fix. Expected: H6 may fail (person guard not yet in place), H8 may fail (nondeterministic ordering), G1–G3 fail (evaluated-set bug).
-
-### Step 6 — Remove `evaluated` set + sort frontier
-
-Remove the `evaluated: HashSet<Handle>` variable and both references to it in the frontier-processing loop. The `to_delete.contains(&neighbor)` check alone prevents infinite loops.
-
-Add `frontier.sort_unstable()` at the top of each while-loop iteration for deterministic output (needed for H8).
-
-**Expected effect**: G1–G3 turn green. H8 turns green. Other tests unaffected.
-
-### Step 7 — Add non-seed person guard
-
-Add an explicit guard at the top of `type_specific_orphan_rule`:
+**`crates/diff/src/compare.rs`** — `compare_note()` (line ~1350): change `FieldKind::Enum` + `format!("{v:?}")` to `FieldKind::Text` + raw clone:
 
 ```rust
-if matches!(node, Node::Person(_)) {
-    return false;
+// After
+field_kind: FieldKind::Text,
+old_value: a.type_field.clone(),
+new_value: b.type_field.clone(),
+```
+
+Update `make_note()` test helper (line ~2338) and `note_change_type` test (line ~2384): `NoteType::General`/`Research` → `"General".to_string()`/`"Research".to_string()`.
+
+`crates/diff/src/matcher.rs` `NoteData { type_field: None, .. }` (line ~1012) is compatible — no change.
+
+**Verify**: `cargo check --workspace --all-targets` compiles. **Acceptance**: merged `--all-features` build passes.
+
+### Step 2 — Generic `read_attr` attribute reader
+
+**`crates/gramps-reader/src/xml.rs`** — add, following the existing `read_handle_attr`/`read_id_attr`/`read_hlink_attr` pattern:
+
+```rust
+/// Read an arbitrary string attribute from an element.
+///
+/// Returns `None` when the element has no attribute with the given name
+/// (whether namespaced or bare).
+pub fn read_attr(e: &quick_xml::events::BytesStart, name: &[u8]) -> Option<String> {
+    for attr in e.attributes().flatten() {
+        let key = attr.key.as_ref();
+        if key == name || key.ends_with(name) {
+            return Some(String::from_utf8_lossy(&attr.value).to_string());
+        }
+    }
+    None
 }
 ```
 
-Remove the `Node::Person(_) => false` match arm (now dead code) to keep the pattern exhaustive.
+**Tests** (existing `mod tests` in xml.rs): present → `Some("value")`; missing → `None`; namespaced (`ns:type`) → matches.
 
-**Expected effect**: H6 turns green.
+> Note: `ends_with(b"type")` also matches a hypothetical `mimetype`; Gramps XML has none, so this matches the existing helper pattern.
 
-### Step 8 — Diagnose and fix remaining failures
+### Step 3 — Parser reads `type` and `format` on `<note>`
 
-Run `cargo test -p delete`. If any test still fails, categorize the failure and fix iteratively:
+**`crates/gramps-reader/src/xml/graph.rs`**:
 
-- **E1–E6 failures**: Cascade reaching unrelated nodes → graph construction or orphan-rule direction bug in `type_specific_orphan_rule`
-- **F1–F3 failures**: Distant-relative items being deleted → family cascade propagation too aggressive
-- **H8/H9 failures**: Residual ordering or monotonicity issues
+- Add fields to `NoteBuilder`: `note_type: Option<String>`, `note_format: Option<i32>`.
+- `into_data()`: pass through both into `NoteData { type_field, format, .. }`.
+- Import `read_attr` alongside `read_handle_attr`/`read_id_attr`/`read_hlink_attr`.
+- In the `b"note"` parser arm (line ~327), read both attributes; **filter empty `""` to `None`** (semantically equivalent to missing):
 
-Fix → run tests → repeat until all 54 pass.
-
-### Step 9 — Final verification
-
-```bash
-cargo test -p delete
-cargo test --workspace
-cargo clippy --all-targets --all-features -- -D warnings
+```rust
+let note_type = read_attr(e, b"type").filter(|s| !s.is_empty());
+let note_format = read_attr(e, b"format").and_then(|s| s.parse::<i32>().ok());
 ```
 
-All tests pass, zero warnings/errors.
+**Tests** (in `crates/gramps-reader/tests/`): `type="Research"` → `Some("Research")`; missing `type` → `None`; `type=""` → `None`; `format="1"` → `Some(1)`; missing `format` → `None`.
+
+### Step 4 — Serializer attribute map: add `type`/`format`, remove `format` child
+
+**`crates/output/src/serialization_map.rs`** Note `XmlTypeInfo`:
+
+- Add to `attributes`: `{ field: "type", attr_name: "type" }`, `{ field: "format", attr_name: "format" }`.
+- Remove the `format` child entry (`XmlChildSource::InlineStruct("format")`) from `children` so `format` is not emitted twice.
+
+**Tests**: mapping test asserting the Note attributes include `type`/`format` and the `format` child is gone.
+
+### Step 5 — Serializer field writer + dead-code removal
+
+**`crates/output/src/xml.rs`**:
+
+- `get_field_value()` `Node::Note` arm: add `"type" => n.type_field.clone()` and `"format" => n.format.map(|v| v.to_string())`.
+- Remove the `"format"` arm for `Node::Note` in both `has_inline_struct_value` (line ~433) and `write_inline_struct` (line ~661) — dead after Step 4, prevents double-emission if re-added later.
+
+**Tests** (existing xml.rs test module): `type_field: Some("Research")` → `type="Research"` on `<note>`; `None` → no `type` attr; `format: Some(1)` → `format="1"`.
+
+### Step 6 — Round-trip + property-based regression tests
+
+**Property-based round-trip** (in `crates/typed-graph/tests/` or `crates/cli/tests/`):
+
+- Known note-type strings (`"General"`, `"Research"`, `"Transcript"`, `"Citation"`, `"Report"`, `"Html code"`, `"To Do"`, `"Source text"`, `"Link"`, `"Unknown"`, `"LDS"`, `"Person Name"`) each survive parse→serialize→parse unaltered.
+- Known `format` values (`0`, `1`) survive the same round-trip.
+- Assert `format` appears only as an attribute on `<note>`, never a child element (regression for Step 4).
+
+**Round-trip test** (`crates/cli/tests/`): parse a `.gramps` file with notes → serialize → parse → note types intact.
+
+### Step 7 — Gramps-gated E2E
+
+**`crates/cli/tests/e2e.rs`** (gated on Gramps being installed): run `gramps-gen delete` on a fixture with notes → import output via `timeout 15 gramps -y -q -i output.gramps 2>&1` → assert no `ERROR:`, `Traceback`, `TypeError`, or `Failed to import`. Key regression assertion: every `<note>` element carries a `type` attribute.
+
+### Step 8 — CI validation script
+
+**`scripts/validate-gramps-import.sh`** — takes a `.gramps` file, runs `gramps -y -q -i` under a 15s timeout, scans combined stdio for `ERROR:|Traceback|TypeError|Failed to import`, exit 0 on success / 1 on failure (treating timeout-124 as success since Gramps stays open). Add to CI only if `.github/workflows/` exists and Gramps is in the runner image — **deferred** here (no workflow directory currently present).
+
+## Test commands
+
+```bash
+cargo check --features schema-5-2          # Step 1 single-version
+cargo check --all-features                  # Step 1 merged
+cargo check --workspace --all-targets      # Step 1 ripple
+cargo test -p gramps-reader                 # Steps 2–3
+cargo test -p output                        # Steps 4–5
+cargo test -p cli                           # Steps 6–7
+cargo test -p typed-graph                   # Step 6 property tests
+cargo clippy --all-targets --all-features -- -D warnings   # final
+```
