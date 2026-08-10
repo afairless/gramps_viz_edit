@@ -1573,3 +1573,79 @@ fn e2e_delete_51_fixture_import_roundtrip() {
     let _ = std::fs::remove_file(&sel_path);
     let _ = std::fs::remove_file(&out_path);
 }
+
+#[test]
+fn e2e_delete_note_default_type_and_format_roundtrip() {
+    // Lock in Step 1 (Serialization): a <note> with no type attribute on input
+    // must receive type="General" in output, and the format attribute must
+    // survive the round-trip losslessly.
+    let pid = std::process::id();
+    let input_path = format!("/tmp/gramps_gen_e2e_notedef_in_{}.gramps", pid);
+    let sel_path = format!("/tmp/gramps_gen_e2e_notedef_sel_{}.json", pid);
+    let out_path = format!("/tmp/gramps_gen_e2e_notedef_out_{}.gramps", pid);
+
+    let fixture = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header><created date="2024-01-01" version="5.2"/></header>
+  <people>
+    <person handle="P0001">
+      <gender>M</gender>
+      <name>
+        <first>John</first>
+        <surname>
+          <surname>Smith</surname>
+          <primary>1</primary>
+        </surname>
+      </name>
+    </person>
+  </people>
+  <notes>
+    <note handle="N1">
+      <text>Untyped note must be defaulted.</text>
+    </note>
+    <note handle="N2" format="1">
+      <text>HTML formatted note.</text>
+    </note>
+  </notes>
+</database>
+"#;
+    // Delete P0001, keeping both notes.
+    let selections = r#"{
+  "selections": [
+    {"handle":"P0001","name":"John Smith","birth_date":null,"death_date":null,"gender":"male","family_group":0}
+  ]
+}"#;
+
+    std::fs::write(&input_path, fixture).unwrap();
+    std::fs::write(&sel_path, selections).unwrap();
+
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "delete",
+        &input_path,
+        "--selections",
+        &sel_path,
+        "--yes",
+        "--output",
+        &out_path,
+    ]);
+    assert_eq!(code, Some(0), "delete should succeed, stderr: {}", stderr);
+
+    let output = std::fs::read_to_string(&out_path).expect("output file should exist");
+
+    // N1 had no type on input -> type="General" on output (Step 1 guard).
+    assert!(
+        output.contains("<note handle=\"N1\" type=\"General\""),
+        "untyped note should default to type=General, got: {}",
+        output
+    );
+    // N2's format attribute survives and its type is also defaulted.
+    assert!(
+        output.contains("<note handle=\"N2\" type=\"General\" format=\"1\""),
+        "note format=1 should survive with a defaulted type, got: {}",
+        output
+    );
+
+    let _ = std::fs::remove_file(&input_path);
+    let _ = std::fs::remove_file(&sel_path);
+    let _ = std::fs::remove_file(&out_path);
+}

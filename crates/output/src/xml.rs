@@ -1718,6 +1718,36 @@ mod tests {
     }
 
     #[test]
+    fn serialize_note_preserves_format_attribute() {
+        // A note's `format` attribute (e.g. 1 = HTML) must survive
+        // serialization, and must be omitted when unset.
+        let map = SerializationMap::new();
+        let writer = GraphXmlWriter::new(map, "5.2.0");
+        let mut graph = Graph::new();
+
+        // Note with format set.
+        let mut note = make_note("n1", "HTML note");
+        if let Node::Note(ref mut n) = note {
+            n.format = Some(1);
+        }
+        graph.add_node("n1".to_string(), note).unwrap();
+
+        // Note with no format attribute.
+        graph
+            .add_node("n2".to_string(), make_note("n2", "Plain note"))
+            .unwrap();
+
+        let mut output = Vec::new();
+        writer.write(&graph, &mut output).unwrap();
+        let xml = String::from_utf8(output).unwrap();
+
+        assert!(xml.contains(r#"<note handle="n1" type="General" format="1""#));
+        // n2's type is defaulted to General, but it has no format attribute.
+        assert!(xml.contains(r#"<note handle="n2" type="General""#));
+        assert!(!xml.contains(r#"format="0""#));
+    }
+
+    #[test]
     fn serialize_tag_element() {
         let map = SerializationMap::new();
         let writer = GraphXmlWriter::new(map, "5.2.0");
