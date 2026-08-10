@@ -688,12 +688,20 @@ impl GraphXmlWriter {
         date: &Option<typed_graph::DateValue>,
     ) -> Result<(), SerializationError> {
         if let Some(ref d) = date {
-            let date_str = if let (Some(month), Some(day)) = (d.month, d.day) {
-                format!("{:04}-{:02}-{:02}", d.year, month, day)
-            } else if let Some(month) = d.month {
-                format!("{:04}-{:02}", d.year, month)
-            } else {
-                format!("{:04}", d.year)
+            // Prefer the preserved original text (e.g. modifiers, ranges, or
+            // an unmodified user-entered value) so it round-trips verbatim.
+            // Only reconstruct from structured fields when no text is present.
+            let date_str = match &d.text {
+                Some(t) if !t.is_empty() => t.clone(),
+                _ => {
+                    if let (Some(month), Some(day)) = (d.month, d.day) {
+                        format!("{:04}-{:02}-{:02}", d.year, month, day)
+                    } else if let Some(month) = d.month {
+                        format!("{:04}-{:02}", d.year, month)
+                    } else {
+                        format!("{:04}", d.year)
+                    }
+                }
             };
             writeln!(
                 writer,
@@ -2404,6 +2412,55 @@ mod tests {
             let xml = String::from_utf8(output).unwrap();
 
             assert!(xml.contains(r#"val="1890-06-15""#));
+        }
+
+        #[test]
+        fn serialize_date_text_round_trips_verbatim() {
+            // A DateValue with preserved text (e.g. "abt 1868" or a range)
+            // must serialize its exact val string rather than reconstructing
+            // from year/month/day.
+            let map = SerializationMap::new();
+            let writer = GraphXmlWriter::new(map, "5.2.0");
+            let mut graph = Graph::new();
+            let mut event = make_event("e1", EventType::Birth);
+            if let Node::Event(ref mut e) = event {
+                e.date = Some(DateValue {
+                    year: 0,
+                    month: None,
+                    day: None,
+                    quality: None,
+                    modifier: None,
+                    text: Some("abt 1868".to_string()),
+                });
+            }
+            graph.add_node("e1".to_string(), event).unwrap();
+
+            let mut output = Vec::new();
+            writer.write(&graph, &mut output).unwrap();
+            let xml = String::from_utf8(output).unwrap();
+
+            assert!(xml.contains(r#"val="abt 1868""#));
+            assert!(!xml.contains(r#"val="0000""#));
+        }
+
+        #[test]
+        fn serialize_date_without_text_reconstructs_structured() {
+            // With text: None the serializer still reconstructs YYYY-MM-DD
+            // from the structured year/month/day fields.
+            let map = SerializationMap::new();
+            let writer = GraphXmlWriter::new(map, "5.2.0");
+            let mut graph = Graph::new();
+            let mut event = make_event("e1", EventType::Birth);
+            if let Node::Event(ref mut e) = event {
+                e.date = Some(DateValue::new_ymd(1868, 9, 20));
+            }
+            graph.add_node("e1".to_string(), event).unwrap();
+
+            let mut output = Vec::new();
+            writer.write(&graph, &mut output).unwrap();
+            let xml = String::from_utf8(output).unwrap();
+
+            assert!(xml.contains(r#"val="1868-09-20""#));
         }
 
         #[test]
