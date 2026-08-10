@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header>
+    <created date="2024-01-15" version="5.2"/>
+  </header>
+  <people>
+    <person handle="_P0001" id="I0001">
+      <gender>1</gender>
+      <name>
+        <first>Ada</first>
+        <surname>Lovelace</surname>
+      </name>
+    </person>
+  </people>
+</database>

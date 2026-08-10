@@ -1649,3 +1649,48 @@ fn e2e_delete_note_default_type_and_format_roundtrip() {
     let _ = std::fs::remove_file(&sel_path);
     let _ = std::fs::remove_file(&out_path);
 }
+
+#[test]
+fn e2e_golden_roundtrip_gramps_import() {
+    // Golden fixture test: parse a committed minimal real Gramps export,
+    // serialize it, then import the result into Gramps (when installed) and
+    // assert no parser/import errors. This guards the write path end-to-end
+    // against regressions that produce un-importable XML.
+    let dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set");
+    let fixture = std::path::Path::new(&dir).join("tests/fixtures/minimal-real.gramps");
+    let content = std::fs::read_to_string(&fixture).expect("golden fixture should exist");
+
+    let (graph, namespace) =
+        gramps_reader::xml::graph::parse_gramps_xml(&content).expect("golden fixture should parse");
+
+    let out_path = temp_output_path("golden");
+    let writer = output::GraphXmlWriter::new(
+        output::SerializationMap::new(),
+        &output::namespace_to_version(&namespace),
+    )
+    .with_namespace(&namespace);
+    let mut file = std::fs::File::create(&out_path).expect("create output file");
+    writer.write(&graph, &mut file).expect("serialize fixture");
+
+    if gramps_installed() {
+        let (import_out, import_code) = run_gramps_import(&out_path);
+        // Exit 0 (success) or 124 (timeout because Gramps stays open) are OK.
+        assert!(
+            import_code == Some(0) || import_code == Some(124),
+            "gramps import should complete after timeout, exit code: {:?}",
+            import_code
+        );
+        for pat in ["ERROR:", "Traceback", "TypeError", "Failed to import"] {
+            assert!(
+                !import_out.contains(pat),
+                "gramps import reported '{}' — bug regression, output:\n{}",
+                pat,
+                import_out
+            );
+        }
+    } else {
+        eprintln!("gramps not installed; skipping real import step");
+    }
+
+    let _ = std::fs::remove_file(&out_path);
+}
