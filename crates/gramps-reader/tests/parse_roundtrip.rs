@@ -280,3 +280,133 @@ fn mixed_type_fixture_malformed_xml() {
     let result = parse_graph(xml);
     assert!(result.is_err(), "Malformed XML should produce an error");
 }
+
+// -----------------------------------------------------------------------
+// Note type/format attribute round-trip
+// -----------------------------------------------------------------------
+
+/// Known Gramps note type strings that must round-trip losslessly.
+const KNOWN_NOTE_TYPES: &[&str] = &[
+    "General",
+    "Research",
+    "Transcript",
+    "Citation",
+    "Report",
+    "Html code",
+    "To Do",
+    "Source text",
+    "Link",
+    "Unknown",
+    "LDS",
+    "Person Name",
+];
+
+/// Known format values.
+const KNOWN_FORMATS: &[i32] = &[0, 1];
+
+#[test]
+fn note_type_attr_parse() {
+    /// Parse a minimal note from XML with given type attribute value and
+    /// return its type_field.
+    fn parse_note_type_attr(xml: &str) -> Option<String> {
+        let graph = parse_graph(xml).expect("should parse");
+        for (_, node) in graph.iter_nodes() {
+            if let Node::Note(n) = node {
+                return n.type_field.clone();
+            }
+        }
+        None
+    }
+
+    for t in KNOWN_NOTE_TYPES {
+        let xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header><created date="2024-01-01" version="5.2"/></header>
+  <notes>
+    <note handle="N0001" type="{}">
+      <text>Test note.</text>
+    </note>
+  </notes>
+</database>"#,
+            t
+        );
+        assert_eq!(
+            parse_note_type_attr(&xml).as_deref(),
+            Some(*t),
+            "Note type '{}' should round-trip losslessly",
+            t
+        );
+    }
+
+    // Missing type attribute -> None
+    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header><created date="2024-01-01" version="5.2"/></header>
+  <notes>
+    <note handle="N0001">
+      <text>Test note.</text>
+    </note>
+  </notes>
+</database>"#;
+    assert_eq!(parse_note_type_attr(xml), None, "Missing type should be None");
+
+    // Empty type attribute -> None (filtered)
+    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header><created date="2024-01-01" version="5.2"/></header>
+  <notes>
+    <note handle="N0001" type="">
+      <text>Test note.</text>
+    </note>
+  </notes>
+</database>"#;
+    assert_eq!(parse_note_type_attr(xml), None, "Empty type should be None");
+}
+
+#[test]
+fn note_format_attr_parse() {
+    /// Parse a minimal note from XML and return its format.
+    fn parse_note_format(xml: &str) -> Option<i32> {
+        let graph = parse_graph(xml).expect("should parse");
+        for (_, node) in graph.iter_nodes() {
+            if let Node::Note(n) = node {
+                return n.format;
+            }
+        }
+        None
+    }
+
+    for fmt in KNOWN_FORMATS {
+        let xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header><created date="2024-01-01" version="5.2"/></header>
+  <notes>
+    <note handle="N0001" format="{}">
+      <text>Test note.</text>
+    </note>
+  </notes>
+</database>"#,
+            fmt
+        );
+        assert_eq!(
+            parse_note_format(&xml),
+            Some(*fmt),
+            "Format '{}' should round-trip",
+            fmt
+        );
+    }
+
+    // Missing format -> None
+    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header><created date="2024-01-01" version="5.2"/></header>
+  <notes>
+    <note handle="N0001">
+      <text>Test note.</text>
+    </note>
+  </notes>
+</database>"#;
+    assert_eq!(parse_note_format(xml), None,"Missing format should be None");
+}
