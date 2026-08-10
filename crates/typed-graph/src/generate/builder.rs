@@ -1038,7 +1038,12 @@ impl<'a, 'b> NoteBuilder<'a, 'b> {
         self.data.text = text.into();
         self
     }
-    pub fn build(self) -> Result<Handle, BuilderError> {
+    /// Set the note type (defaults to `"General"` when left unset).
+    pub fn with_type(mut self, type_field: impl Into<String>) -> Self {
+        self.data.type_field = Some(type_field.into());
+        self
+    }
+    pub fn build(mut self) -> Result<Handle, BuilderError> {
         let handle = self.data.handle.clone();
         if handle.is_empty() {
             return Err(BuilderError::MissingRequiredField {
@@ -1051,6 +1056,12 @@ impl<'a, 'b> NoteBuilder<'a, 'b> {
                 builder_type: "Note",
                 field: "text",
             });
+        }
+        // Default the type when the caller left it unset so generated notes
+        // carry a valid type (Gramps drops a <note> without a type on import).
+        // Keep NoteData::default() as None for all other consumers.
+        if self.data.type_field.is_none() {
+            self.data.type_field = Some("General".to_string());
         }
         let node = Node::Note(self.data);
         self.builder
@@ -1806,6 +1817,44 @@ mod tests {
         let node = graph.get_node(&"n1".to_string()).unwrap();
         if let Node::Note(note) = node {
             assert_eq!(note.text, "Some notes here");
+        } else {
+            panic!("Expected Note node");
+        }
+    }
+
+    #[test]
+    fn builder_note_defaults_type_to_general() {
+        // Generation-path counterpart of the serialization default: a note
+        // built without an explicit type gets "General" so generated notes
+        // remain importable by Gramps.
+        let mut graph = Graph::new();
+        let mut builder = GraphBuilder::new(&mut graph);
+        builder
+            .add_note("n1")
+            .with_text("Defaulted note")
+            .build()
+            .unwrap();
+        let node = graph.get_node(&"n1".to_string()).unwrap();
+        if let Node::Note(note) = node {
+            assert_eq!(note.type_field, Some("General".to_string()));
+        } else {
+            panic!("Expected Note node");
+        }
+    }
+
+    #[test]
+    fn builder_note_preserves_explicit_type() {
+        let mut graph = Graph::new();
+        let mut builder = GraphBuilder::new(&mut graph);
+        builder
+            .add_note("n1")
+            .with_text("Research note")
+            .with_type("Research")
+            .build()
+            .unwrap();
+        let node = graph.get_node(&"n1".to_string()).unwrap();
+        if let Node::Note(note) = node {
+            assert_eq!(note.type_field, Some("Research".to_string()));
         } else {
             panic!("Expected Note node");
         }
