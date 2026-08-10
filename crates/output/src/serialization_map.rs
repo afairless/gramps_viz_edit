@@ -488,6 +488,13 @@ impl SerializationMap {
 
         // -----------------------------------------------------------------------
         // Notes
+        //
+        // NOTE: the `change` timestamp attribute is deliberately excluded from
+        // the serialization map on ALL primary types (person, family, event,
+        // note, etc.). Gramps regenerates the `change` timestamp on import, so
+        // writing it adds no value and any attempt to round-trip it would
+        // produce spurious diffs. Do not treat its absence as a bug or re-add
+        // it without confirming this contract still holds.
         // -----------------------------------------------------------------------
         type_map.insert(
             "Note".to_string(),
