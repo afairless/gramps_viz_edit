@@ -21,7 +21,7 @@
 
 use crate::error::Error;
 use crate::xml::header::detect_schema_version;
-use crate::xml::{read_handle_attr, read_hlink_attr, read_id_attr, strip_prefix};
+use crate::xml::{read_attr, read_handle_attr, read_hlink_attr, read_id_attr, strip_prefix};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use typed_graph::*;
@@ -2288,6 +2288,9 @@ impl Parser {
             gramps_id,
             ..NoteData::default()
         };
+        // Read type and format from attributes (new serializer emits them as attributes)
+        note.type_field = read_attr(start, b"type").filter(|s| !s.is_empty());
+        note.format = read_attr(start, b"format").and_then(|s| s.parse::<i32>().ok());
         let mut in_text = false;
         let mut in_format = false;
         let mut in_type = false;

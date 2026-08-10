@@ -24,7 +24,7 @@ use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::xml::header::detect_schema_version;
-use crate::xml::{read_handle_attr, read_hlink_attr, read_id_attr, strip_prefix};
+use crate::xml::{read_attr, read_handle_attr, read_hlink_attr, read_id_attr, strip_prefix};
 use typed_graph::graph::*;
 use typed_graph::*;
 
@@ -327,9 +327,14 @@ impl GraphParser {
                         b"note" if self.state.current_section == Section::Notes => {
                             let handle = read_handle_attr(e).unwrap_or_default();
                             let gramps_id = read_id_attr(e);
+                            let note_type = read_attr(e, b"type").filter(|s| !s.is_empty());
+                            let note_format = read_attr(e, b"format")
+                                .and_then(|s| s.parse::<i32>().ok());
                             current_note = Some(NoteBuilder {
                                 handle,
                                 gramps_id,
+                                note_type,
+                                note_format,
                                 ..NoteBuilder::default()
                             });
                         }
@@ -1647,6 +1652,8 @@ struct NoteBuilder {
     handle: Handle,
     gramps_id: Option<String>,
     text: String,
+    note_type: Option<String>,
+    note_format: Option<i32>,
 }
 
 impl NoteBuilder {
@@ -1655,6 +1662,8 @@ impl NoteBuilder {
             handle: self.handle,
             gramps_id: self.gramps_id,
             text: self.text,
+            type_field: self.note_type,
+            format: self.note_format,
             ..NoteData::default()
         }
     }
