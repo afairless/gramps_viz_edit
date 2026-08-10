@@ -503,15 +503,19 @@ impl SerializationMap {
                         field: "gramps_id".to_string(),
                         attr_name: "id".to_string(),
                     },
+                    XmlAttribute {
+                        field: "type".to_string(),
+                        attr_name: "type".to_string(),
+                    },
+                    XmlAttribute {
+                        field: "format".to_string(),
+                        attr_name: "format".to_string(),
+                    },
                 ],
                 children: vec![
                     XmlChild {
                         element_name: "text".to_string(),
                         source: XmlChildSource::InlineStruct("text".to_string()),
-                    },
-                    XmlChild {
-                        element_name: "format".to_string(),
-                        source: XmlChildSource::InlineStruct("format".to_string()),
                     },
                     XmlChild {
                         element_name: "noteref".to_string(),
