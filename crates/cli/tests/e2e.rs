@@ -1468,3 +1468,108 @@ fn e2e_delete_51_namespace_emits_flat_event_type() {
     let _ = std::fs::remove_file(&sel_path);
     let _ = std::fs::remove_file(&out_path);
 }
+
+#[test]
+fn e2e_delete_51_fixture_import_roundtrip() {
+    // The real-world 5.1 path: a 5.1-namespace/5.1-format input is deleted and
+    // the output must be importable by Gramps with no errors. This covers the
+    // note-default, flat-event-type, and date-text fidelity fixes on a 5.1
+    // input (the existing note test only exercised the 5.2 path).
+    let pid = std::process::id();
+    let input_path = format!("/tmp/gramps_gen_e2e_51import_in_{}.gramps", pid);
+    let sel_path = format!("/tmp/gramps_gen_e2e_51import_sel_{}.json", pid);
+    let out_path = format!("/tmp/gramps_gen_e2e_51import_out_{}.gramps", pid);
+
+    let fixture = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.1/">
+  <header><created date="2024-01-01" version="5.1"/></header>
+  <people>
+    <person handle="P0001">
+      <gender>M</gender>
+      <name>
+        <first>John</first>
+        <surname>
+          <surname>Smith</surname>
+          <primary>1</primary>
+        </surname>
+      </name>
+    </person>
+    <person handle="P0002">
+      <gender>F</gender>
+      <name>
+        <first>Jane</first>
+        <surname>
+          <surname>Doe</surname>
+          <primary>1</primary>
+        </surname>
+      </name>
+    </person>
+  </people>
+  <events>
+    <event handle="E1">
+      <type>Birth</type>
+      <dateval val="1868-09-20"/>
+    </event>
+  </events>
+  <notes>
+    <note handle="N1">
+      <text>A note without an explicit type attribute.</text>
+    </note>
+  </notes>
+</database>
+"#;
+    // Delete P0001, keeping P0002, the event, and the note.
+    let selections = r#"{
+  "selections": [
+    {"handle":"P0001","name":"John Smith","birth_date":null,"death_date":null,"gender":"male","family_group":0}
+  ]
+}"#;
+
+    std::fs::write(&input_path, fixture).unwrap();
+    std::fs::write(&sel_path, selections).unwrap();
+
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "delete",
+        &input_path,
+        "--selections",
+        &sel_path,
+        "--yes",
+        "--output",
+        &out_path,
+    ]);
+    assert_eq!(code, Some(0), "delete should succeed, stderr: {}", stderr);
+
+    let output = std::fs::read_to_string(&out_path).expect("output file should exist");
+    // 5.1 flat event type and preserved namespace (format fidelity).
+    assert!(output.contains("<type>Birth</type>"), "got: {}", output);
+    assert!(!output.contains("<eventtype>"), "got: {}", output);
+    assert!(
+        output.contains("http://gramps-project.org/xml/1.7.1/"),
+        "got: {}",
+        output
+    );
+
+    if gramps_installed() {
+        let (import_out, import_code) = run_gramps_import(&out_path);
+        // Exit 0 (success) or 124 (timeout because Gramps stays open) are OK.
+        assert!(
+            import_code == Some(0) || import_code == Some(124),
+            "gramps import should complete after timeout, exit code: {:?}",
+            import_code
+        );
+        for pat in ["ERROR:", "Traceback", "TypeError", "Failed to import"] {
+            assert!(
+                !import_out.contains(pat),
+                "gramps import reported '{}' — bug regression, output:\n{}",
+                pat,
+                import_out
+            );
+        }
+    } else {
+        eprintln!("gramps not installed; skipping real import step");
+    }
+
+    let _ = std::fs::remove_file(&input_path);
+    let _ = std::fs::remove_file(&sel_path);
+    let _ = std::fs::remove_file(&out_path);
+}
