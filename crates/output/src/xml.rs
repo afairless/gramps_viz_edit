@@ -517,16 +517,28 @@ impl GraphXmlWriter {
                 }
             }
             // Event: event_type is an EventType enum
+            // Format switch point: Gramps 5.2 nests the type inside the
+            // element (`<eventtype><type>Birth</type></eventtype>`), while
+            // 5.1 serializes it flat (`<type>Birth</type>`).  Audited format
+            // switch points where 5.2 nesting is currently hardcoded: event
+            // type (here), the event `date` (attribute-only, version-neutral),
+            // and the `<created>` header version (handled via the caller
+            // passing the input-derived version to `new`).
             "event_type" => {
                 if let Node::Event(e) = node {
                     let type_str = typed_graph::event_type_display(&e.event_type);
-                    writeln!(
-                        writer,
-                        "      <{}><type>{}</type></{}>",
-                        child.element_name,
-                        escape_xml(&type_str),
-                        child.element_name
-                    )?;
+                    let escaped_type = escape_xml(&type_str);
+                    if self.gramps_xml_version.starts_with("5.1") {
+                        // 5.1 flat form
+                        writeln!(writer, "      <type>{}</type>", escaped_type)?;
+                    } else {
+                        // 5.2 (and later) nested form
+                        writeln!(
+                            writer,
+                            "      <{}><type>{}</type></{}>",
+                            child.element_name, escaped_type, child.element_name
+                        )?;
+                    }
                 }
             }
             // Event: date is an Option<DateValue>
@@ -2469,6 +2481,44 @@ mod tests {
         }
 
         #[test]
+        fn serialize_event_type_nested_for_52() {
+            let map = SerializationMap::new();
+            let writer = GraphXmlWriter::new(map, "5.2.0");
+            let mut graph = Graph::new();
+            graph
+                .add_node("e1".to_string(), make_event("e1", EventType::Birth))
+                .unwrap();
+
+            let mut output = Vec::new();
+            writer.write(&graph, &mut output).unwrap();
+            let xml = String::from_utf8(output).unwrap();
+
+            assert!(xml.contains("<eventtype><type>Birth</type></eventtype>"));
+        }
+
+        #[test]
+        fn serialize_event_type_flat_for_51_namespace() {
+            // A 5.1-namespace input (preserved via with_namespace) must emit the
+            // flat <type>Birth</type> form rather than the nested 5.2 form.
+            let map = SerializationMap::new();
+            let writer = GraphXmlWriter::new(map, "5.2.0")
+                .with_namespace("http://gramps-project.org/xml/1.7.1/");
+            let mut graph = Graph::new();
+            graph
+                .add_node("e1".to_string(), make_event("e1", EventType::Birth))
+                .unwrap();
+
+            let mut output = Vec::new();
+            writer.write(&graph, &mut output).unwrap();
+            let xml = String::from_utf8(output).unwrap();
+
+            assert!(xml.contains("<type>Birth</type>"));
+            assert!(!xml.contains("<eventtype>"));
+            // Still emits the 5.1 namespace.
+            assert!(xml.contains("http://gramps-project.org/xml/1.7.1/"));
+        }
+
+        #[test]
         fn serialize_event_with_date() {
             let map = SerializationMap::new();
             let writer = GraphXmlWriter::new(map, "5.2.0");
@@ -2586,15 +2636,21 @@ mod tests {
             writer.write(&graph, &mut output).unwrap();
             let xml = String::from_utf8(output).unwrap();
 
-            // Event type should render as "Death", not "Some(Death)"
+            // 5.1 serializes the event type flat (no eventtype wrapper).
             assert!(
-                xml.contains("<eventtype><type>Death</type></eventtype>"),
+                xml.contains("<type>Death</type>"),
                 "Event type should render as Death, not Some(Death). Got: {}",
                 xml
             );
             assert!(
                 !xml.contains("Some(Death)"),
                 "Event type should NOT contain 'Some(Death)'. Got: {}",
+                xml
+            );
+            // Flat form has no enclosing eventtype element.
+            assert!(
+                !xml.contains("<eventtype>"),
+                "5.1 should not emit the nested eventtype element. Got: {}",
                 xml
             );
         }
