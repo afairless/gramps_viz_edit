@@ -430,15 +430,6 @@ impl GraphXmlWriter {
                 }
             }
             "text" => matches!(node, Node::Note(_)),
-            "format" => {
-                matches!(node, Node::Note(_)) && {
-                    if let Node::Note(n) = node {
-                        n.format.is_some()
-                    } else {
-                        false
-                    }
-                }
-            }
             _ => false,
         }
     }
@@ -655,14 +646,6 @@ impl GraphXmlWriter {
             "text" => {
                 if let Node::Note(n) = node {
                     writeln!(writer, "      <text>{}</text>", escape_xml(&n.text))?;
-                }
-            }
-            // Note: format (optional)
-            "format" => {
-                if let Node::Note(n) = node {
-                    if let Some(fmt) = n.format {
-                        writeln!(writer, "      <format>{}</format>", fmt)?;
-                    }
                 }
             }
             // Repository: name (optional) — handled by "name" above
@@ -956,6 +939,8 @@ impl GraphXmlWriter {
             Node::Note(n) => match field_name {
                 "handle" => Some(n.handle.clone()),
                 "gramps_id" => n.gramps_id.clone(),
+                "type" => n.type_field.clone(),
+                "format" => n.format.map(|v| v.to_string()),
                 _ => None,
             },
             Node::Tag(t) => match field_name {
