@@ -1229,3 +1229,165 @@ fn e2e_integrate_diff_viz_wrapped_envelope() {
     let _ = std::fs::remove_file(&sel_path);
     let _ = std::fs::remove_file(&out_path);
 }
+
+/// Whether the `gramps` binary is available on PATH.
+///
+/// Used to gate E2E tests that import real Gramps output. When Gramps is
+/// not installed the test is skipped rather than failed, so headless CI
+/// runners without Gramps still pass.
+fn gramps_installed() -> bool {
+    std::process::Command::new("gramps")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Run the Gramps import CLI under a short timeout and return combined
+/// stdout+stderr plus the exit code.
+///
+/// Gramps stays open after a successful import, so the command is run under
+/// `timeout`; the timeout exit code (124) is treated as success since the
+/// import itself has already completed by then.
+fn run_gramps_import(path: &str) -> (String, Option<i32>) {
+    let output = std::process::Command::new("timeout")
+        .args(["15", "gramps", "-y", "-q", "-i", path])
+        .output()
+        .expect("failed to run timeout gramps");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    (combined, output.status.code())
+}
+
+#[test]
+fn e2e_delete_notes_import_roundtrip() {
+    // This E2E test exercises the fixed note type/format serialization.
+    // It requires a real Gramps install to import the output; when Gramps
+    // is absent the non-Gramps assertions still run and the import step is
+    // skipped.
+    let pid = std::process::id();
+    let input_path = format!("/tmp/gramps_gen_e2e_notes_in_{}.gramps", pid);
+    let sel_path = format!("/tmp/gramps_gen_e2e_notes_sel_{}.json", pid);
+    let out_path = format!("/tmp/gramps_gen_e2e_notes_out_{}.gramps", pid);
+
+    // Input fixture with two notes carrying type and format attributes.
+    let fixture = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header><created date="2024-01-01" version="5.2"/></header>
+  <people>
+    <person handle="P0001">
+      <gender>M</gender>
+      <name>
+        <first>John</first>
+        <surname>
+          <surname>Smith</surname>
+          <primary>1</primary>
+        </surname>
+      </name>
+    </person>
+    <person handle="P0002">
+      <gender>F</gender>
+      <name>
+        <first>Jane</first>
+        <surname>
+          <surname>Doe</surname>
+          <primary>1</primary>
+        </surname>
+      </name>
+    </person>
+  </people>
+  <notes>
+    <note handle="N0001" type="General" format="1">
+      <text>Research note about John.</text>
+    </note>
+    <note handle="N0002" type="To Do" format="0">
+      <text>Follow up.</text>
+    </note>
+  </notes>
+</database>
+"#;
+    // Delete P0001, keeping P0002 and both notes.
+    let selections = r#"{
+  "exported_at": "2025-01-15T10:30:00.000Z",
+  "file": "selections.json",
+  "selections": [
+    {"handle":"P0001","name":"John Smith","birth_date":null,"death_date":null,"gender":"male","family_group":0}
+  ]
+}"#;
+
+    std::fs::write(&input_path, fixture).unwrap();
+    std::fs::write(&sel_path, selections).unwrap();
+
+    // Run delete.
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "delete",
+        &input_path,
+        "--selections",
+        &sel_path,
+        "--yes",
+        "--output",
+        &out_path,
+    ]);
+    assert_eq!(code, Some(0), "delete should succeed, stderr: {}", stderr);
+
+    let output = std::fs::read_to_string(&out_path).expect("output file should exist");
+
+    // Key regression: every <note> element must carry a type attribute.
+    // Match the opening tag only (not <notes>, </note>, or <noteref>).
+    let notes: Vec<&str> = output
+        .lines()
+        .filter(|l| l.trim_start().starts_with("<note ") || l.trim_start().starts_with("<note>"))
+        .collect();
+    assert!(
+        !notes.is_empty(),
+        "output should contain note elements, got: {}",
+        output
+    );
+    for line in &notes {
+        assert!(
+            line.contains("type="),
+            "every <note> must carry a type attribute, offending line: {}",
+            line
+        );
+    }
+    // Note types must survive the round-trip losslessly.
+    assert!(
+        output.contains("type=\"General\""),
+        "expected General note type"
+    );
+    assert!(
+        output.contains("type=\"To Do\""),
+        "expected To Do note type"
+    );
+    assert!(output.contains("format=\"1\""), "expected format 1");
+    assert!(output.contains("format=\"0\""), "expected format 0");
+
+    // Import into Gramps if it is installed.
+    if gramps_installed() {
+        let (import_out, import_code) = run_gramps_import(&out_path);
+        // Exit 0 (success) or 124 (timeout because Gramps stays open) are OK.
+        assert!(
+            import_code == Some(0) || import_code == Some(124),
+            "gramps import should complete after timeout, exit code: {:?}",
+            import_code
+        );
+        for pat in ["ERROR:", "Traceback", "TypeError", "Failed to import"] {
+            assert!(
+                !import_out.contains(pat),
+                "gramps import reported '{}' — bug regression, output:\n{}",
+                pat,
+                import_out
+            );
+        }
+    } else {
+        eprintln!("gramps not installed; skipping real import step");
+    }
+
+    // Clean up
+    let _ = std::fs::remove_file(&input_path);
+    let _ = std::fs::remove_file(&sel_path);
+    let _ = std::fs::remove_file(&out_path);
+}
