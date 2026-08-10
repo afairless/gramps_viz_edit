@@ -3063,17 +3063,17 @@ fn parse_repository_type(s: &str) -> Option<RepositoryType> {
     }
 }
 
-/// Parse a SourceMediaType from a string value.
-fn parse_note_type(s: &str) -> Option<NoteType> {
-    match s.trim().to_lowercase().as_str() {
-        "general" => Some(NoteType::General),
-        "research" => Some(NoteType::Research),
-        "transcript" => Some(NoteType::Transcript),
-        "citation" => Some(NoteType::Citation),
-        "report" => Some(NoteType::Report),
-        "html" => Some(NoteType::HTML),
-        "other" => Some(NoteType::Other),
-        _ => None,
+/// Parse a note type string losslessly.
+///
+/// Note types are stored as `String` in `NoteData` to preserve the exact
+/// XML value from the input file (the `NoteType` enum variant names do not
+/// match Gramps XML strings). Returns the trimmed raw string.
+fn parse_note_type(s: &str) -> Option<String> {
+    let t = s.trim();
+    if t.is_empty() {
+        None
+    } else {
+        Some(t.to_string())
     }
 }
 
@@ -4347,7 +4347,7 @@ mod tests {
         assert_eq!(n.handle, "n0001");
         assert_eq!(n.text, "This is a note about the family.");
         assert_eq!(n.format, Some(0));
-        assert_eq!(n.type_field, Some(NoteType::General));
+        assert_eq!(n.type_field, Some("General".to_string()));
         // note_list is stored in citation_list for noteref
         assert_eq!(n.citation_list, vec!["n0002", "c0001"]);
         assert_eq!(n.tag_list, vec!["t0001"]);

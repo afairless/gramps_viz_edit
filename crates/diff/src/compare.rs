@@ -1368,10 +1368,10 @@ pub fn compare_note(a: &NoteData, b: &NoteData) -> Vec<FieldChange> {
     }
     if a.type_field != b.type_field {
         changes.push(FieldChange {
-            field_kind: FieldKind::Enum,
+            field_kind: FieldKind::Text,
             field_name: "type_field".into(),
-            old_value: a.type_field.map(|v| format!("{v:?}")),
-            new_value: b.type_field.map(|v| format!("{v:?}")),
+            old_value: a.type_field.clone(),
+            new_value: b.type_field.clone(),
             similarity: 0.0,
         });
     }
@@ -2341,7 +2341,7 @@ mod tests {
             gramps_id: Some("N0001".into()),
             text: "Married on June 15, 1870".into(),
             format: Some(0),
-            type_field: Some(typed_graph::NoteType::General),
+            type_field: Some("General".to_string()),
             citation_list: vec![],
             tag_list: vec![],
         }
@@ -2381,11 +2381,11 @@ mod tests {
     fn note_change_type() {
         let a = make_note();
         let mut b = make_note();
-        b.type_field = Some(typed_graph::NoteType::Research);
+        b.type_field = Some("Research".to_string());
         let changes = compare_note(&a, &b);
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].field_name, "type_field");
-        assert_eq!(changes[0].field_kind, FieldKind::Enum);
+        assert_eq!(changes[0].field_kind, FieldKind::Text);
     }
 
     #[test]
