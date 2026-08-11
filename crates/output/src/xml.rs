@@ -57,13 +57,6 @@ impl From<std::io::Error> for SerializationError {
 /// The writer uses a [`SerializationMap`] to determine XML element and attribute
 /// names, walks the graph's nodes grouped by type, and emits XML following the
 /// Gramps RelaxNG schema.
-///
-/// # Filter support
-///
-/// When a `to_delete` set is provided (via [`with_filter`](Self::with_filter)),
-/// nodes whose handles are in the set are skipped during serialization, and
-/// edges whose either endpoint is in the set are also skipped. The graph is
-/// never mutated — filtering happens at serialization time.
 pub struct GraphXmlWriter {
     map: SerializationMap,
     /// Creation date string for the header (YYYY-MM-DD format).
@@ -76,8 +69,6 @@ pub struct GraphXmlWriter {
     /// vs nested serialization of version-sensitive elements such as event
     /// types. This is distinct from the header `gramps_version`.
     gramps_xml_version: String,
-    /// Optional set of handles to exclude from serialization (filter-during-serialization).
-    to_delete: Option<std::collections::HashSet<Handle>>,
     /// Optional researcher note for the header (e.g. "Cleaned by gramps-gen delete").
     researcher_note: Option<String>,
 }
@@ -94,15 +85,8 @@ impl GraphXmlWriter {
             gramps_version: gramps_version.to_string(),
             namespace,
             gramps_xml_version,
-            to_delete: None,
             researcher_note: None,
         }
-    }
-
-    /// Set the set of handles to exclude from serialization (filter-during-serialization).
-    pub fn with_filter(mut self, to_delete: std::collections::HashSet<Handle>) -> Self {
-        self.to_delete = Some(to_delete);
-        self
     }
 
     /// Override the XML namespace URI explicitly (instead of deriving from version).
@@ -264,11 +248,11 @@ impl GraphXmlWriter {
             None => return Ok(()), // Unknown section, skip
         };
 
-        // Collect nodes of this type, filtering out any in the to_delete set
+        // Collect nodes of this type
         let mut nodes: Vec<(Handle, Node)> = graph
             .iter_nodes()
-            .filter(|(handle, node)| {
-                node_type_name(node) == Some(&type_info.element_name) && !self.is_deleted(handle)
+            .filter(|(_, node)| {
+                node_type_name(node) == Some(&type_info.element_name)
             })
             .map(|(h, n)| (h.clone(), n.clone()))
             .collect::<Vec<_>>();
@@ -773,7 +757,7 @@ impl GraphXmlWriter {
         let edges_from = graph.edges_from(&handle_owned);
         let matching_edges: Vec<&Edge> = edges_from
             .iter()
-            .filter(|e| edge_variant_name(e) == Some(edge_name) && !self.is_edge_deleted(e))
+            .filter(|e| edge_variant_name(e) == Some(edge_name))
             .copied()
             .collect();
 
@@ -883,40 +867,6 @@ impl GraphXmlWriter {
                 _ => {
                     // Unknown edge element, skip
                 }
-            }
-        }
-        Ok(())
-    }
-
-    /// Check whether a handle is in the to_delete set.
-    fn is_deleted(&self, handle: &Handle) -> bool {
-        self.to_delete
-            .as_ref()
-            .map(|s| s.contains(handle))
-            .unwrap_or(false)
-    }
-
-    /// Check whether an edge should be skipped because one of its endpoints is deleted.
-    fn is_edge_deleted(&self, edge: &Edge) -> bool {
-        let (source, target) = edge_source_target(edge);
-        self.is_deleted(&source) || self.is_deleted(&target)
-    }
-
-    /// Validate the to_delete set for consistency.
-    ///
-    /// Returns an error if:
-    /// - A handle in to_delete does not exist in the graph
-    pub fn validate_deletion_set(
-        &self,
-        graph: &Graph,
-        to_delete: &std::collections::HashSet<Handle>,
-    ) -> Result<(), SerializationError> {
-        for handle in to_delete {
-            if !graph.contains_node(handle) {
-                return Err(SerializationError::MissingRequiredField {
-                    handle: handle.clone(),
-                    field: "handle in deletion set does not exist in graph",
-                });
             }
         }
         Ok(())
@@ -1173,59 +1123,6 @@ fn get_edge_relation(edge: &Edge) -> String {
             )
         }
         _ => "Birth".to_string(),
-    }
-}
-
-/// Extract source and target handles from an Edge.
-fn edge_source_target(edge: &Edge) -> (Handle, Handle) {
-    match edge {
-        Edge::PersonFamily { source, target, .. }
-        | Edge::PersonParentFamily { source, target, .. }
-        | Edge::PersonEventRef { source, target, .. }
-        | Edge::FamilyFather { source, target, .. }
-        | Edge::FamilyMother { source, target, .. }
-        | Edge::FamilyChildRef { source, target, .. }
-        | Edge::FamilyEventRef { source, target, .. }
-        | Edge::EventPlace { source, target, .. }
-        | Edge::EventCitation { source, target, .. }
-        | Edge::EventNote { source, target, .. }
-        | Edge::EventMediaRef { source, target, .. }
-        | Edge::EventTag { source, target, .. }
-        | Edge::FamilyCitation { source, target, .. }
-        | Edge::FamilyNote { source, target, .. }
-        | Edge::FamilyMediaRef { source, target, .. }
-        | Edge::FamilyTag { source, target, .. }
-        | Edge::PersonCitation { source, target, .. }
-        | Edge::PersonNote { source, target, .. }
-        | Edge::PersonMediaRef { source, target, .. }
-        | Edge::PersonTag { source, target, .. }
-        | Edge::PlaceCitation { source, target, .. }
-        | Edge::PlaceNote { source, target, .. }
-        | Edge::PlaceMediaRef { source, target, .. }
-        | Edge::PlaceTag { source, target, .. }
-        | Edge::SourceNote { source, target, .. }
-        | Edge::SourceMediaRef { source, target, .. }
-        | Edge::SourceTag { source, target, .. }
-        | Edge::CitationNote { source, target, .. }
-        | Edge::CitationMediaRef { source, target, .. }
-        | Edge::CitationTag { source, target, .. }
-        | Edge::RepositoryNote { source, target, .. }
-        | Edge::RepositoryMediaRef { source, target, .. }
-        | Edge::RepositoryTag { source, target, .. }
-        | Edge::MediaNote { source, target, .. }
-        | Edge::MediaCitation { source, target, .. }
-        | Edge::MediaTag { source, target, .. }
-        | Edge::NoteCitation { source, target, .. }
-        | Edge::NoteTag { source, target, .. }
-        | Edge::TagTag { source, target, .. }
-        | Edge::CitationSource { source, target, .. }
-        | Edge::PersonPersonRef { source, target, .. }
-        | Edge::SourceRepoRef { source, target, .. }
-        | Edge::PlacePlaceRef { source, target, .. } => (source.clone(), target.clone()),
-        Edge::CitationRef { source, target, .. }
-        | Edge::NoteRef { source, target, .. }
-        | Edge::MediaRef { source, target, .. }
-        | Edge::TagRef { source, target, .. } => (source.clone(), target.clone()),
     }
 }
 
