@@ -1,227 +1,319 @@
-# Implementation Plan: Delete Tool Output Round-Trip Fidelity
+# Implementation Plan: Gramps Python Delete Backend
 
-Source: [`docs/research/delete-output-roundtrip.md`](docs/research/delete-output-roundtrip.md)
+Source: [`docs/research/gramps-python-delete-backend.md`](docs/research/gramps-python-delete-backend.md)
 
-**Problem**: `gramps-gen delete` output is not byte-faithful to its input.
-Four classes of fidelity gaps remain after the already-committed note-type
-fix (76ed57e…c098134): (1) no crash-prevention default when a `<note>` has no
-`type` on input, (2) dates are truncated to year-only (with a **year-stored-
-in-`day`** bug), (3) the output mixes a 5.1 namespace with 5.2-style content
-(e.g. nested `<eventtype>`), and (4) the `change` attribute is dropped
-(deliberate, needs documenting).
+**Problem**: The `delete` command serializes its filtered output with our own
+Rust `GraphXmlWriter`. Every divergence between our XML output and Gramps'
+expected format is a potential crash, and that attack surface spans the entire
+Gramps XML schema (namespace mismatches, date truncation, missing attributes,
+element ordering). Prior round-trip fixes are defense-in-depth patches, not a
+structural remedy.
 
-**Strategy**: Defense-in-depth for the note-type default → fix date
-truncation (structured + raw text) → make output version-aware so content
-format matches the preserved namespace → expand round-trip/E2E coverage →
-harden CI against stale build artifacts.
+**Strategy**: Keep the well-tested Rust cascade engine (it computes the
+deletion set), but delegate all XML I/O for `delete` to Gramps' own
+import/delete/export libraries via a Python subprocess. Input → Rust cascade →
+JSON manifest → Python (Gramps DB import, dependency-ordered delete, Gramps
+export). Removes the filter path from `GraphXmlWriter`; the full serializer
+stays for `generate`.
 
-> Prior note-type plan (committed): see `git log 76ed57e..c098134`. This
-> plan is a fresh sequence for the delete-output-roundtrip research doc.
+> The previous delete-output-round-trip plan (committed `0ffa5a1..0ac495d`) is
+> complete and stays on `main`; `gramps_xml_version`/`namespace_to_version`
+> are retained because `generate` also uses them. This is a fresh feature plan.
+
+## Verified facts (audited against the tree)
+
+- `build_manifest(&source, selections, &seed, &to_delete, &graph)` already
+  groups a flat `&[Handle]` per type via `NodeKindLabel::plural()` →
+  snake_case keys (`people`, `families`, …). No new grouping function needed.
+- `delete.rs` already passes `final_to_delete` (the reviewed set) to
+  `build_manifest`, not the raw `DeletePlan`. The manifest is correctly
+  built from the reviewed set.
+- `GraphXmlWriter` filter surface (`with_filter`, `is_deleted`,
+  `is_edge_deleted`, `validate_deletion_set`, `to_delete` field) is referenced
+  **only** by `crates/cli/src/commands/delete.rs`; no `xml.rs` unit test
+  exercises it, and `integration.rs`/other tests use `GraphXmlWriter::new`
+  without a filter. So filter removal touches no other unit tests.
+- Gramps **5.1.6** is installed locally (`/usr/bin/gramps`, `gramps.gen`
+  importable) and `import gramps.gen.db.utils` succeeds → the Step-1 API spike
+  and the Gramps round-trip E2E are runnable on this machine.
+- The project's existing Python test uses stdlib `unittest`
+  (`extract/test_extractor.py`), but `pytest` is **not** currently installed.
+  Per user decision, the backend's Step-8 tests will use **pytest**; add a
+  `pytest` dev dependency for `scripts/`. This introduces a new Python dev
+toolchain the existing extract tests do not rely on.
+- No `.github/` directory exists → the CI step (Step 7 of the source doc) is
+  **deferred**, exactly as the source doc already states.
 
 ## Impact summary
 
-| Phase | Component | Change |
+| Commit | Component | Change |
 |---|---|---|
-| 1 — Crash-free output | `crates/output/src/xml.rs` | `get_field_value` Note arm defaults `type` → `"General"` |
-| 1 — Crash-free output | `crates/typed-graph/src/generate/builder.rs` | `NoteBuilder::build` defaults `type_field` → `"General"` |
-| 2 — Date fidelity | `crates/gramps-reader/src/xml/graph.rs` | `parse_year_from_val` → `parse_date_from_val` (year/month/day + raw text) |
-| 2 — Date fidelity | `crates/output/src/xml.rs` | `write_date_element` serializes `text` when present |
-| 3 — Version-aware | `crates/output/src/xml.rs` | `gramps_xml_version` field; `namespace_to_version()`; 5.1-flat vs 5.2-nested event types |
-| 3 — Version-aware | `crates/cli/src/commands/delete.rs` | use input version instead of hardcoded `"5.2"` |
-| 4 — Tests | `crates/*/tests/` | 5.1 fixture round-trip, note default/format, import golden |
-| 5 — CI | `.github/workflows/` (deferred), `scripts/` | stale-artifact guard, wire `validate-gramps-import.sh` |
-
-> **Design decisions** (from source doc): default note type `"General"`;
-> Option A version-aware output; structured + raw-text date fidelity; keep
-> `NoteData.type_field` as `Option<String>` (already merged).
+| 1 | `scripts/delete_backend.py` | temp DB init spike (make_database contract, backend/version selection), gzip input, import |
+| 2 | `scripts/delete_backend.py` | dependency-ordered deletion, handle validation, `rejected` dead-letter |
+| 3 | `scripts/delete_backend.py` | version-from-xmlns, export, atomic rename, `main`, JSON result |
+| 4 | `crates/delete/tests/`, `types.rs` | pin shared manifest-contract fixture; roundtrip test |
+| 5 | `crates/cli/src/commands/delete.rs` | build reviewed manifest + delegate to Python backend; drop gzip/write_gzip_output |
+| 6 | `crates/output/src/xml.rs` | remove `with_filter`/`is_deleted`/`is_edge_deleted`/`to_delete`/`validate_deletion_set` |
+| 7 | `crates/cli/tests/e2e.rs`, `integration.rs` | rework/remove obsolete delete-output XML assertions |
+| 8 | `scripts/`, pytest | Python edge-case unit tests (pytest, fixtures) |
+| 9 | `crates/cli/tests/e2e.rs` | Gramps round-trip E2E + `gramps_available()` guard test |
+| 10 | `AGENTS.md`, docs | document Python-backed delete pipeline |
+| 11 | — | CI gating (deferred — no `.github/` present) |
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `fix(output): default missing note type to "General" at serialization` | Serialization default | `crates/output/src/xml.rs` | Unit |
-| 2 | `fix(typed-graph): default note type to "General" in builder` | Builder default | `crates/typed-graph/src/generate/builder.rs` | Unit |
-| 3 | `fix(gramps-reader): parse full date into year/month/day/raw text` | Date parser | `crates/gramps-reader/src/xml/graph.rs` | Unit |
-| 4 | `fix(output): serialize original date text when present` | Date serializer | `crates/output/src/xml.rs` | Unit |
-| 5 | `docs(output): document intentional change attribute omission` | Doc contract | `crates/output/src/serialization_map.rs` | — |
-| 6 | `test: add date round-trip and property-based fidelity tests` | Date round-trip coverage | `crates/gramps-reader/tests/`, `crates/output/tests/` | Unit, property |
-| 7 | `feat(output): derive XML format version from namespace` | Version derivation | `crates/output/src/xml.rs` | Unit |
-| 8 | `feat(output): version-aware event type serialization (5.1 flat / 5.2 nested)` | Format switch-points | `crates/output/src/xml.rs` | Unit |
-| 9 | `fix(delete): use input Gramps version for output XML format` | Delete wiring | `crates/cli/src/commands/delete.rs` | Integration |
-| 10 | `test: add Gramps 5.1 fixture round-trip import test` | 5.1 E2E | `crates/cli/tests/e2e.rs` | Integration (E2E) |
-| 11 | `test: note default type and format attribute round-trip` | Note fidelity tests | `crates/cli/tests/`, `crates/output/tests/` | Unit, integration |
-| 12 | `chore: add Gramps import golden test with committed fixture` | Import golden | `crates/cli/tests/e2e.rs`, fixture | Integration (E2E) |
-| 13 | `chore: harden CI against stale build artifacts` | CI guardrail | `.github/workflows/` (if created), `scripts/` | — |
-
-> After steps 1 and 2, run `cargo clean -p typed-graph && cargo test` once to
-> confirm the freshly-generated `NoteData` (with `type_field: Option<String>`)
-> — stale `$OUT_DIR` artifacts can mask the note-type fix.
+| 1 | `feat(delete): add Python backend temp DB init and XML import` | Backend DB/import spike | `scripts/delete_backend.py` (`create_temp_db`, `import_xml`, version/backend detection, gzip input) | Smoke, python unit |
+| 2 | `feat(delete): add Python backend dependency-ordered deletion` | Deletion engine | `scripts/delete_backend.py` (`delete_items`, per-type `remove_*`, handle validation, `rejected`) | Python unit |
+| 3 | `feat(delete): add Python backend export, atomic output, main` | Export + orchestration | `scripts/delete_backend.py` (`export_xml`, version-from-xmlns, atomic rename, `main`, JSON result) | Smoke, python unit |
+| 4 | `test(delete): pin manifest contract with shared JSON fixture` | Manifest data contract | `crates/delete/tests/manifest_contract.rs`, `crates/delete/tests/fixtures/manifest-contract-v1.json`, `manifest_json_roundtrip` | Unit, integration, doc |
+| 5 | `feat(delete): delegate delete XML I/O to Python backend` | CLI wiring | `crates/cli/src/commands/delete.rs` (interpreter resolution, temp manifest, subprocess, timeout, `PythonResult`, report; remove `write_gzip_output`/flate2) | Integration |
+| 6 | `refactor(output): remove GraphXmlWriter filter/deletion methods` | Filter removal | `crates/output/src/xml.rs` | Unit |
+| 7 | `test(delete): remove obsolete delete-output XML assertions` | Test rework | `crates/cli/tests/e2e.rs`, `crates/cli/tests/integration.rs` | Integration |
+| 8 | `test(delete): Python backend edge-case unit tests` | Python edge cases | `scripts/test_delete_backend.py`, `scripts/pytest.ini` or config (pytest) | Python unit |
+| 9 | `test(delete): Gramps round-trip E2E with import verification` | Behavioral E2E | `crates/cli/tests/e2e.rs` (`e2e_delete_gramps_python_roundtrip`, `gramps_available()`) | Integration (E2E), unit |
+| 10 | `docs(delete): document Python-backed delete pipeline` | Docs | `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/delete-tool.md`, `docs/research/delete-output-roundtrip.md` | — |
+| 11 | `chore(delete): gate E2E behind gramps_available and pin version` | CI guardrail | `.github/workflows/` (deferred — no dir present) | — |
 
 ## Step details
 
-### Step 1 — Serialization default for missing note type
+### Step 1 — Python backend: temp DB init + import (the API spike)
 
-**`crates/output/src/xml.rs`** — in `get_field_value`'s `Node::Note` arm,
-change the `"type"` arm so a `None` `type_field` emits `"General"`:
+**`scripts/delete_backend.py`** — create the headless script shell proving the
+Gramps init contract (validated against the locally installed **Gramps 5.1.6**):
 
-```rust
-"type" => Some(n.type_field.clone().unwrap_or_else(|| "General".to_string())),
-```
+- `gi.require_version('Gtk', '3.0')` up-front to suppress PyGIWarning.
+- `make_database(backend_plugin_id)` returns an **uninitialized** DB (not a
+  dir path). Set `db.dir = tmpdir`, then `db.write_version(VERSION)` before
+  importing. Version/backend selection: 5.1/5.2 → `"bsddb"`; read
+  `gramps.gen.const.VERSION` and pick accordingly. **Verify the exact init
+  sequence here against the installed Gramps** — this is version-sensitive.
+- `create_temp_db()` → temp dir + initialized DB (Berkeley DB).
+- `import_xml(db, path)` → gzip-detect via `\x1f\x8b` magic bytes, rename to
+  `.gz` so `importxml.importData` handles it; call
+  `gramps.plugins.importer.importxml.importData(db, path, User())`.
+- Temp-DB cleanup via `shutil.rmtree(path, ignore_errors=True)` in a
+  `finally` (Berkeley DB holds locks on some platforms).
 
-This is the **primary** guard ensuring Gramps never receives a `<note>`
-without a `type` attribute on the delete round-trip path.
+**Tests**: smoke (script imports without a window; a no-op import then export
+succeeds). Minimal — this commit is primarily the spike.
 
-**Tests** (existing xml.rs test module): `type_field: Some("Research")` →
-`type="Research"`; `type_field: None` → `type="General"` (regression: no
-bare `<note>` ever emitted).
+### Step 2 — Python backend: dependency-ordered deletion + validation
 
-### Step 2 — Builder default for note type (generation path only)
+**`scripts/delete_backend.py`** — add `delete_items(db, manifest)`:
 
-**`crates/typed-graph/src/generate/builder.rs`** — in `NoteBuilder::build()`
-(and/or the `GraphBuilder::add_note` initializer), set `type_field` to
-`Some("General".to_string())` when the caller left it `None`. Do **not**
-change the generated `NoteData::default()` — keep that `None` for all other
-consumers (build.rs untouched).
+- **Pre-deletion handle validation**: every manifest handle must match UUID
+  v4 (`/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i`).
+  Non-matching handles → `rejected` list (dead-letter), skipped. Matching
+  handles absent from the DB → abort **before any deletion** (no partial
+  writes).
+- Delete strictly in this order inside one shared `DbTxn`
+  (`gramps.gen.db.DbTxn`):
+  1. People — `db.get_person_from_handle(h)` then
+     `db.delete_person_from_database(person, trans)` (takes a **`Person`
+     object**, not a handle; handles family ref cleanup)
+  2. Families — `remove_family(h, trans)`
+  3. Events — `remove_event(h, trans)`
+  4. Notes — `remove_note(h, trans)`
+  5. Places — `remove_place(h, trans)`
+  6. Sources — `remove_source(h, trans)`
+  7. Citations — `remove_citation(h, trans)`
+  8. Repositories — `remove_repository(h, trans)`
+  9. Media — `remove_media(h, trans)`
+  10. Tags — `remove_tag(h, trans)`
+- Passing one shared `DbTxn` to every call realizes the atomic-write goal.
 
-**Tests**: `add_note().with_text("x").build()` yields a note with
-`type_field == Some("General")`; explicit `.with_type("Research")` (if such
-a setter exists / add one) is preserved.
+**Tests**: Python unit — ordering is fixed; malformed handles land in
+`rejected`; a well-formed-but-absent handle aborts before any write.
 
-### Step 3 — Full date parsing (fixes year-as-day + truncation)
+### Step 3 — Python backend: export, atomic output, main
 
-**`crates/gramps-reader/src/xml/graph.rs`**:
+**`scripts/delete_backend.py`**:
 
-- Replace `parse_year_from_val` with `parse_date_from_val` returning a small
-  `ParsedDate { year: i32, month: Option<i32>, day: Option<i32>, raw_text: Option<String> }`.
-  Split the `val` string on `-` for year/month/day; capture the entire raw
-  `val` as `raw_text` (reuse the existing `read_dateval_val` helper).
-- Update the `b"dateval"` arm (~line 1250) to build
-  `DateValue { quality: None, modifier: None, day: parsed.day, month: parsed.month, year: parsed.year, text: parsed.raw_text }`.
-  This removes the `day: Some(year as i32)` bug and preserves month/day/text.
+- Read `xmlns` from the input XML header to determine the Gramps XML version;
+  pass it to the exporter so output matches input. Unrecognized namespace →
+  fall back to `"5.2"` + warning on stderr.
+- `export_xml(db, path)` → gzip if the output filename ends in `.gz` else
+  uncompressed; write via `gramps.plugins.export.exportxml.export_data`.
+- **Atomic output**: export to a temp file, then `os.replace` onto the final
+  path (deletion is atomic via `DbTxn`; export happens after commit).
+- `main()` → parse args (`--input`, `--manifest`, `--output`), orchestrate,
+  print JSON to stdout (see Step 5's `PythonResult`), errors via stderr +
+  non-zero exit.
 
-**Tests** (xml.rs/graph.rs unit tests): `"1868-09-20"` → `{year:1868,
-month:Some(9), day:Some(20)}`; `"1868"` → `{year:1868, month:None, day:None}`;
-`"1868-09"` → day `None`; a modifier/range `val` string preserved verbatim in
-`text`.
+**Tests**: smoke — empty manifest → no-op import/export succeeds; result JSON
+parses into the `PythonResult` shape.
 
-### Step 4 — Serialize original date text when present
+### Step 4 — Pin the manifest data contract with a shared fixture
 
-**`crates/output/src/xml.rs`** — in `write_date_element`, when `d.text` is
-`Some` and non-empty, use it directly as the `val` attribute instead of
-reconstructing from year/month/day:
+The JSON shape Rust emits and Python consumes must be pinned so the two sides
+cannot silently drift (data-contracts skill).
 
-```rust
-let date_str = match &d.text {
-    Some(t) if !t.is_empty() => t.clone(),
-    _ => { /* existing year/month/day reconstruction */ }
-};
-```
+**`crates/delete/tests/manifest_contract.rs`** — serialize a sample
+`DeleteManifest` built from a test helper and assert the exact JSON shape: top
+keys (`version`, `source_file`, `created_at`, `seed_people`, `plan`) and the
+per-type `to_delete`/`kept` nesting under snake_case keys (`people`,
+`families`, `events`, `notes`, `places`, `sources`, `citations`,
+`repositories`, `media`, `tags`).
 
-**Tests**: a `DateValue` with `text` set round-trips to the exact `val`
-string; a `DateValue` constructed via `new_ymd` (with `text: None`) still
-emits `YYYY-MM-DD`.
+**`crates/delete/tests/fixtures/manifest-contract-v1.json`** — a minimal valid
+manifest with one entry per type, committed so both Rust and Python consume
+the same fixture. A format change on either side fails loudly.
 
-### Step 5 — Document intentional `change` attribute omission
+**`crates/delete/src/types.rs`** — add `manifest_json_roundtrip` unit test
+(serialize → deserialize → equal `DeleteManifest`).
 
-**`crates/output/src/serialization_map.rs`** — add a doc/`//` comment at the
-`type_map` definition (near the Note/Primary entries) explaining that the
-`change` timestamp attribute is **deliberately** excluded from the
-serialization map on all primary types because Gramps auto-generates the
-timestamp on import. Prevents future devs treating it as a bug.
+### Step 5 — Delegate delete XML I/O to the Python backend
 
-No tests. (`—`)
+**`crates/cli/src/commands/delete.rs`** — replace the `GraphXmlWriter` write
+step with a subprocess call passing a manifest built from the **reviewed set**
+`final_to_delete`:
 
-### Step 6 — Date round-trip + property-based tests
+1. **Always serialize the manifest** to a temp JSON file (not just when
+   `--save-manifest`) — Python needs it. Reuse the existing
+   `build_manifest(..., &seed_vec, &delete_vec, &graph)`.
+2. **Locate the Python script**: embedded at build time via
+   `concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/delete_backend.py")`;
+   honour a `GRAMPS_DELETE_BACKEND` env override for development.
+3. **Resolve the interpreter deterministically**:
+   1. `GRAMPS_PYTHON` env var (use as-is);
+   2. probe `python3 -c "import gramps.gen.db.utils"` → use `python3` if exit 0;
+   3. else error: "Gramps Python libraries not found. Set GRAMPS_PYTHON env var
+      to the python interpreter that can import gramps."
+4. **Spawn**: `python3 <script> --input <in.gramps> --manifest <plan.json> --output <out.gramps>`.
+   Generous timeout (e.g. 5 min) — Berkeley DB is slow on large files; kill on
+   timeout.
+5. **Parse stdout** JSON into `PythonResult { status, output?, deleted?,
+   message?, rejected }`; map to success or `CliError`.
+6. **Remove dead gzip paths**: `write_gzip_output`, `is_gzip`, the `flate2`
+   usage in `delete.rs`, and the `output::GraphXmlWriter`/`SerializationMap`
+   import — Python controls gzip via the output filename. `--dry-run` must not
+   invoke the subprocess; `--save-manifest`/`--load-manifest` UX unchanged.
+   Temp dir cleaned up on exit.
 
-Add round-trip tests across `gramps-reader` and `output`:
+**Tests**: integration — dry-run makes no subprocess call; success path parses
+`PythonResult`; error/output paths map to `CliError`.
 
-- `"1868-09-20"` survives parse→serialize→parse unchanged (the original
-  Bug 2 regression).
-- Year-only, year-month, full YMD, and modifier/range/spans ("before
-  ...", ranges) each survive round-trip.
-- **Property-based** invariant for all valid `DateValue` inputs:
-  `parse_xml(serialize_xml(date))` yields an equivalent `DateValue` —
-  catches leap days, month boundaries, and modifier text single-example
-  tests miss.
+### Step 6 — Remove the GraphXmlWriter filter/serialization path
 
-### Step 7 — Derive XML format version from namespace
+**`crates/output/src/xml.rs`** — remove together, as one atomic change (they
+reference each other):
 
-**`crates/output/src/xml.rs`**:
+- `with_filter` (pub), `is_deleted` (private), `is_edge_deleted` (private),
+  `validate_deletion_set` (pub), and the `to_delete` field from
+  `GraphXmlWriter`. Its uses are at `write_section` (~line 271 filter) and
+  `write_edge_items` (~line 776 filter); remove those references too.
+- **Keep** `gramps_xml_version` and `with_namespace` — used by `generate`.
+- `crates/output/src/lib.rs` — no change (public API changes are only the
+  removed methods).
 
-- Add `namespace_to_version(ns)` helper reading the namespace URI
-  (`.../xml/1.7.1/` → `"5.1"`, `.../xml/1.7.2/` → `"5.2"`).
-- Add a `gramps_xml_version: String` field to `GraphXmlWriter` (distinct
-  from the schema `gramps_version` used for the header).
-- Have `with_namespace` derive and store the format version from the passed
-  namespace (internal consistency with the preserved namespace).
+**Tests**: existing `xml.rs` writer unit tests (incl. `gramps_xml_version`
+derivation at lines ~2483/2487) still pass.
 
-**Tests**: `namespace_to_version` maps known URIs correctly and falls back
-safely for unknown ones.
+### Step 7 — Rework/remove obsolete delete-output XML assertions
 
-### Step 8 — Version-aware event-type serialization
+The four E2E tests asserting our writer's XML for delete output no longer
+apply now that Gramps produces the output (Gramps re-normalizes; our
+`type="General"` default and flat 5.1 event types are emitted by Gramps itself
+only where it preserves the input). A format change on either side of the
+contract is caught by Step 4's fixture + Step 9's import test, not by string
+matching.
 
-**`crates/output/src/xml.rs`** — audit all format switch points where 5.2
-nesting is hardcoded (document findings in a code comment):
+**`crates/cli/tests/e2e.rs`** — rework or replace:
 
-- Event type: currently `<eventtype><type>Birth</type></eventtype>` →
-  for `gramps_xml_version == "5.1"` emit flat `<type>Birth</type>`.
-- Ensure the `<created>` header uses `version` matching the derived format.
+- `e2e_delete_notes_import_roundtrip` (line 1266)
+- `e2e_delete_51_namespace_emits_flat_event_type` (line 1396)
+- `e2e_delete_51_fixture_import_roundtrip` (line 1473)
+- `e2e_delete_note_default_type_and_format_roundtrip` (line 1578)
 
-For each switch point emit the 5.1-flat or 5.2-nested form per
-`gramps_xml_version`. **Tests**: event type serializes flat for 5.1, nested
-for 5.2.
+Any surviving behavior (input imports cleanly, deleted handles absent) moves
+into Step 9's Gramps-backed round-trip test. Remove the standalone
+`GraphXmlWriter`/filter usage if present.
 
-### Step 9 — Delete uses input version
+**Tests**: integration.
 
-**`crates/cli/src/commands/delete.rs`** — replace the hardcoded
-`let gramps_version = "5.2";` with the version derived from the parsed
-`namespace` (via `namespace_to_version`), so the writer's content format and
-header match the input. **Tests**: integration test that delete output for a
-5.1-namespace input emits 5.1-flat event types.
+### Step 8 — Python backend edge-case unit tests
 
-### Step 10 — Gramps 5.1 fixture round-trip import test
+**`scripts/test_delete_backend.py`** (pytest, per user decision; add `pytest`
+as a Python dev dependency — e.g. a `scripts/` `requirements-dev.txt` with
+`pytest`, since it is not in the stdlib and not yet installed):
 
-**`crates/cli/tests/e2e.rs`** — add a gated test: a real (or representative
-synthetic) 5.1-namespace/5.1-format `.gramps` fixture → `gramps-gen delete`
-→ `timeout 15 gramps -y -q -i output.gramps` → assert no `ERROR:`,
-`Traceback`, `TypeError`, or `Failed to import`. This covers the user's
-actual 5.1 input path that the existing 5.2-only note test misses.
+- Empty manifest and all-empty per-type lists → no-op import/export succeeds.
+- Manifest handle absent from the DB → fails with a specific error **before**
+  deleting anything.
+- Partial presence (some handles exist, one doesn't) → nothing written.
+- Invalid handle format (not UUID v4) → handle in `rejected`, valid handles
+  still deleted.
+- Subprocess timeout: spawn a mock Python script that sleeps indefinitely,
+  assert the timeout fires and the subprocess is killed (run from the Rust
+  side or a `unittest.mock` subprocess double).
 
-### Step 11 — Note default-type and `format` attribute tests
+**Tests**: python unit.
 
-- Assert a `<note>` with **no** `type` in input receives `type="General"` in
-  output (lock in Step 1).
-- Assert the `format` attribute (e.g. `format="1"` HTML notes) survives the
-  round-trip — fidelity gap (not crash) regression for the Note `XmlTypeInfo`
-  added in the prior plan.
+### Step 9 — Gramps round-trip E2E + guard
 
-### Step 12 — Gramps import golden test
+**`crates/cli/tests/e2e.rs`**:
 
-Add a committed fixture of the smallest possible real Gramps export;
-test: parse → serialize → `gramps -y -q -i` → no errors on stdout/stderr.
-Guard on Gramps availability next to the other gated E2E tests.
+- `e2e_delete_gramps_python_roundtrip`: real `.gramps` fixture →
+  `gramps-gen delete --selections picks.json --yes -o clean.gramps` → import
+  output via `gramps.plugins.importer.importxml` → assert deleted
+  people/families/events/notes absent and no errors on stderr. (Limitation:
+  test uses the same importer as the backend; optional secondary check via
+  `gramps -y -q -i clean.gramps` when the CLI binary is present.)
+- `gramps_available()` guard unit test: compiles, returns a `bool`, doesn't
+  panic; asserts the Gramps version starts with `("5.1","5.2")` (rejects 6.x's
+  bsddb removal). E2E tests skip gracefully when Gramps is unavailable.
 
-### Step 13 — CI stale-artifact hardening
+**Tests**: integration (E2E), unit.
 
-- CI runs `cargo clean -p typed-graph` before the delete round-trip tests so
-  generated `$OUT_DIR` code always matches the current schema files.
-- Wire `scripts/validate-gramps-import.sh` into CI **only if** `.github/
-  workflows/` exists and Gramps is in the runner image — **deferred** here
-  (no workflow directory present).
+### Step 10 — Documentation
+
+| Document | Change |
+|---|---|
+| `AGENTS.md` | Add `scripts/delete_backend.py` to project structure |
+| `docs/ARCHITECTURE.md` | Update the delete pipeline diagram (output delegate = Python backend) |
+| `docs/delete-tool.md` | Update pipeline diagram; fix manifest JSON example to snake_case keys (`"people"` not `"Person"` — verified the doc currently uses `"Person"` at line 231); note deletion uses Gramps' native libraries |
+| `docs/research/delete-output-roundtrip.md` | Note that bugs 1–4 are obsoleted by this restructure |
+
+### Step 11 — CI (deferred)
+
+The delete command now requires a working Gramps install (Python libraries).
+CI E2E must run with Gramps present and pinned to 5.1/5.2 (the API usage is
+validated against 5.1.6; 6.x deviates). Deferred: no `.github/` directory
+exists in this repo. Revisit when CI is introduced; the `gramps_available()`
+version assert in Step 9 already enforces the environment contract.
+
+## Dependencies / ordering notes
+
+- Steps 1–4 are independent of `crates/cli` and `crates/output`; they build
+  the backend and its contract.
+- Step 5 (delegation) depends on Steps 1–3 (script exists) and Step 4
+  (contract fixtures make drift visible).
+- **Step 6 and Step 7 must land together or keep the tree green**: Step 6
+  removes the filter surface, and Step 7 removes tests/`delete.rs` references
+  to it. Because verification showed no `xml.rs` unit tests exercise the
+  filter (only `delete.rs`), the compile/pass boundary is safe if Step 5
+  already dropped `delete.rs`'s filter usage. Confirm the tree compiles and
+  tests pass at each checkpoint.
+- `docs/delete-tool.md` currently shows uppercase keys (`"Person"` at line
+  231) — Step 10 must fix this to the actual snake_case output.
 
 ## Repository health / pre-work
 
 Before implementing, satisfy the incremental-development pre-work gate:
-`git status` clean, `cargo test --workspace` green, `git branch --show-current`
-on `main`. Create a feature branch (e.g. `agent/delete-output-roundtrip`) per
-git-workflow before the first step commit.
+`git status` clean, `cargo test --workspace` green, `git branch
+--show-current` on `main`. Create a feature branch (e.g.
+`agent/delete-python-backend`) per git-workflow before the first step commit.
+`docs/research/gramps-python-delete-backend.md` is currently untracked and
+must be committed with this plan in Step 10's/dedicated docs commit.
 
 ## Test commands
 
 ```bash
-cargo test -p output                                   # Steps 1, 4, 7, 8, 11
-cargo test -p typed-graph                              # Step 2
-cargo test -p gramps-reader                            # Steps 3, 6
-cargo test -p cli                                      # Steps 9-12
-cargo test --workspace                                 # full suite before each commit
+pytest scripts/                                  # Steps 1-3, 8 (pytest, after installing dev reqs)
+cargo test -p delete                              # Step 4 (contract fixture + roundtrip)
+cargo test -p cli                                 # Steps 5, 7, 9
+cargo test -p output                              # Step 6
+cargo test --workspace                            # full suite before each commit
 cargo clippy --all-targets --all-features -- -D warnings   # final gate
-cargo clean -p typed-graph && cargo test               # stale-artifact verification
+python3 -c "import gramps.gen.db.utils"           # sanity check for local Gramps
 ```
