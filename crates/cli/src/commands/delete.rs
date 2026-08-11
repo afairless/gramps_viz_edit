@@ -1,11 +1,16 @@
 //! Delete command — remove selected people and their orphaned dependencies.
 //!
 //! Pipeline: parse input file → load selections → run cascade engine →
-//! (optional review) → build manifest → delegate to Python backend.
+//! (optional review) → build manifest v2 → delegate to Python backend
+//! (persistent DB, people-only deletion) → reconcile manifest against
+//! surviving report → save enriched manifest alongside output.
 //!
 //! XML I/O is delegated to Gramps' own import/delete/export libraries
 //! via a Python subprocess (`scripts/delete_backend.py`). The Rust
-//! cascade engine remains intact for computing the deletion set.
+//! cascade engine remains intact for computing the deletion set, but is
+//! advisory-only for non-people types — only people are actually deleted
+//! through the Gramps API. The Gramps DB is retained for user inspection
+//! (unless `--no-retain-db` is specified).
 
 use std::collections::HashSet;
 use std::fs;

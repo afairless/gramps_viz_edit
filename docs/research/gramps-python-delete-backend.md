@@ -548,3 +548,14 @@ either all deletions succeed or none do.
 7. `delete-tool.md` manifest example uses correct snake_case keys
 8. `gramps_available()` guard function has a unit test; CI asserts it returns
    `true` (failing CI if Gramps is not installed)
+
+---
+
+> **Update (Gramps API shift):** The Python backend now creates a **persistent**
+> Gramps DB (not a temp directory), deletes **only people** via
+> `delete_person_from_database`, and retains the DB for user inspection. The
+> `--db-dir` and `--no-retain-db` flags control the DB directory location and
+> automatic cleanup. The backend also reports a `surviving` set — handles that
+> still exist in the DB after deletion — for reconciliation with the Rust
+> manifest. The manifest has been updated to v2 format with per-handle status
+> tracking (`pending`, `deleted`, `kept`).

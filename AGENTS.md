@@ -131,10 +131,11 @@ gramps_viz_edit/
 │   ├── delete/                     # Deletion cascade engine: remove people and orphaned dependencies
 │       └── src/
 │           ├── lib.rs              # Library root, re-exports
-│           ├── types.rs            # DeletePlan, DeleteManifest, DeleteCandidate, TypePlan, ReviewState
+│           ├── types.rs            # DeletePlan, DeleteManifest, DeleteCandidate, TypePlan, ReviewState, HandleStatus, HandleEntry
 │           ├── cascade.rs          # Fixed-point cascade engine (read-only on graph)
 │           ├── review.rs           # Interactive terminal review loop
-│           └── manifest.rs         # Save/load/validate deletion manifests (JSON)
+│           ├── manifest.rs         # Save/load/validate deletion manifests (JSON)
+│           └── reconcile.rs        # Manifest reconciliation against Gramps DB surviving report
 ```
 
 ## Key Design Rules

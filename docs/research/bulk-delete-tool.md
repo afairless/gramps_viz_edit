@@ -578,3 +578,13 @@ before proceeding to the next step.
   people by query (e.g., "all people born before 1800")
 - **Merge cleanup**: After merging two `.gramps` files, automatically clean up
   duplicate or orphaned objects
+
+---
+
+> **Update (Gramps API shift):** The cascade engine is now **advisory-only** for
+> non-people types. The Rust cascade still computes the full orphan closure for
+> review, but only people are sent to Gramps for actual deletion. Non-people
+> types (events, notes, places, etc.) always survive in the output — Gramps
+> never deletes them. The manifest tracks which handles Gramps actually deleted
+> (via the `surviving` report from the Python backend), marking them as
+> `deleted`, `pending` (kept by Gramps), or `kept` (user chose to keep).

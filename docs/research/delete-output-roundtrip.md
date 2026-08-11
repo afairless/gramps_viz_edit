@@ -357,3 +357,12 @@ in the minimal test fixture:
   - `crates/output/src/serialization_map.rs` — Note `XmlTypeInfo` with `type` attr
   - `crates/cli/src/commands/delete.rs` — delete pipeline
   - `crates/cli/tests/e2e.rs` — `e2e_delete_notes_import_roundtrip`
+
+---
+
+> **Update (Gramps API shift):** Orphaned secondary objects (events, notes,
+> places, etc.) are now **intentionally preserved** in the output. The Gramps
+> DB API (`delete_person_from_database`) only deletes people and auto-clears
+> empty families. All other types survive as orphans. This is correct behavior:
+> Gramps itself never garbage-collects orphaned secondary objects, and they
+> survive XML export/import without errors.

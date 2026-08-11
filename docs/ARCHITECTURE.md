@@ -13,7 +13,7 @@ The system is a **Rust workspace** with eight crates:
 | `gramps-reader` | Shared library for streaming `.gramps` XML parsing, DSU, generation computation, `compute_generation_table` for FamilyGroupGenerationTable |
 | `integrate` | Diff-viz merge: full outer join of diff CSV and visualizer selections by handle |
 | `diff` | Gramps XML diff analyzer — compare and match entities across two family trees |
-| `delete` | Deletion cascade engine — remove seed people and compute orphaned dependencies |
+| `delete` | Deletion cascade engine — identify orphaned dependencies, delegate deletion to Gramps DB API, reconcile manifest with actual state |
 | `cli` | CLI binary (`gramps-gen`), scenario parsing, pipeline wiring |
 | `visualize` | Tauri v2 desktop app with D3.js force-directed graph visualization (optional, gated behind `--features visualize`) |
 
@@ -126,14 +126,32 @@ A **Python extractor** (`extract/extract_schema.py`) introspects Gramps Python c
 │  Interactive review ──────── review.rs (terminal TUI)          │
 │  Manifest  ────────────────── manifest.rs (save/load JSON)     │
 │  Types     ────────────────── types.rs (DeletePlan, Manifest)  │
-└──────────────────────────┬─────────────────────────────────────┘
-                           │  JSON manifest
+│  Reconcile ────────────────── reconcile.rs (manifest vs DB)    │
+└──────────────────────────────┬─────────────────────────────────┘
+                           │  JSON manifest v2 (with HandleStatus)
                            ▼
 ┌────────────────────────────────────────────────────────────────┐
 │  scripts/delete_backend.py  (Python subprocess)                │
 │                                                                │
-│  Temp Gramps DB ──── import ──── delete ──── export ──► .gramps│
+│  Persistent Gramps DB ──── import ──── delete PEOPLE ONLY       │
+│  ──── export ──► .gramps + report surviving handles            │
+│  DB retained at <input>-gramps-db/ for inspection              │
 │  Gramps' own libraries via gramps.gen + plugins               │
+└──────────────────────────────┬─────────────────────────────────┘
+                           │  surviving: [handle, ...]
+                           ▼
+┌────────────────────────────────────────────────────────────────┐
+│  Rust reconciliation (crates/delete/src/reconcile.rs)          │
+│  Compare manifest plan vs. actual DB state                     │
+│  Mark each handle: deleted / pending / kept                    │
+│  Save enriched manifest alongside output                       │
+└────────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌────────────────────────────────────────────────────────────────┐
+│  Output                                                     │
+│  output.gramps + output.manifest.json                         │
+│  <input>-gramps-db/ (retained Gramps DB)                      │
 └────────────────────────────────────────────────────────────────┘
                            │
                            ▼
@@ -828,22 +846,60 @@ type-by-type (People, Families, Events, etc.) with 6 actions: `y` (delete), `n`
 
 ### Manifest Format
 
-Deletion manifests are version-1 JSON files with: `version`, `source_file`,
-`selections_file`, `created_at`, `seed_people`, and `plan` (per-type `to_delete`
+Deletion manifests use **v2 format** with per-handle status tracking:
 
-- `kept` arrays). Manifests support audit trail workflows and can be saved/loaded
-via `--save-manifest` / `--load-manifest`.
+```json
+{
+  "version": 2,
+  "deletion_mode": "people_only",
+  "plan": {
+    "people": {
+      "to_delete": [
+        {"handle": "...", "status": "deleted"},
+        {"handle": "...", "status": "pending"}
+      ],
+      "kept": [
+        {"handle": "...", "status": "kept"}
+      ]
+    }
+  }
+}
+```
+
+| Status | Meaning |
+|--------|--------|
+| `pending` | Initial state — cascade says this should be deleted |
+| `deleted` | Confirmed: Gramps actually removed this object |
+| `kept` | User chose to keep this during review |
+
+Manifests are always saved alongside the output file (`<output-stem>.manifest.json`).
+`--save-manifest <FILE>` overrides the default path. v1 manifests (flat handle
+strings) are auto-migrated to v2 on load, with all entries set to `pending`.
 
 ### Integration
 
-The `gramps-gen delete <file>` CLI subcommand supports flags: `--selections`
-(required), `--output`, `--yes` (skip review), `--dry-run` (compute only),
-`--save-manifest`, `--load-manifest`. The cascade engine reads the Graph
-via `gramps-reader`, computes orphaned dependencies, and serializes the
-reviewed set as a JSON manifest. The CLI then delegates all XML I/O to
-`scripts/delete_backend.py` (a Python subprocess that uses Gramps' own
-import/delete/export libraries), replacing the prior Rust filter path
-in `GraphXmlWriter`.
+The `gramps-gen delete <file>` CLI subcommand supports flags:
+
+- `--selections <FILE>` — visualizer selection JSON (required unless `--load-manifest`)
+- `--output`, `-o <FILE>` — output path
+- `--yes`, `-y` — skip review prompts
+- `--dry-run`, `-n` — compute cascade, save manifest, exit
+- `--save-manifest <FILE>` — override manifest output path
+- `--load-manifest <FILE>` — load pre-reviewed manifest (skip review, filter pending-only)
+- `--db-dir <DIR>` — Gramps DB directory (default: `<input-stem>-gramps-db/`)
+- `--no-retain-db` — clean up Gramps DB after successful export
+
+### Reconciliation
+
+The `reconcile.rs` module compares the manifest against the `surviving` report
+from the Python backend. After reconciliation:
+
+- People that Gramps deleted → status = `deleted`
+- Families that Gramps auto-cascaded → status = `deleted`
+- Objects Gramps kept (events, notes, etc.) → status = `pending`
+- User-kept items → status = `kept`
+
+Reconciliation is idempotent: running it twice produces the same result.
 
 ---
 
