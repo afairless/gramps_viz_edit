@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import tempfile
 from typing import Any, Dict, List, Optional
@@ -21,7 +20,6 @@ import pytest
 
 # Import the backend module under test.
 from delete_backend import (
-    UUID_V4_RE,
     _DELETION_ORDER,
     _TYPE_OPS,
     _extract_handle,
@@ -110,6 +108,47 @@ HANDLE_A = "a5f0c1a2-4000-4b3d-8000-000000000001"
 HANDLE_B = "b5f0c1a2-4000-4b3d-8000-000000000002"
 HANDLE_C = "c5f0c1a2-4000-4b3d-8000-000000000003"
 
+# Gramps-native handle format: underscore + 16 hex chars (e.g. _103f72212ad34087).
+GRAMPS_HANDLE_A = "_103f72212ad34087"
+GRAMPS_HANDLE_B = "_103f72212ad34088"
+
+# A minimal Gramps XML with Gramps-native handles (not UUID v4).
+GRAMPS_NATIVE_XML = '''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE database PUBLIC "-//Gramps//DTD Gramps XML 1.7.1//EN"
+"http://gramps-project.org/xml/1.7.1/grampsxml.dtd">
+<database xmlns="http://gramps-project.org/xml/1.7.1/">
+  <header>
+    <created date="2025-01-15" version="5.1.6"/>
+    <researcher/>
+  </header>
+  <people>
+    <person handle="_103f72212ad34087" id="I0000" change="1700000000">
+      <gender>1</gender>
+      <name type="Birth Name">
+        <first>John</first>
+        <surname>Doe</surname>
+      </name>
+    </person>
+    <person handle="_103f72212ad34088" id="I0001" change="1700000000">
+      <gender>2</gender>
+      <name type="Birth Name">
+        <first>Jane</first>
+        <surname>Doe</surname>
+      </name>
+    </person>
+  </people>
+  <families/>
+  <events/>
+  <places/>
+  <sources/>
+  <citations/>
+  <repositories/>
+  <media/>
+  <notes/>
+  <tags/>
+</database>
+'''
+
 
 @pytest.fixture(scope="function")
 def gramps_db():
@@ -126,6 +165,27 @@ def gramps_db():
         mode="w", suffix=".gramps", delete=False, encoding="utf-8"
     )
     tmp_xml.write(MINIMAL_GRAMPS_XML)
+    tmp_xml_path = tmp_xml.name
+    tmp_xml.close()
+
+    try:
+        import_xml(db, tmp_xml_path)
+        yield db, db_dir, tmp_xml_path
+    finally:
+        shutil.rmtree(db_dir, ignore_errors=True)
+        if os.path.exists(tmp_xml_path):
+            os.unlink(tmp_xml_path)
+
+
+@pytest.fixture(scope="function")
+def gramps_native_db():
+    """Create a Gramps DB from GRAMPS_NATIVE_XML (Gramps-native handles)."""
+    db_dir = tempfile.mkdtemp(prefix="gramps_test_db_")
+    db = create_db(db_dir)
+    tmp_xml = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".gramps", delete=False, encoding="utf-8"
+    )
+    tmp_xml.write(GRAMPS_NATIVE_XML)
     tmp_xml_path = tmp_xml.name
     tmp_xml.close()
 
@@ -210,39 +270,6 @@ def make_manifest(
 
 
 # ---------------------------------------------------------------------------
-# UUID v4 regex tests
-# ---------------------------------------------------------------------------
-
-
-class TestUuidValidation:
-    """Test the UUID v4 regex pattern used for handle validation."""
-
-    def test_valid_uuid_v4(self) -> None:
-        assert UUID_V4_RE.match("a5f0c1a2-4000-4b3d-8000-000000000001")
-        assert UUID_V4_RE.match("b5f0c1a2-4000-4b3d-8000-000000000002")
-        assert UUID_V4_RE.match("c5f0c1a2-4000-4b3d-8000-000000000003")
-        assert UUID_V4_RE.match("d5f0c1a2-4000-4b3d-8000-000000000004")
-        assert UUID_V4_RE.match("e5f0c1a2-4000-4b3d-8000-000000000005")
-        assert UUID_V4_RE.match("f5f0c1a2-4000-4b3d-8000-000000000006")
-        assert UUID_V4_RE.match("95f0c1a2-4000-4b3d-8000-000000000009")
-        assert UUID_V4_RE.match("a5f0c1a2-4000-4b3d-8000-ffffffffffff")
-        # Uppercase
-        assert UUID_V4_RE.match("A5F0C1A2-4000-4B3D-8000-000000000001")
-
-    def test_invalid_uuid_not_v4(self) -> None:
-        # Version nibble is not 4
-        assert not UUID_V4_RE.match("a5f0c1a2-4000-1b3d-8000-000000000001")
-        assert not UUID_V4_RE.match("a5f0c1a2-4000-5b3d-8000-000000000001")
-
-    def test_invalid_uuid_wrong_format(self) -> None:
-        assert not UUID_V4_RE.match("not-a-uuid")
-        assert not UUID_V4_RE.match("")
-        assert not UUID_V4_RE.match("a5f0c1a2-4000-4b3d-8000-000000000001-extra")
-        assert not UUID_V4_RE.match("a5f0c1a240004b3d8000000000000001")
-        assert not UUID_V4_RE.match("zzzzzzzz-4000-4b3d-8000-000000000001")
-
-
-# ---------------------------------------------------------------------------
 # _extract_handle tests
 # ---------------------------------------------------------------------------
 
@@ -303,23 +330,20 @@ class TestValidateHandles:
             _validate_handles(db, manifest)
 
     def test_invalid_handle_rejected(self, gramps_db):
-        """Invalid format → handle in rejected list, valid ones accepted."""
+        """Handles not in the DB → ValueError."""
         db, _, _ = gramps_db
         manifest = make_manifest(
             people=[HANDLE_A, "not-a-uuid", "also-bad"]
         )
-        valid, rejected = _validate_handles(db, manifest)
-        assert HANDLE_A in valid.get("people", [])
-        assert "not-a-uuid" in rejected
-        assert "also-bad" in rejected
+        with pytest.raises(ValueError, match=r"handle\(s\) in manifest not found"):
+            _validate_handles(db, manifest)
 
     def test_all_invalid_handles_rejected(self, gramps_db):
-        """All handles invalid → no valid, all rejected."""
+        """All handles not in DB → ValueError."""
         db, _, _ = gramps_db
         manifest = make_manifest(people=["bad1", "bad2"])
-        valid, rejected = _validate_handles(db, manifest)
-        assert valid == {}
-        assert len(rejected) == 2
+        with pytest.raises(ValueError, match=r"handle\(s\) in manifest not found"):
+            _validate_handles(db, manifest)
 
     def test_mixed_types_all_valid(self, two_person_db):
         """Multiple types with valid handles work."""
@@ -333,6 +357,24 @@ class TestValidateHandles:
         assert HANDLE_A in valid.get("people", [])
         assert HANDLE_B in valid.get("people", [])
         assert rejected == []
+
+    def test_handles_accepted_regardless_of_format(self, gramps_native_db):
+        """Gramps-native handles (underscore + hex) are accepted by the validator."""
+        db, _, _ = gramps_native_db
+        manifest = make_manifest(people=[GRAMPS_HANDLE_A])
+        valid, rejected = _validate_handles(db, manifest)
+        assert GRAMPS_HANDLE_A in valid.get("people", [])
+        assert rejected == []
+
+    def test_missing_handle_raises_before_deletion(self, gramps_native_db):
+        """A Gramps-native handle absent from the DB raises ValueError."""
+        db, _, _ = gramps_native_db
+        manifest = make_manifest(people=[GRAMPS_HANDLE_A, GRAMPS_HANDLE_B])
+        # Only GRAMPS_HANDLE_A exists in this fixture DB... both exist actually.
+        # Use a third, non-existent handle to test the missing path.
+        manifest = make_manifest(people=[GRAMPS_HANDLE_A, "_deadbeef00000000"])
+        with pytest.raises(ValueError, match=r"handle\(s\) in manifest not found"):
+            _validate_handles(db, manifest)
 
     def test_plan_key_missing(self, gramps_db):
         """Missing type key in plan is handled gracefully."""
@@ -402,21 +444,20 @@ class TestDeleteItems:
         assert db.has_person_handle(HANDLE_B)
 
     def test_invalid_handles_skipped(self, gramps_db):
-        """Invalid format handles go to rejected, valid ones still deleted."""
+        """Handles not in DB → ValueError before any deletion."""
         db, _, _ = gramps_db
         manifest = make_manifest(people=[HANDLE_A, "not-a-uuid"])
-        deleted, rejected, surviving = delete_items(db, manifest)
-        assert deleted == 1
-        assert "not-a-uuid" in rejected
-        assert not db.has_person_handle(HANDLE_A)
+        with pytest.raises(ValueError, match=r"handle\(s\) in manifest not found"):
+            delete_items(db, manifest)
+        # Verify nothing was deleted
+        assert db.has_person_handle(HANDLE_A)
 
     def test_all_invalid_skipped(self, gramps_db):
-        """All invalid → 0 deleted, all in rejected."""
+        """All handles not in DB → ValueError."""
         db, _, _ = gramps_db
         manifest = make_manifest(people=["bad1", "bad2"])
-        deleted, rejected, surviving = delete_items(db, manifest)
-        assert deleted == 0
-        assert len(rejected) == 2
+        with pytest.raises(ValueError, match=r"handle\(s\) in manifest not found"):
+            delete_items(db, manifest)
 
     def test_delete_two_people(self, two_person_db):
         """Delete both people from a two-person DB."""
@@ -737,7 +778,7 @@ class TestMainIntegration:
             assert "not found" in (parsed.get("message") or "").lower()
 
     def test_invalid_handle_skipped(self):
-        """Invalid handle format → rejected, valid handle still deleted."""
+        """Handle not in DB → error (no format filter, all handles checked for existence)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             input_path = os.path.join(tmpdir, "input.gramps")
             manifest_path = os.path.join(tmpdir, "manifest.json")
@@ -767,11 +808,10 @@ class TestMainIntegration:
                 timeout=60,
             )
 
-            assert result.returncode == 0, f"stderr: {result.stderr}"
+            assert result.returncode != 0
             parsed = json.loads(result.stdout)
-            assert parsed["status"] == "ok"
-            assert parsed["deleted"] == 1
-            assert "not-a-uuid" in parsed.get("rejected", [])
+            assert parsed["status"] == "error"
+            assert "not found" in (parsed.get("message") or "").lower()
 
     def test_nonexistent_input_file(self):
         """Nonexistent input file → error."""
