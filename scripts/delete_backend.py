@@ -35,6 +35,7 @@ import gi
 
 gi.require_version("Gtk", "3.0")
 
+
 def detect_version() -> str:
     """Return the installed Gramps version string (e.g. '5.1.6')."""
     import gramps.gen.const as const
@@ -169,16 +170,20 @@ _DELETION_ORDER: List[str] = [
 # The 'delete' key is only used for "people" — all other types are
 # advisory-only and are not explicitly deleted.
 _TYPE_OPS: Dict[str, Dict[str, str]] = {
-    "people":       {"has": "has_person_handle",     "delete": "delete_person_from_database", "get": "get_person_from_handle"},
-    "families":     {"has": "has_family_handle"},
-    "events":       {"has": "has_event_handle"},
-    "notes":        {"has": "has_note_handle"},
-    "places":       {"has": "has_place_handle"},
-    "sources":      {"has": "has_source_handle"},
-    "citations":    {"has": "has_citation_handle"},
+    "people": {
+        "has": "has_person_handle",
+        "delete": "delete_person_from_database",
+        "get": "get_person_from_handle",
+    },
+    "families": {"has": "has_family_handle"},
+    "events": {"has": "has_event_handle"},
+    "notes": {"has": "has_note_handle"},
+    "places": {"has": "has_place_handle"},
+    "sources": {"has": "has_source_handle"},
+    "citations": {"has": "has_citation_handle"},
     "repositories": {"has": "has_repository_handle"},
-    "media":        {"has": "has_media_handle"},
-    "tags":         {"has": "has_tag_handle"},
+    "media": {"has": "has_media_handle"},
+    "tags": {"has": "has_tag_handle"},
 }
 
 
@@ -193,6 +198,16 @@ def _extract_handle(entry: Any) -> str:
     if isinstance(entry, dict):
         return entry.get("handle", "")
     return str(entry)
+
+
+def _normalize_handle(handle: str) -> str:
+    """Strip leading underscore for Gramps DB compatibility.
+
+    Gramps XML serialization prefixes handles with '_' (e.g. _a1b2c3...).
+    Gramps' internal Berkeley DB stores handles without this prefix.
+    This function normalizes a handle from XML format to DB format.
+    """
+    return handle.lstrip("_")
 
 
 def _validate_handles(
@@ -230,7 +245,7 @@ def _validate_handles(
 
         for entry in to_delete:
             handle = _extract_handle(entry)
-            if not has_fn(handle):
+            if not has_fn(_normalize_handle(handle)):
                 missing.append(handle)
                 continue
             type_valid.append(handle)
@@ -296,7 +311,7 @@ def delete_items(db: Any, manifest: Dict[str, Any]) -> tuple[int, List[str], Lis
         get_fn = getattr(db, get_fn_name)
 
         for handle in people_handles:
-            person = get_fn(handle)
+            person = get_fn(_normalize_handle(handle))
             delete_fn(person, trans)
             deleted_count += 1
 
@@ -308,7 +323,7 @@ def delete_items(db: Any, manifest: Dict[str, Any]) -> tuple[int, List[str], Lis
             if ops is None:
                 continue
             has_fn = getattr(db, ops["has"])
-            if has_fn(handle):
+            if has_fn(_normalize_handle(handle)):
                 surviving.append(handle)
                 break
 
@@ -353,6 +368,7 @@ def read_xmlns_from_input(input_path: str) -> Optional[str]:
 # Export
 # ---------------------------------------------------------------------------
 
+
 def export_xml(db: Any, path: str) -> None:
     """Export the database to a Gramps XML file.
 
@@ -388,7 +404,7 @@ def _smoke_test() -> None:
             '"http://gramps-project.org/xml/1.7.1/grampsxml.dtd">\n'
             '<database xmlns="http://gramps-project.org/xml/1.7.1/">\n'
             "  <header>\n"
-            "    <created date=\"2025-01-15\" version=\"5.1.6\"/>\n"
+            '    <created date="2025-01-15" version="5.1.6"/>\n'
             "    <researcher/>\n"
             "  </header>\n"
             "  <people/>\n"
