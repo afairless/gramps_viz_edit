@@ -158,7 +158,143 @@ def cleanup_db(db: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Smoke test (runs when invoked as __main__ with --smoke-test)
+# Deletion engine
+# ---------------------------------------------------------------------------
+
+# Deletion order respects the dependency chain. People must go first because
+# delete_person_from_database handles family ref cleanup internally. All other
+# types are independent of each other but must follow people.
+_DELETION_ORDER: List[str] = [
+    "people",
+    "families",
+    "events",
+    "notes",
+    "places",
+    "sources",
+    "citations",
+    "repositories",
+    "media",
+    "tags",
+]
+
+# Map manifest type keys to Gramps DB existence-check and delete methods.
+_TYPE_OPS: Dict[str, Dict[str, str]] = {
+    "people":       {"has": "has_person_handle",     "delete": "delete_person_from_database", "get": "get_person_from_handle"},
+    "families":     {"has": "has_family_handle",     "delete": "remove_family"},
+    "events":       {"has": "has_event_handle",      "delete": "remove_event"},
+    "notes":        {"has": "has_note_handle",       "delete": "remove_note"},
+    "places":       {"has": "has_place_handle",      "delete": "remove_place"},
+    "sources":      {"has": "has_source_handle",     "delete": "remove_source"},
+    "citations":    {"has": "has_citation_handle",   "delete": "remove_citation"},
+    "repositories": {"has": "has_repository_handle", "delete": "remove_repository"},
+    "media":        {"has": "has_media_handle",      "delete": "remove_media"},
+    "tags":         {"has": "has_tag_handle",        "delete": "remove_tag"},
+}
+
+
+def _validate_handles(
+    db: Any,
+    manifest: Dict[str, Any],
+) -> tuple[Dict[str, List[str]], List[str]]:
+    """Validate all handles in the manifest.
+
+    Returns (valid_handles, rejected):
+    - valid_handles: {type_key: [handle, ...]} for handles that pass UUID
+      validation AND exist in the database.
+    - rejected: handles that don't match UUID v4 format.
+
+    Raises ValueError if any valid-format handle is absent from the DB.
+    This abort-before-any-deletion rule prevents partial writes.
+    """
+    plan: Dict[str, Any] = manifest.get("plan", {})
+    rejected: List[str] = []
+    valid: Dict[str, List[str]] = {}
+    missing: List[str] = []
+
+    for type_key in _DELETION_ORDER:
+        type_plan = plan.get(type_key)
+        if type_plan is None:
+            continue
+        to_delete: List[str] = type_plan.get("to_delete", [])
+        if not to_delete:
+            continue
+
+        type_valid: List[str] = []
+        ops = _TYPE_OPS.get(type_key)
+        if ops is None:
+            continue
+        has_fn = getattr(db, ops["has"])
+
+        for handle in to_delete:
+            if not UUID_V4_RE.match(handle):
+                rejected.append(handle)
+                continue
+            if not has_fn(handle):
+                missing.append(handle)
+                continue
+            type_valid.append(handle)
+
+        if type_valid:
+            valid[type_key] = type_valid
+
+    if missing:
+        raise ValueError(
+            f"{len(missing)} handle(s) in manifest not found in database "
+            f"(first 5): {missing[:5]}"
+        )
+
+    return valid, rejected
+
+
+def delete_items(db: Any, manifest: Dict[str, Any]) -> tuple[int, List[str]]:
+    """Delete items from the database per the manifest, in dependency order.
+
+    All deletions run inside a single DbTxn for atomicity. Handles are
+    validated before any deletion begins.
+
+    Returns (deleted_count, rejected):
+    - deleted_count: total number of handles successfully deleted.
+    - rejected: handles with invalid UUID v4 format (skipped).
+    """
+    from gramps.gen.db import DbTxn
+
+    # Pre-deletion handle validation.
+    valid, rejected = _validate_handles(db, manifest)
+
+    if not valid:
+        return 0, rejected
+
+    deleted_count = 0
+
+    with DbTxn("gramps-gen delete", db) as trans:
+        for type_key in _DELETION_ORDER:
+            handles = valid.get(type_key)
+            if not handles:
+                continue
+
+            ops = _TYPE_OPS.get(type_key)
+            if ops is None:
+                continue
+
+            delete_fn = getattr(db, ops["delete"])
+
+            for handle in handles:
+                if type_key == "people":
+                    # delete_person_from_database takes a Person object,
+                    # not a handle.
+                    get_fn = getattr(db, ops["get"])
+                    person = get_fn(handle)
+                    delete_fn(person, trans)
+                else:
+                    delete_fn(handle, trans)
+
+                deleted_count += 1
+
+    return deleted_count, rejected
+
+
+# ---------------------------------------------------------------------------
+# Smoke test
 # ---------------------------------------------------------------------------
 def _smoke_test() -> None:
     """Minimal smoke test: create DB, import empty XML, clean up."""
