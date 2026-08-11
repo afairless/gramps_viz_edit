@@ -23,6 +23,7 @@ from delete_backend import (
     _DELETION_ORDER,
     _TYPE_OPS,
     _extract_handle,
+    _normalize_handle,
     _validate_handles,
     create_db,
     import_xml,
@@ -37,7 +38,7 @@ from delete_backend import (
 # ---------------------------------------------------------------------------
 
 # A minimal valid Gramps 5.1 XML with one person, one family, and one event.
-MINIMAL_GRAMPS_XML = '''<?xml version="1.0" encoding="UTF-8"?>
+MINIMAL_GRAMPS_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE database PUBLIC "-//Gramps//DTD Gramps XML 1.7.1//EN"
 "http://gramps-project.org/xml/1.7.1/grampsxml.dtd">
 <database xmlns="http://gramps-project.org/xml/1.7.1/">
@@ -64,10 +65,10 @@ MINIMAL_GRAMPS_XML = '''<?xml version="1.0" encoding="UTF-8"?>
   <notes/>
   <tags/>
 </database>
-'''
+"""
 
 # A minimal XML with two people for partial-presence tests.
-MINIMAL_TWO_PERSON_XML = '''<?xml version="1.0" encoding="UTF-8"?>
+MINIMAL_TWO_PERSON_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE database PUBLIC "-//Gramps//DTD Gramps XML 1.7.1//EN"
 "http://gramps-project.org/xml/1.7.1/grampsxml.dtd">
 <database xmlns="http://gramps-project.org/xml/1.7.1/">
@@ -101,7 +102,7 @@ MINIMAL_TWO_PERSON_XML = '''<?xml version="1.0" encoding="UTF-8"?>
   <notes/>
   <tags/>
 </database>
-'''
+"""
 
 # Sample valid UUID v4 handles for testing.
 HANDLE_A = "a5f0c1a2-4000-4b3d-8000-000000000001"
@@ -113,7 +114,7 @@ GRAMPS_HANDLE_A = "_103f72212ad34087"
 GRAMPS_HANDLE_B = "_103f72212ad34088"
 
 # A minimal Gramps XML with Gramps-native handles (not UUID v4).
-GRAMPS_NATIVE_XML = '''<?xml version="1.0" encoding="UTF-8"?>
+GRAMPS_NATIVE_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE database PUBLIC "-//Gramps//DTD Gramps XML 1.7.1//EN"
 "http://gramps-project.org/xml/1.7.1/grampsxml.dtd">
 <database xmlns="http://gramps-project.org/xml/1.7.1/">
@@ -147,7 +148,7 @@ GRAMPS_NATIVE_XML = '''<?xml version="1.0" encoding="UTF-8"?>
   <notes/>
   <tags/>
 </database>
-'''
+"""
 
 
 @pytest.fixture(scope="function")
@@ -291,6 +292,31 @@ class TestExtractHandle:
 
 
 # ---------------------------------------------------------------------------
+# _normalize_handle tests
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeHandle:
+    """Test the handle normalization for Gramps DB compatibility."""
+
+    def test_strips_single_underscore(self) -> None:
+        """Leading underscore is stripped."""
+        assert _normalize_handle("_abc123") == "abc123"
+
+    def test_preserves_already_normalized(self) -> None:
+        """Handles without underscore are unchanged."""
+        assert _normalize_handle("abc123") == "abc123"
+
+    def test_handles_empty_string(self) -> None:
+        """Empty string returns empty string."""
+        assert _normalize_handle("") == ""
+
+    def test_handles_multiple_underscores(self) -> None:
+        """Multiple leading underscores are all stripped."""
+        assert _normalize_handle("__abc") == "abc"
+
+
+# ---------------------------------------------------------------------------
 # _validate_handles tests
 # ---------------------------------------------------------------------------
 
@@ -332,9 +358,7 @@ class TestValidateHandles:
     def test_invalid_handle_rejected(self, gramps_db):
         """Handles not in the DB → ValueError."""
         db, _, _ = gramps_db
-        manifest = make_manifest(
-            people=[HANDLE_A, "not-a-uuid", "also-bad"]
-        )
+        manifest = make_manifest(people=[HANDLE_A, "not-a-uuid", "also-bad"])
         with pytest.raises(ValueError, match=r"handle\(s\) in manifest not found"):
             _validate_handles(db, manifest)
 
@@ -351,7 +375,7 @@ class TestValidateHandles:
         manifest = make_manifest(
             people=[HANDLE_A, HANDLE_B],
             families=[],  # No families in the fixture
-            events=[],    # No events in the fixture
+            events=[],  # No events in the fixture
         )
         valid, rejected = _validate_handles(db, manifest)
         assert HANDLE_A in valid.get("people", [])
@@ -360,6 +384,14 @@ class TestValidateHandles:
 
     def test_handles_accepted_regardless_of_format(self, gramps_native_db):
         """Gramps-native handles (underscore + hex) are accepted by the validator."""
+        db, _, _ = gramps_native_db
+        manifest = make_manifest(people=[GRAMPS_HANDLE_A])
+        valid, rejected = _validate_handles(db, manifest)
+        assert GRAMPS_HANDLE_A in valid.get("people", [])
+        assert rejected == []
+
+    def test_gramps_native_handles_normalized(self, gramps_native_db):
+        """Underscore-prefixed handles are found via normalization."""
         db, _, _ = gramps_native_db
         manifest = make_manifest(people=[GRAMPS_HANDLE_A])
         valid, rejected = _validate_handles(db, manifest)
@@ -418,7 +450,9 @@ class TestDeleteItems:
     def test_people_only_other_types_survive(self, gramps_db):
         """Only people are deleted — other types in manifest survive."""
         db, _, _ = gramps_db
-        manifest = make_manifest(people=[HANDLE_A], events=["c5f0c1a2-4000-4b3d-8000-000000000004"])
+        manifest = make_manifest(
+            people=[HANDLE_A], events=["c5f0c1a2-4000-4b3d-8000-000000000004"]
+        )
         # The event handle doesn't exist in the DB, so it will be missing.
         # But only people deletion is attempted.
         with pytest.raises(ValueError, match="handle\\(s\\) in manifest not found"):
@@ -468,6 +502,18 @@ class TestDeleteItems:
         assert rejected == []
         assert not db.has_person_handle(HANDLE_A)
         assert not db.has_person_handle(HANDLE_B)
+
+    def test_gramps_native_delete_items(self, gramps_native_db):
+        """Delete a person with Gramps-native handle, verify surviving uses original format."""
+        db, _, _ = gramps_native_db
+        manifest = make_manifest(people=[GRAMPS_HANDLE_A])
+        deleted, rejected, surviving = delete_items(db, manifest)
+        assert deleted == 1
+        assert rejected == []
+        # Verify the person is actually gone (normalized DB query)
+        assert not db.has_person_handle("103f72212ad34087")
+        # Surviving report uses original (underscored) handles
+        assert GRAMPS_HANDLE_A not in surviving
 
     def test_surviving_empty_after_delete(self, gramps_db):
         """After deleting the only person, surviving is empty."""
@@ -546,12 +592,7 @@ class TestReadXmlns:
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".gramps", delete=False, encoding="utf-8"
         ) as f:
-            f.write(
-                '<?xml version="1.0"?>\n'
-                "<database>\n"
-                "  <header/>\n"
-                "</database>\n"
-            )
+            f.write('<?xml version="1.0"?>\n<database>\n  <header/>\n</database>\n')
             path = f.name
         try:
             version = read_xmlns_from_input(path)
@@ -589,9 +630,7 @@ class TestIsGzipFile:
         """A real gzip file is detected."""
         import gzip as gzip_mod
 
-        with tempfile.NamedTemporaryFile(
-            suffix=".gramps.gz", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(suffix=".gramps.gz", delete=False) as f:
             path = f.name
         try:
             with gzip_mod.open(path, "wt", encoding="utf-8") as gz:
@@ -688,10 +727,14 @@ class TestMainIntegration:
                 [
                     "python3",
                     os.path.join(os.path.dirname(__file__), "delete_backend.py"),
-                    "--input", input_path,
-                    "--manifest", manifest_path,
-                    "--output", output_path,
-                    "--db-dir", db_dir,
+                    "--input",
+                    input_path,
+                    "--manifest",
+                    manifest_path,
+                    "--output",
+                    output_path,
+                    "--db-dir",
+                    db_dir,
                 ],
                 capture_output=True,
                 text=True,
@@ -725,10 +768,14 @@ class TestMainIntegration:
                 [
                     "python3",
                     os.path.join(os.path.dirname(__file__), "delete_backend.py"),
-                    "--input", input_path,
-                    "--manifest", manifest_path,
-                    "--output", output_path,
-                    "--db-dir", db_dir,
+                    "--input",
+                    input_path,
+                    "--manifest",
+                    manifest_path,
+                    "--output",
+                    output_path,
+                    "--db-dir",
+                    db_dir,
                 ],
                 capture_output=True,
                 text=True,
@@ -762,10 +809,14 @@ class TestMainIntegration:
                 [
                     "python3",
                     os.path.join(os.path.dirname(__file__), "delete_backend.py"),
-                    "--input", input_path,
-                    "--manifest", manifest_path,
-                    "--output", output_path,
-                    "--db-dir", db_dir,
+                    "--input",
+                    input_path,
+                    "--manifest",
+                    manifest_path,
+                    "--output",
+                    output_path,
+                    "--db-dir",
+                    db_dir,
                 ],
                 capture_output=True,
                 text=True,
@@ -798,10 +849,14 @@ class TestMainIntegration:
                 [
                     "python3",
                     os.path.join(os.path.dirname(__file__), "delete_backend.py"),
-                    "--input", input_path,
-                    "--manifest", manifest_path,
-                    "--output", output_path,
-                    "--db-dir", db_dir,
+                    "--input",
+                    input_path,
+                    "--manifest",
+                    manifest_path,
+                    "--output",
+                    output_path,
+                    "--db-dir",
+                    db_dir,
                 ],
                 capture_output=True,
                 text=True,
@@ -829,10 +884,14 @@ class TestMainIntegration:
                 [
                     "python3",
                     os.path.join(os.path.dirname(__file__), "delete_backend.py"),
-                    "--input", "/nonexistent/file.gramps",
-                    "--manifest", manifest_path,
-                    "--output", output_path,
-                    "--db-dir", db_dir,
+                    "--input",
+                    "/nonexistent/file.gramps",
+                    "--manifest",
+                    manifest_path,
+                    "--output",
+                    output_path,
+                    "--db-dir",
+                    db_dir,
                 ],
                 capture_output=True,
                 text=True,
@@ -860,10 +919,14 @@ class TestMainIntegration:
                 [
                     "python3",
                     os.path.join(os.path.dirname(__file__), "delete_backend.py"),
-                    "--input", input_path,
-                    "--manifest", "/nonexistent/manifest.json",
-                    "--output", output_path,
-                    "--db-dir", db_dir,
+                    "--input",
+                    input_path,
+                    "--manifest",
+                    "/nonexistent/manifest.json",
+                    "--output",
+                    output_path,
+                    "--db-dir",
+                    db_dir,
                 ],
                 capture_output=True,
                 text=True,
@@ -895,10 +958,14 @@ class TestMainIntegration:
                 [
                     "python3",
                     os.path.join(os.path.dirname(__file__), "delete_backend.py"),
-                    "--input", input_path,
-                    "--manifest", manifest_path,
-                    "--output", output_path,
-                    "--db-dir", db_dir,
+                    "--input",
+                    input_path,
+                    "--manifest",
+                    manifest_path,
+                    "--output",
+                    output_path,
+                    "--db-dir",
+                    db_dir,
                 ],
                 capture_output=True,
                 text=True,
@@ -929,10 +996,14 @@ class TestMainIntegration:
                 [
                     "python3",
                     os.path.join(os.path.dirname(__file__), "delete_backend.py"),
-                    "--input", input_path,
-                    "--manifest", manifest_path,
-                    "--output", output_path,
-                    "--db-dir", db_dir,
+                    "--input",
+                    input_path,
+                    "--manifest",
+                    manifest_path,
+                    "--output",
+                    output_path,
+                    "--db-dir",
+                    db_dir,
                     "--no-retain-db",
                 ],
                 capture_output=True,
@@ -966,10 +1037,14 @@ class TestMainIntegration:
                 [
                     "python3",
                     os.path.join(os.path.dirname(__file__), "delete_backend.py"),
-                    "--input", input_path,
-                    "--manifest", manifest_path,
-                    "--output", output_path,
-                    "--db-dir", db_dir,
+                    "--input",
+                    input_path,
+                    "--manifest",
+                    manifest_path,
+                    "--output",
+                    output_path,
+                    "--db-dir",
+                    db_dir,
                 ],
                 capture_output=True,
                 text=True,
