@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "source_file": "test.gramps",
+  "selections_file": "selections.json",
+  "created_at": "2025-01-15T10:30:00Z",
+  "seed_people": [
+    "a5f0c1a2-4000-4b3d-8000-000000000001"
+  ],
+  "plan": {
+    "people": {
+      "to_delete": ["a5f0c1a2-4000-4b3d-8000-000000000001"],
+      "kept": ["a5f0c1a2-4000-4b3d-8000-000000000002"]
+    },
+    "families": {
+      "to_delete": ["b5f0c1a2-4000-4b3d-8000-000000000003"],
+      "kept": []
+    },
+    "events": {
+      "to_delete": ["c5f0c1a2-4000-4b3d-8000-000000000004"],
+      "kept": ["c5f0c1a2-4000-4b3d-8000-000000000005"]
+    },
+    "notes": {
+      "to_delete": ["d5f0c1a2-4000-4b3d-8000-000000000006"],
+      "kept": []
+    },
+    "places": {
+      "to_delete": ["e5f0c1a2-4000-4b3d-8000-000000000007"],
+      "kept": []
+    },
+    "sources": {
+      "to_delete": ["f5f0c1a2-4000-4b3d-8000-000000000008"],
+      "kept": []
+    },
+    "citations": {
+      "to_delete": ["95f0c1a2-4000-4b3d-8000-000000000009"],
+      "kept": []
+    },
+    "repositories": {
+      "to_delete": ["85f0c1a2-4000-4b3d-8000-00000000000a"],
+      "kept": []
+    },
+    "media": {
+      "to_delete": ["75f0c1a2-4000-4b3d-8000-00000000000b"],
+      "kept": []
+    },
+    "tags": {
+      "to_delete": ["65f0c1a2-4000-4b3d-8000-00000000000c"],
+      "kept": []
+    }
+  }
+}
