@@ -1,132 +1,61 @@
-# Implementation Plan: Fix Handle Format Mismatch
+# Implementation Plan: Handle Underscore Mismatch Fix
 
-Source: `docs/research/fix-handle-format-mismatch.md`
+Source: `docs/research/handle-underscore-fix.md`
+
+## Problem
+
+Gramps XML serialization prefixes handles with `_` (e.g. `_103e398e0c42...`), but Gramps' internal Berkeley DB stores handles without the prefix. The Python delete backend (`delete_backend.py`) queries the DB using the underscored XML handles, which always returns `False` — causing the delete command to fail with "handle(s) in manifest not found in database".
+
+## Fix Strategy
+
+Add a `_normalize_handle()` helper that strips the leading `_` for DB queries, and use it in both `_validate_handles()` and `delete_items()`. The manifest preserves original XML handles for audit purposes; normalization is only applied at DB interaction points.
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `feat: add generate_handle() to typed-graph` | `generate_handle()` function | `crates/typed-graph/src/generate/mod.rs` | Unit |
-| 2 | `refactor: migrate random densify adversarial to generate_handle()` | Generator code migration | `crates/typed-graph/src/generate/random.rs`, `densify.rs`, `adversarial.rs` | Unit |
-| 3 | `refactor: migrate builder auto-handle methods to generate_handle()` | Builder handle migration | `crates/typed-graph/src/generate/builder.rs` | Unit |
-| 4 | `chore: remove uuid dependency from typed-graph and workspace` | Dependency cleanup | `Cargo.toml`, `crates/typed-graph/Cargo.toml` | — |
-| 5 | `fix: remove UUID v4 format validator from delete_backend.py` | Python backend validator removal | `scripts/delete_backend.py` | Unit |
-| 6 | `test: update Python tests for handle format changes` | Python test updates | `scripts/test_delete_backend.py` | Unit |
-| 7 | `test: verify full pipeline end-to-end` | E2E verification | Manual verification commands | — |
-| 8 | `docs: update handle format documentation` | Documentation update | `AGENTS.md`, `docs/research/gramps-python-delete-backend.md`, `docs/ARCHITECTURE.md` | — |
+| 1 | `fix: normalize handles before DB queries in delete backend` | Handle normalization in all DB query paths | `scripts/delete_backend.py` | Unit (existing tests pass, including `test_handles_accepted_regardless_of_format`) |
+| 2 | `test: add unit tests for handle normalization` | Normalization unit tests | `scripts/test_delete_backend.py` | Unit |
+| 3 | `chore: verify integration end-to-end` | Integration verification | Manual run of delete command + Python + Rust test suites | — |
 
----
+## Step Details
 
-## Step 1 — Add `generate_handle()` to `generate/mod.rs`
+### Step 1 — Add `_normalize_handle()` and normalize all DB query paths
 
-**Files:** `crates/typed-graph/src/generate/mod.rs`
+**Changes to `scripts/delete_backend.py`:**
 
-Add a public `generate_handle(rng: &mut impl Rng) -> String` function that produces Gramps-compatible handles (`_` + 16 hex chars). The format mirrors Gramps' `create_id()`: `_{:08x}{:08x}` (timestamp_part, random_part).
+1. Add `_normalize_handle(handle: str) -> str` helper after `_extract_handle()`:
+   - Strips leading `_` via `handle.lstrip('_')`
+   - Preserves handles without `_` unchanged
 
-Add unit tests at the bottom of `mod.rs`:
+2. In `_validate_handles()`: normalize handle before `has_fn()` call
+   - `has_fn` is called with `_normalize_handle(handle)` instead of raw `handle`
+   - The `missing` list retains original (underscored) handles for error messages
 
-- `test_generate_handle_format`: assert output matches `^_[0-9a-f]{16}$`
-- `test_generate_handle_unique`: generate 10,000 handles, assert all unique
-- `test_generate_handle_has_underscore_prefix`: assert `handle.starts_with('_')`
+3. In `delete_items()`:
+   - **3a**: Normalize handle before `get_fn()` in person deletion loop
+   - **3b**: Normalize handle before `has_fn()` in surviving handles check loop
+   - The `surviving` list retains original (underscored) handles for reconciliation
 
-**Why separate:** `generate_handle()` is a pure, testable utility function. Adding it first means every subsequent migration step can immediately use it without needing to modify the same file.
+**Test evidence:** The existing test `test_handles_accepted_regardless_of_format` (which is currently failing) will pass after this step.
 
----
+### Step 2 — Add unit tests for handle normalization
 
-## Step 2 — Migrate `random.rs`, `densify.rs`, `adversarial.rs` to `generate_handle(rng)`
+**Changes to `scripts/test_delete_backend.py`:**
 
-**Files:**
+1. Add `TestNormalizeHandle` class with:
+   - `test_strips_single_underscore` — `_abc123` → `abc123`
+   - `test_preserves_already_normalized` — `abc123` → `abc123`
+   - `test_handles_empty_string` — `""` → `""`
+   - `test_handles_multiple_underscores` — `__abc` → `abc`
 
-- `crates/typed-graph/src/generate/random.rs` (~20 occurrences)
-- `crates/typed-graph/src/generate/densify.rs` (2 occurrences)
-- `crates/typed-graph/src/generate/adversarial.rs` (6 occurrences)
+2. Add `test_gramps_native_handles_normalized` to `TestValidateHandles`:
+   - Gramps-native handles (with `_` prefix) are found after normalization
 
-These files already have `rng: &mut impl Rng` in scope. Replace every `uuid::Uuid::new_v4().to_string()` with `generate_handle(rng)`.
+3. Add `test_gramps_native_delete_items` to `TestDeleteItems`:
+   - Verify person deletion with Gramps-native handles works
+   - Verify surviving report uses original (underscored) handles
 
-**Why separate from builder.rs:** These three files share the same replacement pattern (use existing `rng` parameter). Builder.rs needs a different approach (`rand::thread_rng()`). Splitting them keeps each step's changes uniform and easy to review.
+### Step 3 — Integration verification
 
----
-
-## Step 3 — Migrate `builder.rs` auto-handle methods to `generate_handle()`
-
-**File:** `crates/typed-graph/src/generate/builder.rs` (5 occurrences)
-
-The builder's auto-handle methods (`add_person_auto`, `add_family_auto`, `add_event_auto`, `add_place_auto`, `add_source_auto`) don't have an RNG parameter. Use `rand::thread_rng()` internally:
-
-```rust
-let handle = generate_handle(&mut rand::thread_rng());
-```
-
-Update doc comments from "auto-generated UUID v4 handle" to "auto-generated Gramps-compatible handle."
-
----
-
-## Step 4 — Remove `uuid` dependency
-
-**Files:** `Cargo.toml` (workspace root), `crates/typed-graph/Cargo.toml`
-
-After all `uuid::Uuid::new_v4()` calls are gone:
-
-1. Remove `uuid = { workspace = true }` from `crates/typed-graph/Cargo.toml`
-2. Remove `uuid = { version = "1", features = ["v4"] }` from workspace `[workspace.dependencies]` in root `Cargo.toml`
-3. Run `cargo update` to prune the lock file
-4. Run `cargo build` to confirm no missing dependencies
-
----
-
-## Step 5 — Remove UUID v4 validator from `delete_backend.py`
-
-**File:** `scripts/delete_backend.py`
-
-Three changes:
-
-1. **Remove `UUID_V4_RE`** constant (lines 39-44). Keep `import re` (still used by `read_xmlns_from_input`).
-2. **Simplify `_validate_handles()`**: Remove the `UUID_V4_RE.match(handle)` block. Only check `has_*_handle(handle)` existence. Handles absent from the DB raise `ValueError`. `rejected` is always empty.
-3. **Fix `all_manifest_handles`** in `delete_items()`: Remove the `if UUID_V4_RE.match(handle)` guard — include all handles unconditionally.
-
----
-
-## Step 6 — Update Python tests
-
-**File:** `scripts/test_delete_backend.py`
-
-1. **Remove `TestUuidValidation` class entirely** — it directly tests `UUID_V4_RE.match()`, which no longer exists.
-2. **Update `test_invalid_handle_rejected`** — non-existent handles now raise `ValueError` (they go to `missing`, not `rejected`). Change to assert `ValueError` is raised.
-3. **Update `test_all_invalid_handles_rejected`** — same as above; change to assert `ValueError` is raised.
-4. **Add Gramps-native XML fixture** — a `GRAMPS_NATIVE_XML` constant with Gramps-native handles (e.g., `_103f72212ad34087`).
-5. **Add `gramps_native_db` fixture** — imports the Gramps-native XML into a test DB.
-6. **Add `test_handles_accepted_regardless_of_format`** — verify that Gramps-native handles `_103f72212ad34087` are accepted by the validator.
-7. **Add `test_missing_handle_raises_before_deletion`** — verify `ValueError` when a handle from the manifest doesn't exist in the DB.
-
----
-
-## Step 7 — Verify the full pipeline
-
-Manual verification commands:
-
-```bash
-# 1. Generate a .gramps file with new handle format
-cargo run -- generate -n 20 -o /tmp/test-new.gramps
-# Verify handles use _XXXXXXXXXXXX format
-grep -oP 'handle="[^"]*"' /tmp/test-new.gramps | head -5
-
-# 2. Run delete on the generated file
-cargo run -- delete /tmp/test-new.gramps \
-  -s /tmp/selections.json -o /tmp/test-cleaned.gramps
-
-# 3. Run delete on a real Gramps file
-cargo run -- delete ~/Documents/gramps01/gramps-ui-gen02.gramps \
-  -s ~/Documents/gramps01/selections2.json \
-  -o ~/Documents/gramps01/test-fixed.gramps
-# Verify: output should have fewer people than input
-
-# 4. Check manifest reflects correct deletion status
-```
-
----
-
-## Step 8 — Update documentation
-
-| Document | Change |
-|---|---|
-| `AGENTS.md` | Note the handle format change in the generate pipeline description |
-| `docs/research/gramps-python-delete-backend.md` | Add a note that the UUID v4 validator was removed (this plan) |
-| `docs/ARCHITECTURE.md` | Update handle format description if mentioned |
+1. Run the Python test suite: `pytest scripts/test_delete_backend.py -v`
+2. Run the Rust test suite: `cargo test -p delete && cargo test -p cli`
+3. Run the original failing command to verify the fix
