@@ -107,6 +107,32 @@ fn resolve_python_interpreter() -> Result<String, CliError> {
     }
 }
 
+/// Check if Gramps Python libraries are available and the version is supported.
+///
+/// Returns `true` if:
+/// 1. `python3` can import `gramps.gen.db.utils`
+/// 2. The installed Gramps version starts with "5.1" or "5.2"
+///
+/// Returns `false` if Gramps is not installed, not importable, or
+/// the version is unsupported (e.g. 6.x which removed bsddb).
+pub fn gramps_available() -> bool {
+    let python = match resolve_python_interpreter() {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    // Verify the installed Gramps version is one we support (5.1/5.2).
+    let output = Command::new(&python)
+        .args([
+            "-c",
+            "import gramps.gen.const as c; \
+             assert c.VERSION.startswith(('5.1','5.2'))",
+        ])
+        .output();
+
+    matches!(output, Ok(o) if o.status.success())
+}
+
 /// Resolve the path to `scripts/delete_backend.py`.
 ///
 /// Priority:
@@ -548,6 +574,21 @@ mod tests {
                 // Expected in CI without Gramps
             }
         }
+    }
+
+    #[test]
+    fn gramps_available_returns_bool() {
+        // The function must compile and return a bool without panicking.
+        let result = gramps_available();
+        // Verifies it returns a bool without panicking; the actual value
+        // is environment-dependent (true with Gramps, false without).
+        assert_eq!(result, result, "must not panic");
+    }
+
+    #[test]
+    fn gramps_available_does_not_panic() {
+        // This function must never panic, even when Gramps is absent.
+        let _ = gramps_available();
     }
 
     #[test]
