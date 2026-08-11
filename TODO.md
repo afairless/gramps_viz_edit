@@ -1,319 +1,190 @@
-# Implementation Plan: Gramps Python Delete Backend
+# Implementation Plan: Shift Delete Tool to Use Gramps Database API
 
-Source: [`docs/research/gramps-python-delete-backend.md`](docs/research/gramps-python-delete-backend.md)
+Source: `docs/research/gramps-api-delete-shift.md`
 
-**Problem**: The `delete` command serializes its filtered output with our own
-Rust `GraphXmlWriter`. Every divergence between our XML output and Gramps'
-expected format is a potential crash, and that attack surface spans the entire
-Gramps XML schema (namespace mismatches, date truncation, missing attributes,
-element ordering). Prior round-trip fixes are defense-in-depth patches, not a
-structural remedy.
+## Pre-Work
 
-**Strategy**: Keep the well-tested Rust cascade engine (it computes the
-deletion set), but delegate all XML I/O for `delete` to Gramps' own
-import/delete/export libraries via a Python subprocess. Input → Rust cascade →
-JSON manifest → Python (Gramps DB import, dependency-ordered delete, Gramps
-export). Removes the filter path from `GraphXmlWriter`; the full serializer
-stays for `generate`.
+Before starting implementation, ensure the workspace is clean and tests pass:
 
-> The previous delete-output-round-trip plan (committed `0ffa5a1..0ac495d`) is
-> complete and stays on `main`; `gramps_xml_version`/`namespace_to_version`
-> are retained because `generate` also uses them. This is a fresh feature plan.
+```bash
+git status          # should be clean
+cargo test --workspace  # all tests pass
+```
 
-## Verified facts (audited against the tree)
+Create a feature branch:
 
-- `build_manifest(&source, selections, &seed, &to_delete, &graph)` already
-  groups a flat `&[Handle]` per type via `NodeKindLabel::plural()` →
-  snake_case keys (`people`, `families`, …). No new grouping function needed.
-- `delete.rs` already passes `final_to_delete` (the reviewed set) to
-  `build_manifest`, not the raw `DeletePlan`. The manifest is correctly
-  built from the reviewed set.
-- `GraphXmlWriter` filter surface (`with_filter`, `is_deleted`,
-  `is_edge_deleted`, `validate_deletion_set`, `to_delete` field) is referenced
-  **only** by `crates/cli/src/commands/delete.rs`; no `xml.rs` unit test
-  exercises it, and `integration.rs`/other tests use `GraphXmlWriter::new`
-  without a filter. So filter removal touches no other unit tests.
-- Gramps **5.1.6** is installed locally (`/usr/bin/gramps`, `gramps.gen`
-  importable) and `import gramps.gen.db.utils` succeeds → the Step-1 API spike
-  and the Gramps round-trip E2E are runnable on this machine.
-- The project's existing Python test uses stdlib `unittest`
-  (`extract/test_extractor.py`), but `pytest` is **not** currently installed.
-  Per user decision, the backend's Step-8 tests will use **pytest**; add a
-  `pytest` dev dependency for `scripts/`. This introduces a new Python dev
-toolchain the existing extract tests do not rely on.
-- No `.github/` directory exists → the CI step (Step 7 of the source doc) is
-  **deferred**, exactly as the source doc already states.
+```bash
+git checkout -b agent/delete-gramps-api-shift
+```
 
-## Impact summary
+---
 
-| Commit | Component | Change |
-|---|---|---|
-| 1 | `scripts/delete_backend.py` | temp DB init spike (make_database contract, backend/version selection), gzip input, import |
-| 2 | `scripts/delete_backend.py` | dependency-ordered deletion, handle validation, `rejected` dead-letter |
-| 3 | `scripts/delete_backend.py` | version-from-xmlns, export, atomic rename, `main`, JSON result |
-| 4 | `crates/delete/tests/`, `types.rs` | pin shared manifest-contract fixture; roundtrip test |
-| 5 | `crates/cli/src/commands/delete.rs` | build reviewed manifest + delegate to Python backend; drop gzip/write_gzip_output |
-| 6 | `crates/output/src/xml.rs` | remove `with_filter`/`is_deleted`/`is_edge_deleted`/`to_delete`/`validate_deletion_set` |
-| 7 | `crates/cli/tests/e2e.rs`, `integration.rs` | rework/remove obsolete delete-output XML assertions |
-| 8 | `scripts/`, pytest | Python edge-case unit tests (pytest, fixtures) |
-| 9 | `crates/cli/tests/e2e.rs` | Gramps round-trip E2E + `gramps_available()` guard test |
-| 10 | `AGENTS.md`, docs | document Python-backed delete pipeline |
-| 11 | — | CI gating (deferred — no `.github/` present) |
+## Steps
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `feat(delete): add Python backend temp DB init and XML import` | Backend DB/import spike | `scripts/delete_backend.py` (`create_temp_db`, `import_xml`, version/backend detection, gzip input) | Smoke, python unit |
-| 2 | `feat(delete): add Python backend dependency-ordered deletion` | Deletion engine | `scripts/delete_backend.py` (`delete_items`, per-type `remove_*`, handle validation, `rejected`) | Python unit |
-| 3 | `feat(delete): add Python backend export, atomic output, main` | Export + orchestration | `scripts/delete_backend.py` (`export_xml`, version-from-xmlns, atomic rename, `main`, JSON result) | Smoke, python unit |
-| 4 | `test(delete): pin manifest contract with shared JSON fixture` | Manifest data contract | `crates/delete/tests/manifest_contract.rs`, `crates/delete/tests/fixtures/manifest-contract-v1.json`, `manifest_json_roundtrip` | Unit, integration, doc |
-| 5 | `feat(delete): delegate delete XML I/O to Python backend` | CLI wiring | `crates/cli/src/commands/delete.rs` (interpreter resolution, temp manifest, subprocess, timeout, `PythonResult`, report; remove `write_gzip_output`/flate2) | Integration |
-| 6 | `refactor(output): remove GraphXmlWriter filter/deletion methods` | Filter removal | `crates/output/src/xml.rs` | Unit |
-| 7 | `test(delete): remove obsolete delete-output XML assertions` | Test rework | `crates/cli/tests/e2e.rs`, `crates/cli/tests/integration.rs` | Integration |
-| 8 | `test(delete): Python backend edge-case unit tests` | Python edge cases | `scripts/test_delete_backend.py`, `scripts/pytest.ini` or config (pytest) | Python unit |
-| 9 | `test(delete): Gramps round-trip E2E with import verification` | Behavioral E2E | `crates/cli/tests/e2e.rs` (`e2e_delete_gramps_python_roundtrip`, `gramps_available()`) | Integration (E2E), unit |
-| 10 | `docs(delete): document Python-backed delete pipeline` | Docs | `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/delete-tool.md`, `docs/research/delete-output-roundtrip.md` | — |
-| 11 | `chore(delete): gate E2E behind gramps_available and pin version` | CI guardrail | `.github/workflows/` (deferred — no dir present) | — |
+| 1 | `feat: add HandleStatus, HandleEntry types with v1 backward compat` | Manifest v2 types | `crates/delete/src/types.rs` — `HandleStatus`, `HandleEntry`, `HandleOrEntry` enum, updated `TypePlan` with `Vec<HandleEntry>` + backward compat deserialization | Unit: HandleEntry serde, HandleStatus serde, v1 flat-string deserialization, v2 round-trip |
+| 2 | `feat: add manifest v2 save/load with backward compat and migration` | Manifest v2 save/load | `crates/delete/src/manifest.rs` — bump `MANIFEST_VERSION` to 2, add `deletion_mode` to `DeleteManifest`, `load_manifest` migration from v1→v2, `build_manifest` produces v2 entries | Unit: v1→v2 migration, v2 round-trip, migration round-trip (load v1→save v2→reload), unsupported version error, contract fixture v2 |
+| 3 | `feat: update build_manifest to produce v2 entries with deletion_mode` | build_manifest v2 | `crates/delete/src/manifest.rs` — `build_manifest` takes `&[HandleEntry]` and produces v2 manifest with `deletion_mode: "people_only"` | Unit: build_manifest with v2 entries, deletion_mode field, deterministic ordering |
+| 4 | `feat: persistent Gramps DB with people-only deletion in Python backend` | Python backend: persistent DB + people-only | `scripts/delete_backend.py` — `--db-dir` flag, persistent DB, `delete_items` deletes only people via `delete_person_from_database`, DB retention, `--no-retain-db` | Unit: people-only deletion (other types survive), persistent DB retention, `--no-retain-db` cleanup, `--db-dir` preexisting overwrite, `--db-dir` permission denied |
+| 5 | `feat: add surviving report to Python backend` | Python backend: surviving report | `scripts/delete_backend.py` — compute `surviving` handles by checking `has_*_handle` for all manifest handles after deletion, add `surviving` to JSON stdout result | Unit: surviving report accuracy, empty manifest surviving, all types checked |
+| 6 | `feat: add reconcile module for manifest reconciliation against Gramps` | Rust reconcile module | `crates/delete/src/reconcile.rs` — `reconcile()` function, `ReconciliationError` type, `surviving: Vec<Handle>` in `PythonResult` | Unit: all people deleted→Deleted, family kept by Gramps→Pending, events always survive→Pending, kept items stay Kept, empty surviving→all Deleted, surviving-handles-not-in-manifest→Err, idempotency (property-based), zero to_delete→no-op, unrecognized deletion_mode→Err |
+| 7 | `feat: add --db-dir, --no-retain-db flags, auto-save manifest, reconciliation wiring` | CLI changes | `crates/cli/src/commands/delete.rs` — `--db-dir` and `--no-retain-db` flags, auto-save manifest alongside output, updated `run()` flow with reconciliation, `--load-manifest` filters pending-only handles, updated `PythonResult` with `surviving` | Unit: new args struct, updated integrated error handling, `PythonResult` deserialization with `surviving` |
+| 8 | `test: add E2E tests for delete pipeline with Gramps API shift` | E2E integration tests | `crates/cli/tests/e2e.rs` — E2E tests for people-only deletion, manifest v2 reconciliation, DB retention, `--no-retain-db`, orphaned events survive, `--load-manifest` v1 and v2 | Integration: `e2e_delete_people_only_python_roundtrip`, `e2e_delete_manifest_v2_reconciliation`, `e2e_delete_db_retained`, `e2e_delete_no_retain_db`, `e2e_delete_orphaned_events_survive`, `e2e_delete_load_manifest_v1`, `e2e_delete_load_manifest_v2_reconciled` |
+| 9 | `docs: update delete pipeline documentation and AGENTS.md` | Documentation update | `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/research/bulk-delete-tool.md`, `docs/research/gramps-python-delete-backend.md`, `docs/research/delete-output-roundtrip.md` | — |
 
-## Step details
+---
 
-### Step 1 — Python backend: temp DB init + import (the API spike)
+## Step Details
 
-**`scripts/delete_backend.py`** — create the headless script shell proving the
-Gramps init contract (validated against the locally installed **Gramps 5.1.6**):
+### Step 1 — Manifest v2 types (`types.rs`)
 
-- `gi.require_version('Gtk', '3.0')` up-front to suppress PyGIWarning.
-- `make_database(backend_plugin_id)` returns an **uninitialized** DB (not a
-  dir path). Set `db.dir = tmpdir`, then `db.write_version(VERSION)` before
-  importing. Version/backend selection: 5.1/5.2 → `"bsddb"`; read
-  `gramps.gen.const.VERSION` and pick accordingly. **Verify the exact init
-  sequence here against the installed Gramps** — this is version-sensitive.
-- `create_temp_db()` → temp dir + initialized DB (Berkeley DB).
-- `import_xml(db, path)` → gzip-detect via `\x1f\x8b` magic bytes, rename to
-  `.gz` so `importxml.importData` handles it; call
-  `gramps.plugins.importer.importxml.importData(db, path, User())`.
-- Temp-DB cleanup via `shutil.rmtree(path, ignore_errors=True)` in a
-  `finally` (Berkeley DB holds locks on some platforms).
+**Changes:**
 
-**Tests**: smoke (script imports without a window; a no-op import then export
-succeeds). Minimal — this commit is primarily the spike.
+- Add `HandleStatus` enum: `Pending`, `Deleted`, `Kept` (serde `rename_all = "snake_case"`)
+- Add `HandleEntry` struct with `handle: Handle` and `status: HandleStatus`
+- Add `HandleOrEntry` untagged enum for v1 backward compat deserialization
+- Change `TypePlan.to_delete` from `Vec<Handle>` to `Vec<HandleEntry>`
+- Change `TypePlan.kept` from `Vec<Handle>` to `Vec<HandleEntry>`
+- Implement `TryFrom<Vec<HandleOrEntry>>` for `Vec<HandleEntry>` (v1→v2 conversion)
+- Custom serde on `TypePlan` to serialize as v2 format but deserialize both v1 and v2
+- Update existing tests to use `HandleEntry` where needed
 
-### Step 2 — Python backend: dependency-ordered deletion + validation
+**Key design decisions:**
 
-**`scripts/delete_backend.py`** — add `delete_items(db, manifest)`:
+- The `HandleOrEntry` untagged enum is read-only (deserialization only). Serialization always emits v2 format.
+- `HandleEntry` in `kept` gets `status: Kept` on migration; `HandleEntry` in `to_delete` gets `status: Pending` on migration.
+- Existing `TypePlan` round-trip tests need updating to use the new format.
 
-- **Pre-deletion handle validation**: every manifest handle must match UUID
-  v4 (`/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i`).
-  Non-matching handles → `rejected` list (dead-letter), skipped. Matching
-  handles absent from the DB → abort **before any deletion** (no partial
-  writes).
-- Delete strictly in this order inside one shared `DbTxn`
-  (`gramps.gen.db.DbTxn`):
-  1. People — `db.get_person_from_handle(h)` then
-     `db.delete_person_from_database(person, trans)` (takes a **`Person`
-     object**, not a handle; handles family ref cleanup)
-  2. Families — `remove_family(h, trans)`
-  3. Events — `remove_event(h, trans)`
-  4. Notes — `remove_note(h, trans)`
-  5. Places — `remove_place(h, trans)`
-  6. Sources — `remove_source(h, trans)`
-  7. Citations — `remove_citation(h, trans)`
-  8. Repositories — `remove_repository(h, trans)`
-  9. Media — `remove_media(h, trans)`
-  10. Tags — `remove_tag(h, trans)`
-- Passing one shared `DbTxn` to every call realizes the atomic-write goal.
+### Step 2 — Manifest v2 save/load (`manifest.rs`)
 
-**Tests**: Python unit — ordering is fixed; malformed handles land in
-`rejected`; a well-formed-but-absent handle aborts before any write.
+**Changes:**
 
-### Step 3 — Python backend: export, atomic output, main
+- Bump `MANIFEST_VERSION` from 1 to 2
+- Add `deletion_mode: String` to `DeleteManifest` (default `"people_only"`)
+- Rename current `load_manifest` to `load_manifest_v1`
+- New `load_manifest()` tries v2 deserialization first, catches `UnsupportedVersion(1)` → falls back to v1 loading + auto-migration
+- Auto-migration: all `to_delete` entries → `HandleEntry { status: Pending }`, all `kept` entries → `HandleEntry { status: Kept }`
+- Add `deletion_mode` to manifest JSON serialization
+- Update `build_manifest` to set `deletion_mode: "people_only"` and `version: 2`
+- Add contract fixture `manifest-contract-v2.json` with v2 format
+- Update `manifest_contract.rs` tests for v2
+- Update `check_source_file` to work with v2 manifests
 
-**`scripts/delete_backend.py`**:
+### Step 3 — build_manifest v2 (`manifest.rs`)
 
-- Read `xmlns` from the input XML header to determine the Gramps XML version;
-  pass it to the exporter so output matches input. Unrecognized namespace →
-  fall back to `"5.2"` + warning on stderr.
-- `export_xml(db, path)` → gzip if the output filename ends in `.gz` else
-  uncompressed; write via `gramps.plugins.export.exportxml.export_data`.
-- **Atomic output**: export to a temp file, then `os.replace` onto the final
-  path (deletion is atomic via `DbTxn`; export happens after commit).
-- `main()` → parse args (`--input`, `--manifest`, `--output`), orchestrate,
-  print JSON to stdout (see Step 5's `PythonResult`), errors via stderr +
-  non-zero exit.
+**Changes:**
 
-**Tests**: smoke — empty manifest → no-op import/export succeeds; result JSON
-parses into the `PythonResult` shape.
+- `build_manifest()` signature: `to_delete: &[HandleEntry]` instead of `&[Handle]`
+- Actually, to minimize API churn: keep `to_delete: &[Handle]` and internally convert `Pending` entries, OR change the signature to accept `&[HandleEntry]`. The plan says "After review, the confirmed set becomes `Vec<HandleEntry>` with status `Pending`" — so change the signature.
+- Update `build_manifest` to set `deletion_mode: "people_only"` on the manifest
+- Ensure deterministic ordering of entries in the manifest
+- All callers updated (in `cli/src/commands/delete.rs`)
 
-### Step 4 — Pin the manifest data contract with a shared fixture
+### Step 4 — Python backend: persistent DB + people-only (`delete_backend.py`)
 
-The JSON shape Rust emits and Python consumes must be pinned so the two sides
-cannot silently drift (data-contracts skill).
+**Changes:**
 
-**`crates/delete/tests/manifest_contract.rs`** — serialize a sample
-`DeleteManifest` built from a test helper and assert the exact JSON shape: top
-keys (`version`, `source_file`, `created_at`, `seed_people`, `plan`) and the
-per-type `to_delete`/`kept` nesting under snake_case keys (`people`,
-`families`, `events`, `notes`, `places`, `sources`, `citations`,
-`repositories`, `media`, `tags`).
+- Replace `--manifest` with `--manifest` (kept, but now with v2 format support)
+- Add `--db-dir <DIR>` flag (default: not set, but required for new flow)
+- Add `--no-retain-db` flag
+- Change `create_temp_db()` to `create_db(db_dir: str)` — creates persistent DB at specified path
+- If `--db-dir` exists, `shutil.rmtree` it first (with warning to stderr)
+- `delete_items()` only deletes people via `delete_person_from_database`
+- Remove all other type deletions from `delete_items()`
+- Keep `_TYPE_OPS` for `has_*_handle` checks (needed for surviving)
+- Update `_smoke_test()` for persistent DB
+- On error/exception, retain DB directory
+- With `--no-retain-db`, clean up on success
 
-**`crates/delete/tests/fixtures/manifest-contract-v1.json`** — a minimal valid
-manifest with one entry per type, committed so both Rust and Python consume
-the same fixture. A format change on either side fails loudly.
+### Step 5 — Python backend: surviving report (`delete_backend.py`)
 
-**`crates/delete/src/types.rs`** — add `manifest_json_roundtrip` unit test
-(serialize → deserialize → equal `DeleteManifest`).
+**Changes:**
 
-### Step 5 — Delegate delete XML I/O to the Python backend
+- After deletion and `DbTxn` commit, compute `surviving` set:
+  - Iterate all handles in all `to_delete` lists across all types in the manifest
+  - For each handle, call `db.has_*_handle(handle)` based on the type
+  - Collect handles that still exist in the DB
+- Add `"surviving": [...]` to the JSON stdout result
+- Handle the case where the manifest is v2 format (with `HandleEntry` objects)
 
-**`crates/cli/src/commands/delete.rs`** — replace the `GraphXmlWriter` write
-step with a subprocess call passing a manifest built from the **reviewed set**
-`final_to_delete`:
+### Step 6 — Rust reconcile module (`reconcile.rs`)
 
-1. **Always serialize the manifest** to a temp JSON file (not just when
-   `--save-manifest`) — Python needs it. Reuse the existing
-   `build_manifest(..., &seed_vec, &delete_vec, &graph)`.
-2. **Locate the Python script**: embedded at build time via
-   `concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/delete_backend.py")`;
-   honour a `GRAMPS_DELETE_BACKEND` env override for development.
-3. **Resolve the interpreter deterministically**:
-   1. `GRAMPS_PYTHON` env var (use as-is);
-   2. probe `python3 -c "import gramps.gen.db.utils"` → use `python3` if exit 0;
-   3. else error: "Gramps Python libraries not found. Set GRAMPS_PYTHON env var
-      to the python interpreter that can import gramps."
-4. **Spawn**: `python3 <script> --input <in.gramps> --manifest <plan.json> --output <out.gramps>`.
-   Generous timeout (e.g. 5 min) — Berkeley DB is slow on large files; kill on
-   timeout.
-5. **Parse stdout** JSON into `PythonResult { status, output?, deleted?,
-   message?, rejected }`; map to success or `CliError`.
-6. **Remove dead gzip paths**: `write_gzip_output`, `is_gzip`, the `flate2`
-   usage in `delete.rs`, and the `output::GraphXmlWriter`/`SerializationMap`
-   import — Python controls gzip via the output filename. `--dry-run` must not
-   invoke the subprocess; `--save-manifest`/`--load-manifest` UX unchanged.
-   Temp dir cleaned up on exit.
+**New file:** `crates/delete/src/reconcile.rs`
 
-**Tests**: integration — dry-run makes no subprocess call; success path parses
-`PythonResult`; error/output paths map to `CliError`.
+**Types:**
 
-### Step 6 — Remove the GraphXmlWriter filter/serialization path
+- `ReconciliationError` enum with `SurvivingHandlesNotInManifest(Vec<Handle>)` and `UnrecognizedDeletionMode(String)` variants
 
-**`crates/output/src/xml.rs`** — remove together, as one atomic change (they
-reference each other):
+**Functions:**
 
-- `with_filter` (pub), `is_deleted` (private), `is_edge_deleted` (private),
-  `validate_deletion_set` (pub), and the `to_delete` field from
-  `GraphXmlWriter`. Its uses are at `write_section` (~line 271 filter) and
-  `write_edge_items` (~line 776 filter); remove those references too.
-- **Keep** `gramps_xml_version` and `with_namespace` — used by `generate`.
-- `crates/output/src/lib.rs` — no change (public API changes are only the
-  removed methods).
+- `reconcile(manifest: &mut DeleteManifest, surviving: &HashSet<Handle>) -> Result<(), ReconciliationError>`:
+  - Check `manifest.deletion_mode` — return `Err` for unrecognized values
+  - For each type's `to_delete` entries:
+    - If handle NOT in `surviving` → `status = Deleted`
+    - If handle IS in `surviving` → `status = Pending` (Gramps kept it)
+  - For `kept` entries: status stays `Kept`
+  - Validate: if any handle in `surviving` is not in the manifest → `Err`
 
-**Tests**: existing `xml.rs` writer unit tests (incl. `gramps_xml_version`
-derivation at lines ~2483/2487) still pass.
+**Module registration:**
 
-### Step 7 — Rework/remove obsolete delete-output XML assertions
+- Add `pub mod reconcile;` to `crates/delete/src/lib.rs`
+- Re-export `reconcile` and `ReconciliationError`
 
-The four E2E tests asserting our writer's XML for delete output no longer
-apply now that Gramps produces the output (Gramps re-normalizes; our
-`type="General"` default and flat 5.1 event types are emitted by Gramps itself
-only where it preserves the input). A format change on either side of the
-contract is caught by Step 4's fixture + Step 9's import test, not by string
-matching.
+### Step 7 — CLI changes (`delete.rs`)
 
-**`crates/cli/tests/e2e.rs`** — rework or replace:
+**Changes to `DeleteArgs`:**
 
-- `e2e_delete_notes_import_roundtrip` (line 1266)
-- `e2e_delete_51_namespace_emits_flat_event_type` (line 1396)
-- `e2e_delete_51_fixture_import_roundtrip` (line 1473)
-- `e2e_delete_note_default_type_and_format_roundtrip` (line 1578)
+- Add `--db-dir <DIR>`: `Option<PathBuf>` (default: `<input>-gramps-db/`)
+- Add `--no-retain-db`: `bool`
 
-Any surviving behavior (input imports cleanly, deleted handles absent) moves
-into Step 9's Gramps-backed round-trip test. Remove the standalone
-`GraphXmlWriter`/filter usage if present.
+**Changes to `PythonResult`:**
 
-**Tests**: integration.
+- Add `#[serde(default)] surviving: Vec<String>`
 
-### Step 8 — Python backend edge-case unit tests
+**Changes to `run()` flow:**
 
-**`scripts/test_delete_backend.py`** (pytest, per user decision; add `pytest`
-as a Python dev dependency — e.g. a `scripts/` `requirements-dev.txt` with
-`pytest`, since it is not in the stdlib and not yet installed):
+1. Parse input → Graph (unchanged)
+2. If `--load-manifest`: filter manifest to pending-only handles, use as seeds. Deleted/kept handles excluded before `validate_manifest`.
+3. Run cascade engine → DeletePlan (unchanged)
+4. Interactive review → final_to_delete (skipped if `--yes` or `--load-manifest`)
+5. Build manifest v2 with `deletion_mode: "people_only"`
+6. If `--dry-run`: save manifest, exit
+7. Resolve Python interpreter + script path (unchanged)
+8. Write manifest JSON to temp file
+9. Spawn Python backend with `--db-dir` and `--no-retain-db` flags
+10. Parse `PythonResult` (including `surviving`)
+11. Reconcile manifest against `surviving`
+12. If DB directory >100MB, emit warning to stderr
+13. Save enriched manifest alongside output (always, not just with `--save-manifest`)
+14. Report summary
+15. Clean up temp manifest file
 
-- Empty manifest and all-empty per-type lists → no-op import/export succeeds.
-- Manifest handle absent from the DB → fails with a specific error **before**
-  deleting anything.
-- Partial presence (some handles exist, one doesn't) → nothing written.
-- Invalid handle format (not UUID v4) → handle in `rejected`, valid handles
-  still deleted.
-- Subprocess timeout: spawn a mock Python script that sleeps indefinitely,
-  assert the timeout fires and the subprocess is killed (run from the Rust
-  side or a `unittest.mock` subprocess double).
+**Manifest auto-save path:**
 
-**Tests**: python unit.
+- Default: `<output-path-stem>.manifest.json`
+- `--save-manifest <FILE>` overrides the path
+- On `--dry-run`: save manifest (all `Pending`)
+- On Python backend failure: save pre-reconciliation manifest (all `Pending`), warn user
 
-### Step 9 — Gramps round-trip E2E + guard
+### Step 8 — E2E tests
 
-**`crates/cli/tests/e2e.rs`**:
+Add to `crates/cli/tests/e2e.rs`:
 
-- `e2e_delete_gramps_python_roundtrip`: real `.gramps` fixture →
-  `gramps-gen delete --selections picks.json --yes -o clean.gramps` → import
-  output via `gramps.plugins.importer.importxml` → assert deleted
-  people/families/events/notes absent and no errors on stderr. (Limitation:
-  test uses the same importer as the backend; optional secondary check via
-  `gramps -y -q -i clean.gramps` when the CLI binary is present.)
-- `gramps_available()` guard unit test: compiles, returns a `bool`, doesn't
-  panic; asserts the Gramps version starts with `("5.1","5.2")` (rejects 6.x's
-  bsddb removal). E2E tests skip gracefully when Gramps is unavailable.
+- `e2e_delete_people_only_python_roundtrip`: delete people, verify Gramps import succeeds on output
+- `e2e_delete_manifest_v2_reconciliation`: verify manifest correctly marks deleted/pending
+- `e2e_delete_db_retained`: verify Gramps DB directory exists after delete
+- `e2e_delete_no_retain_db`: verify `--no-retain-db` cleans up DB directory
+- `e2e_delete_orphaned_events_survive`: verify events referenced only by deleted people still exist in output
+- `e2e_delete_load_manifest_v1`: verify `--load-manifest` with v1 manifest works (auto-migration)
+- `e2e_delete_load_manifest_v2_reconciled`: verify `--load-manifest` with reconciled v2 manifest skips already-deleted handles
 
-**Tests**: integration (E2E), unit.
+### Step 9 — Documentation
 
-### Step 10 — Documentation
+Update these files to reflect the new architecture:
 
-| Document | Change |
-|---|---|
-| `AGENTS.md` | Add `scripts/delete_backend.py` to project structure |
-| `docs/ARCHITECTURE.md` | Update the delete pipeline diagram (output delegate = Python backend) |
-| `docs/delete-tool.md` | Update pipeline diagram; fix manifest JSON example to snake_case keys (`"people"` not `"Person"` — verified the doc currently uses `"Person"` at line 231); note deletion uses Gramps' native libraries |
-| `docs/research/delete-output-roundtrip.md` | Note that bugs 1–4 are obsoleted by this restructure |
-
-### Step 11 — CI (deferred)
-
-The delete command now requires a working Gramps install (Python libraries).
-CI E2E must run with Gramps present and pinned to 5.1/5.2 (the API usage is
-validated against 5.1.6; 6.x deviates). Deferred: no `.github/` directory
-exists in this repo. Revisit when CI is introduced; the `gramps_available()`
-version assert in Step 9 already enforces the environment contract.
-
-## Dependencies / ordering notes
-
-- Steps 1–4 are independent of `crates/cli` and `crates/output`; they build
-  the backend and its contract.
-- Step 5 (delegation) depends on Steps 1–3 (script exists) and Step 4
-  (contract fixtures make drift visible).
-- **Step 6 and Step 7 must land together or keep the tree green**: Step 6
-  removes the filter surface, and Step 7 removes tests/`delete.rs` references
-  to it. Because verification showed no `xml.rs` unit tests exercise the
-  filter (only `delete.rs`), the compile/pass boundary is safe if Step 5
-  already dropped `delete.rs`'s filter usage. Confirm the tree compiles and
-  tests pass at each checkpoint.
-- `docs/delete-tool.md` currently shows uppercase keys (`"Person"` at line
-  231) — Step 10 must fix this to the actual snake_case output.
-
-## Repository health / pre-work
-
-Before implementing, satisfy the incremental-development pre-work gate:
-`git status` clean, `cargo test --workspace` green, `git branch
---show-current` on `main`. Create a feature branch (e.g.
-`agent/delete-python-backend`) per git-workflow before the first step commit.
-`docs/research/gramps-python-delete-backend.md` is currently untracked and
-must be committed with this plan in Step 10's/dedicated docs commit.
-
-## Test commands
-
-```bash
-pytest scripts/                                  # Steps 1-3, 8 (pytest, after installing dev reqs)
-cargo test -p delete                              # Step 4 (contract fixture + roundtrip)
-cargo test -p cli                                 # Steps 5, 7, 9
-cargo test -p output                              # Step 6
-cargo test --workspace                            # full suite before each commit
-cargo clippy --all-targets --all-features -- -D warnings   # final gate
-python3 -c "import gramps.gen.db.utils"           # sanity check for local Gramps
-```
+- `AGENTS.md` — update delete pipeline description; mention DB retention, advisory-only cascade for non-people types
+- `docs/ARCHITECTURE.md` — update delete pipeline diagram
+- `docs/research/bulk-delete-tool.md` — add note: cascade engine now advisory-only for non-people types
+- `docs/research/gramps-python-delete-backend.md` — add note: people-only deletion, DB retention
+- `docs/research/delete-output-roundtrip.md` — add note: orphaned objects now intentionally preserved
