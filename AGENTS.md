@@ -14,6 +14,12 @@ gramps_viz_edit/
 │   └── schema-5.1.json               # Gramps 5.1 schema in JSON Schema format (auto-converted)
 ├── extract/
 │   └── extract_schema.py         # Python extractor (reads Gramps Python classes)
+├── scripts/
+│   ├── delete_backend.py          # Python backend: Gramps DB import/delete/export for delete command
+│   ├── test_delete_backend.py     # pytest unit tests for delete_backend.py
+│   ├── requirements-dev.txt       # Python dev dependencies (pytest)
+│   ├── validate-gramps-import.sh  # CI: validate .gramps file via Gramps CLI import
+│   └── validate-gramps-roundtrip.sh # CI: validate round-trip import/export
 ├── crates/
 │   ├── typed-graph/              # Core: graph model, schema codegen, validation, generation
 │   │   ├── build.rs              # Reads schema files → generates Rust types at compile time

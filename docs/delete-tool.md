@@ -82,12 +82,21 @@ gramps-gen delete data.gramps --selections picks.json \
 │  4. Interactive review     │  Terminal TUI (skip with --yes)
 │     (optional)             │  Review per-type, y/n/l/r/s/q
 └──────────┬─────────────────┘
-           │  Confirmed DeletePlan
+           │  Reviewed set → JSON manifest
            ▼
 ┌────────────────────────────┐
-│  5. Write output           │  Filter graph → output crate → .gramps XML
+│  5. Python backend         │  scripts/delete_backend.py (subprocess)
+│     (XML I/O)              │  Temp Gramps DB → import → delete → export
+│                            │  Uses Gramps' own import/export libraries
 └────────────────────────────┘
 ```
+
+> **Note:** Step 5 delegates all XML I/O to `scripts/delete_backend.py`, a
+> Python subprocess that uses Gramps' own `gramps.plugins.importer.importxml`
+> and `gramps.plugins.export.exportxml` libraries. This eliminates the entire
+> class of XML round-trip bugs that arose from the previous Rust-based
+> `GraphXmlWriter` filter path. The Rust cascade engine (steps 1–4) remains
+> unchanged.
 
 ---
 
@@ -228,15 +237,15 @@ structure:
   "created_at": "2025-08-08T14:30:00Z",
   "seed_people": ["abc123", "def456", "ghi789"],
   "plan": {
-    "Person": {
+    "people": {
       "to_delete": ["abc123", "def456", "ghi789"],
       "kept": ["jkl012", "mno345"]
     },
-    "Family": {
+    "families": {
       "to_delete": ["fam001"],
       "kept": ["fam002"]
     },
-    "Event": {
+    "events": {
       "to_delete": ["evt001", "evt002", "evt003"],
       "kept": []
     }
@@ -256,6 +265,11 @@ structure:
 The manifest serves as an **audit trail** — it records exactly what was
 deleted and when. Empty `to_delete` arrays for a type mean no nodes of
 that type were orphaned.
+
+> **Note:** The manifest JSON keys use **snake_case** plural type names
+> (`people`, `families`, `events`, etc.) matching the Rust
+> `NodeKindLabel::plural()` output. This is the format consumed by the
+> Python backend script.
 
 ---
 
@@ -298,7 +312,7 @@ gramps-gen delete data.gramps --selections picks.json \
   --dry-run --save-manifest plan.json
 
 # Step 2: Review the manifest
-cat plan.json | jq '.plan.Person.to_delete | length'
+cat plan.json | jq '.plan.people.to_delete | length'
 
 # Step 3: Execute from manifest
 gramps-gen delete data.gramps \

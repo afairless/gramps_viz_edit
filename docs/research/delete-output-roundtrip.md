@@ -1,5 +1,13 @@
 # Delete Tool Output Round-Trip Fidelity
 
+> **Status: OBSOLETED** — The bugs described in this document (1–4) are
+> resolved by the Python backend restructure
+> ([`gramps-python-delete-backend.md`](./gramps-python-delete-backend.md)).
+> The `delete` command now delegates all XML I/O to a Python subprocess that
+> uses Gramps' own `importxml` and `exportxml` libraries, eliminating the
+> entire class of XML round-trip bugs. The detailed analysis below is
+> preserved for historical reference.
+
 ## Problem
 
 Running `gramps-gen delete` on a Gramps 5.1 `.gramps` file produces output

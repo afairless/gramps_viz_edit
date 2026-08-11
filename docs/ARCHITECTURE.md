@@ -126,6 +126,14 @@ A **Python extractor** (`extract/extract_schema.py`) introspects Gramps Python c
 │  Interactive review ──────── review.rs (terminal TUI)          │
 │  Manifest  ────────────────── manifest.rs (save/load JSON)     │
 │  Types     ────────────────── types.rs (DeletePlan, Manifest)  │
+└──────────────────────────┬─────────────────────────────────────┘
+                           │  JSON manifest
+                           ▼
+┌────────────────────────────────────────────────────────────────┐
+│  scripts/delete_backend.py  (Python subprocess)                │
+│                                                                │
+│  Temp Gramps DB ──── import ──── delete ──── export ──► .gramps│
+│  Gramps' own libraries via gramps.gen + plugins               │
 └────────────────────────────────────────────────────────────────┘
                            │
                            ▼
@@ -831,8 +839,11 @@ via `--save-manifest` / `--load-manifest`.
 The `gramps-gen delete <file>` CLI subcommand supports flags: `--selections`
 (required), `--output`, `--yes` (skip review), `--dry-run` (compute only),
 `--save-manifest`, `--load-manifest`. The cascade engine reads the Graph
-via `gramps-reader`, computes orphaned dependencies, and writes filtered
-XML via the `output` crate.
+via `gramps-reader`, computes orphaned dependencies, and serializes the
+reviewed set as a JSON manifest. The CLI then delegates all XML I/O to
+`scripts/delete_backend.py` (a Python subprocess that uses Gramps' own
+import/delete/export libraries), replacing the prior Rust filter path
+in `GraphXmlWriter`.
 
 ---
 
