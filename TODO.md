@@ -1,61 +1,63 @@
-# Implementation Plan: Handle Underscore Mismatch Fix
+# Implementation Plan: Event Cleaning Post-Process
 
-Source: `docs/research/handle-underscore-fix.md`
+Source: `docs/research/event-cleaning-postprocess.md`
 
-## Problem
+## Overview
 
-Gramps XML serialization prefixes handles with `_` (e.g. `_103e398e0c42...`), but Gramps' internal Berkeley DB stores handles without the prefix. The Python delete backend (`delete_backend.py`) queries the DB using the underscored XML handles, which always returns `False` — causing the delete command to fail with "handle(s) in manifest not found in database".
-
-## Fix Strategy
-
-Add a `_normalize_handle()` helper that strips the leading `_` for DB queries, and use it in both `_validate_handles()` and `delete_items()`. The manifest preserves original XML handles for audit purposes; normalization is only applied at DB interaction points.
+Add an automatic post-processing step to the `gramps-gen delete` command that
+removes orphaned events (marked `Pending` in the manifest after reconciliation)
+from the `.gramps` XML output using a streaming `quick-xml` filter. Produces
+a `<input-stem>-no-events.gramps` file alongside the existing `-cleaned.gramps`.
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `fix: normalize handles before DB queries in delete backend` | Handle normalization in all DB query paths | `scripts/delete_backend.py` | Unit (existing tests pass, including `test_handles_accepted_regardless_of_format`) |
-| 2 | `test: add unit tests for handle normalization` | Normalization unit tests | `scripts/test_delete_backend.py` | Unit |
-| 3 | `chore: verify integration end-to-end` | Integration verification | Manual run of delete command + Python + Rust test suites | — |
+| 1 | `feat: add streaming XML event filter for cleaning orphaned events` | Clean module | `crates/cli/src/commands/clean.rs` (new), `crates/cli/src/commands/mod.rs` (+1 line), `crates/cli/src/error.rs` (+`From<CleanError> for CliError`) | Unit |
+| 2 | `feat: integrate event cleaning into delete command pipeline` | Delete integration | `crates/cli/src/commands/delete.rs` (~30 lines; make `strip_gramps_extensions` `pub(crate)`, add clean step, derive helper) | — |
+| 3 | `test: add integration tests for event cleaning in delete pipeline` | Integration tests | `crates/cli/tests/e2e_delete.rs` (new tests) | Integration |
 
 ## Step Details
 
-### Step 1 — Add `_normalize_handle()` and normalize all DB query paths
+### Step 1 — Clean module
 
-**Changes to `scripts/delete_backend.py`:**
+**Key deliverables:**
 
-1. Add `_normalize_handle(handle: str) -> str` helper after `_extract_handle()`:
-   - Strips leading `_` via `handle.lstrip('_')`
-   - Preserves handles without `_` unchanged
+- `crates/cli/src/commands/clean.rs` — new module with:
+  - `CleanStats` struct (events_removed, events_not_found)
+  - `CleanError` enum (Io, XmlParse variants)
+  - `clean_events_xml(input, output, event_handles) -> Result<CleanStats, CleanError>` — streaming XML filter using `quick-xml` Reader + Writer with transparent gzip decompression via `flate2`
+  - Namespace-aware element detection (using `strip_prefix` from `gramps_reader::xml`)
+  - Handle attribute detection (using `read_handle_attr` from `gramps_reader::xml`)
+  - Temp-file write-then-rename for atomic output
+  - Unit tests: remove_single_event, remove_self_closing_event, keep_unrelated_event, no_events_to_remove, handle_not_found, namespace_prefixed_event, nested_eventtype, flat_type, multiple_events_mixed, non_event_xml_preserved, gzip_input
+- `crates/cli/src/commands/mod.rs` — add `pub mod clean;`
+- `crates/cli/src/error.rs` — add `From<CleanError> for CliError` impl mapping Io→Io, XmlParse→XmlParseError
 
-2. In `_validate_handles()`: normalize handle before `has_fn()` call
-   - `has_fn` is called with `_normalize_handle(handle)` instead of raw `handle`
-   - The `missing` list retains original (underscored) handles for error messages
+**Test scope:** Unit tests for all 11 cases described in the plan.
 
-3. In `delete_items()`:
-   - **3a**: Normalize handle before `get_fn()` in person deletion loop
-   - **3b**: Normalize handle before `has_fn()` in surviving handles check loop
-   - The `surviving` list retains original (underscored) handles for reconciliation
+### Step 2 — Delete integration
 
-**Test evidence:** The existing test `test_handles_accepted_regardless_of_format` (which is currently failing) will pass after this step.
+**Key deliverables:**
 
-### Step 2 — Add unit tests for handle normalization
+- `crates/cli/src/commands/delete.rs`:
+  - Make `strip_gramps_extensions` `pub(crate)` (used by clean.rs's derive helper)
+  - Add `derive_no_events_path(input_path: &Path) -> PathBuf` helper (uses `strip_gramps_extensions`)
+  - After reconciliation (step 14 in current flow), add clean step:
+    1. Collect pending event handles from manifest's `events` plan
+    2. If non-empty, call `clean::clean_events_xml(&output_path, &no_events_path, &pending_events)`
+    3. Log stats
+    4. Mark pending events as `Deleted` in manifest
+    5. Re-save manifest (overwrite checkpoint copy)
+  - If no pending events, log info and skip
 
-**Changes to `scripts/test_delete_backend.py`:**
+**Test scope:** — (no new standalone tests; the module is wired but only exercised by integration tests)
 
-1. Add `TestNormalizeHandle` class with:
-   - `test_strips_single_underscore` — `_abc123` → `abc123`
-   - `test_preserves_already_normalized` — `abc123` → `abc123`
-   - `test_handles_empty_string` — `""` → `""`
-   - `test_handles_multiple_underscores` — `__abc` → `abc`
+### Step 3 — Integration tests
 
-2. Add `test_gramps_native_handles_normalized` to `TestValidateHandles`:
-   - Gramps-native handles (with `_` prefix) are found after normalization
+**Key deliverables:**
 
-3. Add `test_gramps_native_delete_items` to `TestDeleteItems`:
-   - Verify person deletion with Gramps-native handles works
-   - Verify surviving report uses original (underscored) handles
+- `crates/cli/tests/e2e_delete.rs` — add tests:
+  - `e2e_delete_with_event_clean`: Generate a family with events, delete people, verify `-no-events.gramps` has events removed
+  - `e2e_delete_no_pending_events_noop`: When all events are deleted by Gramps, `-no-events` = `-cleaned`
+  - `e2e_delete_manifest_re_saved_after_clean`: After successful clean, manifest on disk has pending events marked `Deleted`
 
-### Step 3 — Integration verification
-
-1. Run the Python test suite: `pytest scripts/test_delete_backend.py -v`
-2. Run the Rust test suite: `cargo test -p delete && cargo test -p cli`
-3. Run the original failing command to verify the fix
+**Test scope:** Integration (subprocess-based, full pipeline)
