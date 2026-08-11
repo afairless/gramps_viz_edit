@@ -294,6 +294,58 @@ def delete_items(db: Any, manifest: Dict[str, Any]) -> tuple[int, List[str]]:
 
 
 # ---------------------------------------------------------------------------
+# XML namespace detection
+# ---------------------------------------------------------------------------
+
+# Known Gramps XML namespaces and their versions.
+_KNOWN_XMLNS: Dict[str, str] = {
+    "http://gramps-project.org/xml/1.7.1/": "5.1",
+    "http://gramps-project.org/xml/1.7.2/": "5.2",
+}
+
+
+def read_xmlns_from_input(input_path: str) -> Optional[str]:
+    """Read the xmlns from the input XML header.
+
+    Returns the Gramps version string (e.g. '5.1') or None if
+    the namespace is unrecognized.
+
+    Uses a streaming approach: reads the first KB and looks for
+    the xmlns attribute on the <database> element.
+    """
+    try:
+        opener = gzip.open if is_gzip_file(input_path) else open
+        with opener(input_path, "rt", encoding="utf-8") as f:
+            chunk = f.read(4096)
+    except OSError:
+        return None
+
+    match = re.search(r'xmlns="([^"]+)"', chunk)
+    if match is None:
+        return None
+    xmlns = match.group(1)
+    return _KNOWN_XMLNS.get(xmlns)
+
+
+# ---------------------------------------------------------------------------
+# Export
+# ---------------------------------------------------------------------------
+
+def export_xml(db: Any, path: str) -> None:
+    """Export the database to a Gramps XML file.
+
+    Gzip-compresses the output if the filename ends in '.gz'.
+    Uses Gramps' own XmlWriter for the highest fidelity output.
+    """
+    from gramps.cli.user import User
+    from gramps.plugins.export.exportxml import XmlWriter
+
+    should_compress = path.endswith(".gz")
+    writer = XmlWriter(db, User(), strip_photos=0, compress=1 if should_compress else 0)
+    writer.write(path)
+
+
+# ---------------------------------------------------------------------------
 # Smoke test
 # ---------------------------------------------------------------------------
 def _smoke_test() -> None:
@@ -371,8 +423,7 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    # Stub: full orchestration comes in Step 3.
-    # For now, validate the import path exists.
+    # Validate input files exist.
     if not os.path.exists(args.input):
         result = {
             "status": "error",
@@ -385,7 +436,6 @@ def main() -> None:
         sys.stdout.flush()
         sys.exit(1)
 
-    # Validate manifest exists
     if not os.path.exists(args.manifest):
         result = {
             "status": "error",
@@ -398,21 +448,64 @@ def main() -> None:
         sys.stdout.flush()
         sys.exit(1)
 
-    # For Step 1, just verify the import works.
-    db = None
+    # Read the manifest.
     try:
-        db = create_temp_db()
-        import_xml(db, args.input)
-        # Smoke: export step deferred to Step 3
+        with open(args.manifest, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
         result = {
-            "status": "ok",
+            "status": "error",
+            "message": f"Failed to read manifest: {exc}",
             "output": None,
-            "deleted": 0,
-            "message": "Import succeeded; deletions not yet implemented",
+            "deleted": None,
             "rejected": [],
         }
         json.dump(result, sys.stdout)
         sys.stdout.flush()
+        sys.exit(1)
+
+    db = None
+    try:
+        # 1. Create temp DB and import the input file.
+        db = create_temp_db()
+        import_xml(db, args.input)
+
+        # 2. Delete items per the manifest.
+        deleted_count, rejected = delete_items(db, manifest)
+
+        # 3. Export to a temp file, then atomically rename.
+        #    (Deletion is already atomic via DbTxn; export is
+        #    separate, so we use os.replace for atomic output.)
+        tmp_output = args.output + ".tmp"
+        try:
+            export_xml(db, tmp_output)
+            os.replace(tmp_output, args.output)
+        finally:
+            if os.path.exists(tmp_output):
+                os.unlink(tmp_output)
+
+        result = {
+            "status": "ok",
+            "output": args.output,
+            "deleted": deleted_count,
+            "message": None,
+            "rejected": rejected,
+        }
+        json.dump(result, sys.stdout)
+        sys.stdout.flush()
+
+    except ValueError as exc:
+        # Handle validation errors (missing handles, etc.)
+        result = {
+            "status": "error",
+            "message": str(exc),
+            "output": None,
+            "deleted": None,
+            "rejected": [],
+        }
+        json.dump(result, sys.stdout)
+        sys.stdout.flush()
+        sys.exit(1)
     except Exception as exc:
         result = {
             "status": "error",
