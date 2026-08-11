@@ -192,6 +192,19 @@ _TYPE_OPS: Dict[str, Dict[str, str]] = {
 }
 
 
+def _extract_handle(entry: Any) -> str:
+    """Extract a handle string from a v1 (string) or v2 (dict) manifest entry.
+
+    v1 format: "handle-string"
+    v2 format: {"handle": "handle-string", "status": "..."}
+    """
+    if isinstance(entry, str):
+        return entry
+    if isinstance(entry, dict):
+        return entry.get("handle", "")
+    return str(entry)
+
+
 def _validate_handles(
     db: Any,
     manifest: Dict[str, Any],
@@ -215,7 +228,7 @@ def _validate_handles(
         type_plan = plan.get(type_key)
         if type_plan is None:
             continue
-        to_delete: List[str] = type_plan.get("to_delete", [])
+        to_delete: List[Any] = type_plan.get("to_delete", [])
         if not to_delete:
             continue
 
@@ -225,7 +238,8 @@ def _validate_handles(
             continue
         has_fn = getattr(db, ops["has"])
 
-        for handle in to_delete:
+        for entry in to_delete:
+            handle = _extract_handle(entry)
             if not UUID_V4_RE.match(handle):
                 rejected.append(handle)
                 continue

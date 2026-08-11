@@ -79,14 +79,18 @@ fn contract_v1_people_has_to_delete_and_kept() {
         .plan
         .get("people")
         .expect("people must be present");
+    assert_eq!(people.to_delete.len(), 1);
     assert_eq!(
-        people.to_delete,
-        vec!["a5f0c1a2-4000-4b3d-8000-000000000001"]
+        people.to_delete[0].handle,
+        "a5f0c1a2-4000-4b3d-8000-000000000001"
     );
+    assert_eq!(people.to_delete[0].status, delete::types::HandleStatus::Pending);
+    assert_eq!(people.kept.len(), 1);
     assert_eq!(
-        people.kept,
-        vec!["a5f0c1a2-4000-4b3d-8000-000000000002"]
+        people.kept[0].handle,
+        "a5f0c1a2-4000-4b3d-8000-000000000002"
     );
+    assert_eq!(people.kept[0].status, delete::types::HandleStatus::Kept);
 }
 
 #[test]
@@ -121,6 +125,7 @@ fn contract_v1_serialize_from_rust_matches_fixture_shape() {
         selections_file: Some("selections.json".to_string()),
         created_at: "2025-01-15T10:30:00Z".to_string(),
         seed_people: vec!["a5f0c1a2-4000-4b3d-8000-000000000001".to_string()],
+        deletion_mode: "people_only".to_string(),
         plan,
     };
 

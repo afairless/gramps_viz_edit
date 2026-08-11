@@ -20,7 +20,7 @@ use std::path::Path;
 use serde_json;
 use typed_graph::{Graph, Handle};
 
-use crate::types::{DeleteManifest, TypePlan};
+use crate::types::{DeleteManifest, HandleEntry, HandleStatus, TypePlan};
 
 /// Errors that can occur during manifest operations.
 #[derive(Debug)]
@@ -119,14 +119,14 @@ pub fn validate_manifest(manifest: &DeleteManifest, graph: &Graph) -> Result<(),
     }
 
     for type_plan in manifest.plan.values() {
-        for handle in &type_plan.to_delete {
-            if !graph.contains_node(handle) {
-                return Err(ManifestError::InvalidHandle(handle.clone()));
+        for entry in &type_plan.to_delete {
+            if !graph.contains_node(&entry.handle) {
+                return Err(ManifestError::InvalidHandle(entry.handle.clone()));
             }
         }
-        for handle in &type_plan.kept {
-            if !graph.contains_node(handle) {
-                return Err(ManifestError::InvalidHandle(handle.clone()));
+        for entry in &type_plan.kept {
+            if !graph.contains_node(&entry.handle) {
+                return Err(ManifestError::InvalidHandle(entry.handle.clone()));
             }
         }
     }
@@ -203,14 +203,20 @@ pub fn build_manifest(
         }
 
         // Ensure deterministic order
-        let mut sorted_delete = type_handles.clone();
-        sorted_delete.sort();
-        let kept: Vec<Handle> = Vec::new();
+        let mut sorted_entries: Vec<HandleEntry> = type_handles
+            .iter()
+            .map(|h| HandleEntry {
+                handle: h.clone(),
+                status: HandleStatus::Pending,
+            })
+            .collect();
+        sorted_entries.sort_by(|a, b| a.handle.cmp(&b.handle));
+        let kept: Vec<HandleEntry> = Vec::new();
 
         plan.insert(
             type_name.to_string(),
             TypePlan {
-                to_delete: sorted_delete,
+                to_delete: sorted_entries,
                 kept,
             },
         );
@@ -225,6 +231,7 @@ pub fn build_manifest(
         selections_file: selections_file.map(|s| s.to_string()),
         created_at,
         seed_people: seed_sorted,
+        deletion_mode: "people_only".to_string(),
         plan,
     }
 }
@@ -288,13 +295,23 @@ fn is_leap(year: i64) -> bool {
 mod tests {
     use super::*;
 
+    fn make_entry(handle: &str, status: HandleStatus) -> HandleEntry {
+        HandleEntry {
+            handle: handle.to_string(),
+            status,
+        }
+    }
+
     #[test]
     fn save_load_roundtrip() {
         let mut plan = HashMap::new();
         plan.insert(
             "people".to_string(),
             TypePlan {
-                to_delete: vec!["p1".to_string(), "p2".to_string()],
+                to_delete: vec![
+                    make_entry("p1", HandleStatus::Pending),
+                    make_entry("p2", HandleStatus::Pending),
+                ],
                 kept: vec![],
             },
         );
@@ -304,6 +321,7 @@ mod tests {
             selections_file: Some("sel.json".to_string()),
             created_at: "2025-01-15T10:30:00Z".to_string(),
             seed_people: vec!["p1".to_string()],
+            deletion_mode: "people_only".to_string(),
             plan,
         };
 
@@ -326,6 +344,7 @@ mod tests {
             selections_file: None,
             created_at: "2025-01-15T10:30:00Z".to_string(),
             seed_people: vec![],
+            deletion_mode: "people_only".to_string(),
             plan: HashMap::new(),
         };
         let dir = std::env::temp_dir();
@@ -356,7 +375,7 @@ mod tests {
         plan.insert(
             "people".to_string(),
             TypePlan {
-                to_delete: vec!["p1".to_string()],
+                to_delete: vec![make_entry("p1", HandleStatus::Pending)],
                 kept: vec![],
             },
         );
@@ -366,6 +385,7 @@ mod tests {
             selections_file: None,
             created_at: "2025-01-15T10:30:00Z".to_string(),
             seed_people: vec!["p1".to_string()],
+            deletion_mode: "people_only".to_string(),
             plan,
         };
 
@@ -381,6 +401,7 @@ mod tests {
             selections_file: None,
             created_at: "2025-01-15T10:30:00Z".to_string(),
             seed_people: vec!["nonexistent".to_string()],
+            deletion_mode: "people_only".to_string(),
             plan: HashMap::new(),
         };
 
@@ -396,6 +417,7 @@ mod tests {
             selections_file: None,
             created_at: "2025-01-15T10:30:00Z".to_string(),
             seed_people: vec![],
+            deletion_mode: "people_only".to_string(),
             plan: HashMap::new(),
         };
 
@@ -411,6 +433,7 @@ mod tests {
             selections_file: None,
             created_at: "2025-01-15T10:30:00Z".to_string(),
             seed_people: vec![],
+            deletion_mode: "people_only".to_string(),
             plan: HashMap::new(),
         };
 
@@ -459,8 +482,18 @@ mod tests {
         assert_eq!(manifest.seed_people, vec!["p1".to_string()]);
         assert!(manifest.plan.contains_key("people"));
         assert!(manifest.plan.contains_key("events"));
-        assert_eq!(manifest.plan["people"].to_delete, vec!["p1".to_string()]);
-        assert_eq!(manifest.plan["events"].to_delete, vec!["e1".to_string()]);
+        assert_eq!(manifest.plan["people"].to_delete.len(), 1);
+        assert_eq!(manifest.plan["people"].to_delete[0].handle, "p1");
+        assert_eq!(
+            manifest.plan["people"].to_delete[0].status,
+            HandleStatus::Pending
+        );
+        assert_eq!(manifest.plan["events"].to_delete.len(), 1);
+        assert_eq!(manifest.plan["events"].to_delete[0].handle, "e1");
+        assert_eq!(
+            manifest.plan["events"].to_delete[0].status,
+            HandleStatus::Pending
+        );
     }
 
     #[test]
