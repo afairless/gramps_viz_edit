@@ -592,7 +592,7 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
 // ---------------------------------------------------------------------------
 
 /// Strip a trailing `.gz` extension if present, then the remaining extension.
-fn strip_gramps_extensions(path: &std::path::Path) -> String {
+pub(crate) fn strip_gramps_extensions(path: &std::path::Path) -> String {
     let mut s = path.to_string_lossy().to_string();
     if s.ends_with(".gz") {
         s.truncate(s.len() - 3);

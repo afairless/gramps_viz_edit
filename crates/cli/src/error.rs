@@ -165,6 +165,17 @@ impl From<gramps_reader::Error> for CliError {
     }
 }
 
+impl From<crate::commands::clean::CleanError> for CliError {
+    fn from(err: crate::commands::clean::CleanError) -> Self {
+        match err {
+            crate::commands::clean::CleanError::Io { path, source } => CliError::Io { path, source },
+            crate::commands::clean::CleanError::XmlParse { message } => {
+                CliError::XmlParseError { message }
+            }
+        }
+    }
+}
+
 impl From<integrate::IntegrateError> for CliError {
     fn from(err: integrate::IntegrateError) -> Self {
         CliError::IntegrateFailed(err.to_string())
