@@ -128,10 +128,7 @@ mod tests {
     use crate::types::{DeleteManifest, HandleEntry, HandleStatus, TypePlan};
     use std::collections::HashMap;
 
-    fn make_manifest(
-        to_delete: Vec<(&str, HandleStatus)>,
-        kept: Vec<&str>,
-    ) -> DeleteManifest {
+    fn make_manifest(to_delete: Vec<(&str, HandleStatus)>, kept: Vec<&str>) -> DeleteManifest {
         let mut plan = HashMap::new();
         plan.insert(
             "people".to_string(),
@@ -218,10 +215,7 @@ mod tests {
     #[test]
     fn all_people_deleted() {
         let mut manifest = make_manifest(
-            vec![
-                ("p1", HandleStatus::Pending),
-                ("p2", HandleStatus::Pending),
-            ],
+            vec![("p1", HandleStatus::Pending), ("p2", HandleStatus::Pending)],
             vec![],
         );
         let surviving = make_surviving(&[]);
@@ -234,10 +228,7 @@ mod tests {
 
     #[test]
     fn all_people_pending_when_surviving() {
-        let mut manifest = make_manifest(
-            vec![("p1", HandleStatus::Pending)],
-            vec![],
-        );
+        let mut manifest = make_manifest(vec![("p1", HandleStatus::Pending)], vec![]);
         let surviving = make_surviving(&["p1"]);
         reconcile(&mut manifest, &surviving).unwrap();
 
@@ -282,10 +273,7 @@ mod tests {
 
     #[test]
     fn kept_items_stay_kept() {
-        let mut manifest = make_manifest(
-            vec![("p1", HandleStatus::Pending)],
-            vec!["p2"],
-        );
+        let mut manifest = make_manifest(vec![("p1", HandleStatus::Pending)], vec!["p2"]);
         let surviving = make_surviving(&[]);
         reconcile(&mut manifest, &surviving).unwrap();
 
@@ -321,10 +309,7 @@ mod tests {
 
     #[test]
     fn surviving_handles_not_in_manifest_errors() {
-        let mut manifest = make_manifest(
-            vec![("p1", HandleStatus::Pending)],
-            vec![],
-        );
+        let mut manifest = make_manifest(vec![("p1", HandleStatus::Pending)], vec![]);
         let surviving = make_surviving(&["p1", "unknown_handle"]);
         let result = reconcile(&mut manifest, &surviving);
         assert!(matches!(
@@ -336,19 +321,20 @@ mod tests {
     #[test]
     fn idempotent_reconciliation() {
         // Reconcile twice should give the same result as once.
-        let mut manifest = make_manifest(
-            vec![("p1", HandleStatus::Pending)],
-            vec![],
-        );
+        let mut manifest = make_manifest(vec![("p1", HandleStatus::Pending)], vec![]);
         let surviving = make_surviving(&[]);
 
         // Reconcile once
         reconcile(&mut manifest, &surviving).unwrap();
-        let state_after_once = manifest.plan.get("people").unwrap().to_delete[0].status.clone();
+        let state_after_once = manifest.plan.get("people").unwrap().to_delete[0]
+            .status
+            .clone();
 
         // Reconcile again
         reconcile(&mut manifest, &surviving).unwrap();
-        let state_after_twice = manifest.plan.get("people").unwrap().to_delete[0].status.clone();
+        let state_after_twice = manifest.plan.get("people").unwrap().to_delete[0]
+            .status
+            .clone();
 
         assert_eq!(state_after_once, state_after_twice);
         assert_eq!(state_after_twice, HandleStatus::Deleted);
@@ -363,10 +349,7 @@ mod tests {
 
     #[test]
     fn unrecognized_deletion_mode_errors() {
-        let mut manifest = make_manifest(
-            vec![("p1", HandleStatus::Pending)],
-            vec![],
-        );
+        let mut manifest = make_manifest(vec![("p1", HandleStatus::Pending)], vec![]);
         manifest.deletion_mode = "delete_everything".to_string();
         let surviving = make_surviving(&[]);
         let result = reconcile(&mut manifest, &surviving);

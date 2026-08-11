@@ -79,16 +79,16 @@ fn contract_v1_people_has_to_delete_and_kept() {
     let manifest: DeleteManifest =
         serde_json::from_str(CONTRACT_FIXTURE).expect("contract fixture must deserialize");
 
-    let people = manifest
-        .plan
-        .get("people")
-        .expect("people must be present");
+    let people = manifest.plan.get("people").expect("people must be present");
     assert_eq!(people.to_delete.len(), 1);
     assert_eq!(
         people.to_delete[0].handle,
         "a5f0c1a2-4000-4b3d-8000-000000000001"
     );
-    assert_eq!(people.to_delete[0].status, delete::types::HandleStatus::Pending);
+    assert_eq!(
+        people.to_delete[0].status,
+        delete::types::HandleStatus::Pending
+    );
     assert_eq!(people.kept.len(), 1);
     assert_eq!(
         people.kept[0].handle,
@@ -167,7 +167,10 @@ fn contract_v2_deserializes_to_delete_manifest() {
 
     assert_eq!(manifest.version, 2);
     assert_eq!(manifest.source_file, "test.gramps");
-    assert_eq!(manifest.selections_file, Some("selections.json".to_string()));
+    assert_eq!(
+        manifest.selections_file,
+        Some("selections.json".to_string())
+    );
     assert_eq!(
         manifest.seed_people,
         vec!["a5f0c1a2-4000-4b3d-8000-000000000001"]
@@ -193,10 +196,7 @@ fn contract_v2_people_entries_have_statuses() {
     let manifest: DeleteManifest =
         serde_json::from_str(CONTRACT_FIXTURE_V2).expect("v2 fixture must deserialize");
 
-    let people = manifest
-        .plan
-        .get("people")
-        .expect("people must be present");
+    let people = manifest.plan.get("people").expect("people must be present");
     assert_eq!(people.to_delete.len(), 2);
     assert_eq!(
         people.to_delete[0].handle,
@@ -230,10 +230,7 @@ fn contract_v1_fixture_load_migrates_to_v2() {
     assert_eq!(manifest.version, 2, "version must be bumped to 2");
     assert_eq!(manifest.deletion_mode, "people_only");
 
-    let people = manifest
-        .plan
-        .get("people")
-        .expect("people must be present");
+    let people = manifest.plan.get("people").expect("people must be present");
     assert_eq!(people.to_delete.len(), 1);
     assert_eq!(people.to_delete[0].status, HandleStatus::Pending);
     assert_eq!(people.kept[0].status, HandleStatus::Kept);

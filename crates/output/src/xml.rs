@@ -251,9 +251,7 @@ impl GraphXmlWriter {
         // Collect nodes of this type
         let mut nodes: Vec<(Handle, Node)> = graph
             .iter_nodes()
-            .filter(|(_, node)| {
-                node_type_name(node) == Some(&type_info.element_name)
-            })
+            .filter(|(_, node)| node_type_name(node) == Some(&type_info.element_name))
             .map(|(h, n)| (h.clone(), n.clone()))
             .collect::<Vec<_>>();
 

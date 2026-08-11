@@ -128,7 +128,6 @@ fn gramps_available() -> bool {
 // Tests
 // ---------------------------------------------------------------------------
 
-
 #[test]
 fn e2e_delete_dry_run_does_not_write_output() {
     let input = temp_path("dry_run.gramps");
@@ -158,7 +157,6 @@ fn e2e_delete_dry_run_does_not_write_output() {
     let _ = std::fs::remove_file(&input);
     let _ = std::fs::remove_file(&selections);
 }
-
 
 #[test]
 fn e2e_delete_zero_percent_overlap_errors() {
@@ -211,9 +209,7 @@ const UUID_FIXTURE_51: &str = r###"<?xml version="1.0" encoding="UTF-8"?>
 fn e2e_delete_gramps_python_roundtrip() {
     // This test requires Gramps to be installed. Skip gracefully if not.
     if !gramps_available() {
-        eprintln!(
-            "Skipping: Gramps Python libraries not available (gramps_available()=false)"
-        );
+        eprintln!("Skipping: Gramps Python libraries not available (gramps_available()=false)");
         return;
     }
 
@@ -222,10 +218,7 @@ fn e2e_delete_gramps_python_roundtrip() {
     let output = temp_path("roundtrip_output.gramps");
 
     write_uuid_fixture(&input, UUID_FIXTURE_51);
-    write_selections(
-        &selections,
-        &["a5f0c1a2-4000-4b3d-8000-000000000001"],
-    );
+    write_selections(&selections, &["a5f0c1a2-4000-4b3d-8000-000000000001"]);
 
     // Run delete with Python backend.
     let (_stdout, stderr, code) = gramps_gen(&[
@@ -250,8 +243,7 @@ fn e2e_delete_gramps_python_roundtrip() {
         std::path::Path::new(&output).exists(),
         "Output file should exist"
     );
-    let content = std::fs::read_to_string(&output)
-        .expect("Output file should be readable");
+    let content = std::fs::read_to_string(&output).expect("Output file should be readable");
     assert!(!content.is_empty(), "Output file should not be empty");
 
     // Verify the deleted person handle is NOT present in the output.

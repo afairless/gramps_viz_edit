@@ -349,7 +349,11 @@ fn note_type_attr_parse() {
     </note>
   </notes>
 </database>"#;
-    assert_eq!(parse_note_type_attr(xml), None, "Missing type should be None");
+    assert_eq!(
+        parse_note_type_attr(xml),
+        None,
+        "Missing type should be None"
+    );
 
     // Empty type attribute -> None (filtered)
     let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -408,5 +412,9 @@ fn note_format_attr_parse() {
     </note>
   </notes>
 </database>"#;
-    assert_eq!(parse_note_format(xml), None,"Missing format should be None");
+    assert_eq!(
+        parse_note_format(xml),
+        None,
+        "Missing format should be None"
+    );
 }

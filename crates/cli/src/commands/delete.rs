@@ -20,8 +20,9 @@ use serde::Deserialize;
 
 use delete::cascade;
 use delete::manifest::{build_manifest, load_manifest, save_manifest, ManifestError};
+use delete::reconcile::{reconcile, ReconciliationError};
 use delete::review::{run_interactive_review, ReviewResult};
-use delete::types::DeletePlan;
+use delete::types::{DeletePlan, HandleStatus, TypePlan};
 
 use crate::error::CliError;
 
@@ -38,6 +39,9 @@ struct PythonResult {
     message: Option<String>,
     #[serde(default)]
     rejected: Vec<String>,
+    /// Handles that still exist in the DB after deletion (for reconciliation).
+    #[serde(default)]
+    surviving: Vec<String>,
 }
 
 /// Arguments for the `delete` subcommand.
@@ -69,6 +73,14 @@ pub struct DeleteArgs {
     /// Load pre-reviewed deletion manifest (skip review)
     #[arg(long = "load-manifest")]
     pub load_manifest: Option<PathBuf>,
+
+    /// Gramps database directory (default: <input-stem>-gramps-db/)
+    #[arg(long = "db-dir")]
+    pub db_dir: Option<PathBuf>,
+
+    /// Clean up Gramps DB after successful export
+    #[arg(long = "no-retain-db")]
+    pub no_retain_db: bool,
 }
 
 /// Resolve the Python interpreter that can import Gramps.
@@ -89,11 +101,13 @@ fn resolve_python_interpreter() -> Result<String, CliError> {
     let output = Command::new("python3")
         .args(["-c", "import gramps.gen.db.utils"])
         .output()
-        .map_err(|e| CliError::ConfigError(format!(
-            "Gramps Python libraries not found. \
+        .map_err(|e| {
+            CliError::ConfigError(format!(
+                "Gramps Python libraries not found. \
              Could not run python3: {e}. \
              Set GRAMPS_PYTHON env var to the python interpreter that can import gramps."
-        )))?;
+            ))
+        })?;
 
     if output.status.success() {
         log::debug!("Resolved python3 for Gramps");
@@ -194,7 +208,25 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
     let seed_people: HashSet<String> = if let Some(ref manifest_path) = args.load_manifest {
         log::info!("Loading manifest: {}", manifest_path.display());
         let manifest = load_manifest(manifest_path)?;
-        manifest.seed_people.into_iter().collect()
+        // Filter to pending-only handles from to_delete lists. Deleted/kept
+        // handles are excluded — they were already removed or explicitly kept
+        // in a previous run.
+        let pending_people: HashSet<String> = manifest
+            .plan
+            .get("people")
+            .map(|p: &TypePlan| {
+                p.to_delete
+                    .iter()
+                    .filter(|e| e.status == HandleStatus::Pending)
+                    .map(|e| e.handle.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        if pending_people.is_empty() {
+            log::warn!("Manifest contains no pending people to delete — nothing to do.");
+            return Ok(());
+        }
+        pending_people
     } else if let Some(ref selections_path) = args.selections {
         log::info!("Loading selections: {}", selections_path.display());
         let selections =
@@ -312,7 +344,7 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
         .map(|p| p.to_string_lossy().to_string());
     let seed_vec: Vec<String> = seed_people.iter().cloned().collect();
     let delete_vec: Vec<String> = final_to_delete.iter().cloned().collect();
-    let manifest = build_manifest(
+    let mut manifest = build_manifest(
         &source_file,
         selections_file.as_deref(),
         &seed_vec,
@@ -320,22 +352,7 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
         &graph,
     );
 
-    // Save manifest (if --save-manifest requested)
-    if let Some(ref manifest_path) = args.save_manifest {
-        log::info!("Saving manifest to: {}", manifest_path.display());
-        save_manifest(&manifest, manifest_path)?;
-    }
-
-    // 6. Dry run check
-    if args.dry_run {
-        log::info!(
-            "Dry run complete. Would delete {} handles.",
-            final_to_delete.len()
-        );
-        return Ok(());
-    }
-
-    // 7. Compute output path
+    // 6. Compute output path
     let output_path = args.output.unwrap_or_else(|| {
         let input_name = input_path
             .file_stem()
@@ -361,20 +378,36 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
 
     log::info!("Writing output to: {}", output_path.display());
 
+    // 7. Determine manifest output path — always saved alongside output.
+    //    `--save-manifest` overrides the default <output-stem>.manifest.json.
+    let manifest_path = match args.save_manifest {
+        Some(ref p) => p.clone(),
+        None => PathBuf::from(format!(
+            "{}.manifest.json",
+            strip_gramps_extensions(&output_path)
+        )),
+    };
+    log::info!("Saving manifest to: {}", manifest_path.display());
+    save_manifest(&manifest, &manifest_path)?;
+
+    // 8. Dry run check (manifest already saved with all-Pending statuses)
+    if args.dry_run {
+        log::info!(
+            "Dry run complete. Would delete {} handles.",
+            final_to_delete.len()
+        );
+        return Ok(());
+    }
+
     // 8. Write manifest to temp file for Python backend
-    let temp_dir = std::env::temp_dir().join(format!(
-        "gramps_delete_{}",
-        std::process::id()
-    ));
+    let temp_dir = std::env::temp_dir().join(format!("gramps_delete_{}", std::process::id()));
     fs::create_dir_all(&temp_dir).map_err(|e| CliError::Io {
         path: temp_dir.display().to_string(),
         source: e,
     })?;
     let manifest_temp = temp_dir.join("delete_manifest.json");
-    let manifest_json =
-        serde_json::to_string_pretty(&manifest).map_err(|e| CliError::ConfigError(format!(
-            "failed to serialize manifest: {e}"
-        )))?;
+    let manifest_json = serde_json::to_string_pretty(&manifest)
+        .map_err(|e| CliError::ConfigError(format!("failed to serialize manifest: {e}")))?;
     fs::write(&manifest_temp, &manifest_json).map_err(|e| CliError::Io {
         path: manifest_temp.display().to_string(),
         source: e,
@@ -383,6 +416,18 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
     // 9. Resolve Python interpreter and script
     let python = resolve_python_interpreter()?;
     let script = resolve_script_path()?;
+
+    // Determine the Gramps DB directory (default: <input-stem>-gramps-db/)
+    let db_dir = args.db_dir.clone().unwrap_or_else(|| {
+        PathBuf::from(format!("{}-gramps-db", strip_gramps_extensions(input_path)))
+    });
+    if db_dir.exists() {
+        log::warn!(
+            "Database directory {} already exists — it will be overwritten.",
+            db_dir.display()
+        );
+    }
+    log::info!("Gramps DB directory: {}", db_dir.display());
 
     log::info!(
         "Delegating XML I/O to Python backend: {} {}",
@@ -396,17 +441,25 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
     let input_clone = input_path.clone();
     let manifest_clone = manifest_temp.clone();
     let output_clone = output_path.clone();
+    let db_dir_clone = db_dir.clone();
+    let no_retain_db = args.no_retain_db;
 
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let result = Command::new(&python_clone)
-            .arg(script_clone.to_string_lossy().as_ref())
+        let mut cmd = Command::new(&python_clone);
+        cmd.arg(script_clone.to_string_lossy().as_ref())
             .arg("--input")
             .arg(&input_clone)
             .arg("--manifest")
             .arg(&manifest_clone)
             .arg("--output")
             .arg(&output_clone)
+            .arg("--db-dir")
+            .arg(&db_dir_clone);
+        if no_retain_db {
+            cmd.arg("--no-retain-db");
+        }
+        let result = cmd
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -438,13 +491,14 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
     };
 
     // 11. Parse stdout as PythonResult
-    let result: PythonResult = serde_json::from_slice(&output.stdout)
-        .unwrap_or_else(|e| PythonResult {
+    let result: PythonResult =
+        serde_json::from_slice(&output.stdout).unwrap_or_else(|e| PythonResult {
             status: "error".to_string(),
             output: None,
             deleted: None,
             message: Some(format!("Failed to parse Python output: {e}")),
             rejected: vec![],
+            surviving: vec![],
         });
 
     // Report stderr
@@ -460,15 +514,60 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
                 output.status.code().unwrap_or(-1)
             )
         });
+        // Python backend failed. Save the pre-reconciliation manifest
+        // (all statuses Pending) so the user still has a record of intent.
+        // If the .gramps output exists (failure happened after writing),
+        // delete it so no stale partial-result pair is left on disk.
+        if output_path.exists() {
+            let _ = fs::remove_file(&output_path);
+        }
+        let _ = save_manifest(&manifest, &manifest_path);
+        log::warn!(
+            "Python backend failed: {}. Reconciliation skipped; \
+             pre-reconciliation manifest saved to {}",
+            msg,
+            manifest_path.display()
+        );
         return Err(CliError::ConfigError(msg));
     }
 
+    // 12. Reconcile the manifest against the surviving report
+    let surviving: HashSet<String> = result.surviving.iter().cloned().collect();
+    reconcile(&mut manifest, &surviving)
+        .map_err(|e: ReconciliationError| CliError::ConfigError(e.to_string()))?;
+
+    // 13. Warn if the retained Gramps DB is unusually large
+    let db_size = dir_size(&db_dir);
+    if db_size > 100 * 1024 * 1024 {
+        log::warn!(
+            "Gramps DB directory {} is large ({} MB). \
+             Use --no-retain-db to remove it after export.",
+            db_dir.display(),
+            db_size / (1024 * 1024)
+        );
+    }
+
+    // 14. Save the enriched manifest alongside the output
+    save_manifest(&manifest, &manifest_path)?;
+
     let deleted_count = result.deleted.unwrap_or(0);
+    let pending_count = manifest
+        .plan
+        .values()
+        .flat_map(|p: &TypePlan| p.to_delete.iter())
+        .filter(|e| e.status == HandleStatus::Pending)
+        .count();
     log::info!(
-        "Done. Deleted {} handles (out of {} total nodes).",
+        "Done. Deleted {} people; {} handles still pending (kept by Gramps).",
         deleted_count,
-        graph.node_count(),
+        pending_count,
     );
+    log::info!("Enriched manifest saved to: {}", manifest_path.display());
+    if args.no_retain_db {
+        log::info!("Gramps DB removed (--no-retain-db).");
+    } else {
+        log::info!("Gramps DB retained at: {}", db_dir.display());
+    }
     if !result.rejected.is_empty() {
         log::warn!(
             "{} handles were rejected (invalid UUID format): {:?}",
@@ -477,10 +576,42 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
         );
     }
 
-    // Clean up temp directory
+    // 15. Clean up temp directory
     let _ = fs::remove_dir_all(&temp_dir);
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Strip a trailing `.gz` extension if present, then the remaining extension.
+fn strip_gramps_extensions(path: &std::path::Path) -> String {
+    let mut s = path.to_string_lossy().to_string();
+    if s.ends_with(".gz") {
+        s.truncate(s.len() - 3);
+    }
+    if let Some(i) = s.rfind('.') {
+        s.truncate(i);
+    }
+    s
+}
+
+/// Compute the total size of a directory tree in bytes.
+fn dir_size(path: &std::path::Path) -> u64 {
+    let mut total = 0;
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                total += dir_size(&p);
+            } else if let Ok(meta) = entry.metadata() {
+                total += meta.len();
+            }
+        }
+    }
+    total
 }
 
 // ---------------------------------------------------------------------------
@@ -537,6 +668,8 @@ mod tests {
             dry_run: false,
             save_manifest: None,
             load_manifest: None,
+            db_dir: None,
+            no_retain_db: false,
         };
         let cloned = args.clone();
         assert_eq!(args.input, cloned.input);
@@ -553,6 +686,8 @@ mod tests {
             dry_run: false,
             save_manifest: None,
             load_manifest: None,
+            db_dir: None,
+            no_retain_db: false,
         };
         assert!(!args.yes);
         assert!(!args.dry_run);
@@ -623,6 +758,29 @@ mod tests {
             CliError::Io { .. } => {}
             _ => panic!("expected Io variant"),
         }
+    }
+
+    #[test]
+    fn strip_gramps_extensions_basic() {
+        assert_eq!(
+            strip_gramps_extensions(&PathBuf::from("test.gramps")),
+            "test"
+        );
+        assert_eq!(
+            strip_gramps_extensions(&PathBuf::from("test.gramps.gz")),
+            "test"
+        );
+        assert_eq!(
+            strip_gramps_extensions(&PathBuf::from("test-cleaned.gramps")),
+            "test-cleaned"
+        );
+        assert_eq!(strip_gramps_extensions(&PathBuf::from("noext")), "noext");
+    }
+
+    #[test]
+    fn dir_size_empty_path() {
+        // Non-existent path should return 0, not panic
+        assert_eq!(dir_size(PathBuf::from("/nonexistent/path").as_path()), 0);
     }
 
     #[test]
