@@ -34,6 +34,7 @@ use std::ops::Range;
 
 use crate::generate::adversarial::AdversarialConfig;
 use crate::generate::adversarial::AdversarialStrategy;
+use crate::generate::generate_handle;
 
 // ---------------------------------------------------------------------------
 // RandomConfig
@@ -524,7 +525,7 @@ pub(crate) fn generate_random_person(
     missing_events_fraction: f64,
     schema: &crate::Schema,
 ) -> Result<(crate::Handle, Option<String>), GenerationError> {
-    let handle = uuid::Uuid::new_v4().to_string();
+    let handle = generate_handle(rng);
 
     // Generate a given name and surname
     let given_name = generate_given_name(&config.name_style, used_names, rng);
@@ -601,7 +602,7 @@ pub(crate) fn generate_random_person(
         ));
     } else {
         // Create birth event
-        let event_handle = uuid::Uuid::new_v4().to_string();
+        let event_handle = generate_handle(rng);
         let birth_event = crate::EventData {
             handle: event_handle.clone(),
             event_type: crate::into_event_type_field(crate::EventType::Birth),
@@ -628,7 +629,7 @@ pub(crate) fn generate_random_person(
 
         // Create death event if death date is set
         if let Some(death_date) = death_date {
-            let death_event_handle = uuid::Uuid::new_v4().to_string();
+            let death_event_handle = generate_handle(rng);
             let death_event = crate::EventData {
                 handle: death_event_handle.clone(),
                 event_type: crate::into_event_type_field(crate::EventType::Death),
@@ -901,7 +902,7 @@ pub(crate) fn generate_family(
                 }
             }
 
-            let family_handle = uuid::Uuid::new_v4().to_string();
+            let family_handle = generate_handle(rng);
             let family = crate::FamilyData {
                 handle: family_handle.clone(),
                 father_handle: None,
@@ -945,7 +946,7 @@ pub(crate) fn generate_family(
                 }
             }
 
-            let family_handle = uuid::Uuid::new_v4().to_string();
+            let family_handle = generate_handle(rng);
             let family = crate::FamilyData {
                 handle: family_handle.clone(),
                 father_handle: Some(father_handle.clone()),
@@ -992,7 +993,7 @@ pub(crate) fn generate_family(
     }
 
     // Create family node
-    let family_handle = uuid::Uuid::new_v4().to_string();
+    let family_handle = generate_handle(rng);
     let family = crate::FamilyData {
         handle: family_handle.clone(),
         father_handle: Some(father_handle.clone()),
@@ -1075,7 +1076,7 @@ fn create_single_parent_family(
         .unwrap_or(0); // Default to male if not found
 
     // Create family node with the correct parent handle set
-    let family_handle = uuid::Uuid::new_v4().to_string();
+    let family_handle = generate_handle(rng);
     let is_female = parent_gender == 1;
 
     let family = if is_female {
@@ -1269,7 +1270,7 @@ pub(crate) fn generate_events(
                             crate::DateValue::new_ymd(marriage_year, marriage_month, marriage_day);
 
                         // Create marriage event
-                        let event_handle = uuid::Uuid::new_v4().to_string();
+                        let event_handle = generate_handle(rng);
                         let event = crate::EventData {
                             handle: event_handle.clone(),
                             event_type: crate::into_event_type_field(crate::EventType::Marriage),
@@ -1317,7 +1318,7 @@ pub(crate) fn generate_events(
             let place = generate_place(config.place_depth, &used_place_names, rng);
             used_place_names.insert(place.city.clone());
 
-            let place_handle = uuid::Uuid::new_v4().to_string();
+            let place_handle = generate_handle(rng);
             let place_node = crate::PlaceData {
                 handle: place_handle.clone(),
                 name: crate::Location {
@@ -1363,7 +1364,7 @@ pub(crate) fn generate_events(
             .collect();
 
         // Create a single source for all citations
-        let source_handle = uuid::Uuid::new_v4().to_string();
+        let source_handle = generate_handle(rng);
         let source = crate::SourceData {
             handle: source_handle.clone(),
             title: "Generated dataset".to_string(),
@@ -1383,7 +1384,7 @@ pub(crate) fn generate_events(
         for event_handle in &event_handles {
             if rng.gen_bool(0.3) {
                 // 30% of events get citations
-                let citation_handle = uuid::Uuid::new_v4().to_string();
+                let citation_handle = generate_handle(rng);
                 let citation = crate::CitationData {
                     handle: citation_handle.clone(),
                     source_handle: crate::into_source_handle_field(source_handle.clone()),
@@ -4029,7 +4030,7 @@ mod tests {
             .unwrap();
 
         // Add birth events for parents
-        let birth_event_f = uuid::Uuid::new_v4().to_string();
+        let birth_event_f = generate_handle(rng);
         graph
             .add_node(
                 birth_event_f.clone(),
@@ -4049,7 +4050,7 @@ mod tests {
             })
             .unwrap();
 
-        let birth_event_m = uuid::Uuid::new_v4().to_string();
+        let birth_event_m = generate_handle(rng);
         graph
             .add_node(
                 birth_event_m.clone(),
@@ -4114,7 +4115,7 @@ mod tests {
             )
             .unwrap();
 
-        let birth_event_f = uuid::Uuid::new_v4().to_string();
+        let birth_event_f = generate_handle(rng);
         graph
             .add_node(
                 birth_event_f.clone(),
@@ -4134,7 +4135,7 @@ mod tests {
             })
             .unwrap();
 
-        let birth_event_m = uuid::Uuid::new_v4().to_string();
+        let birth_event_m = generate_handle(rng);
         graph
             .add_node(
                 birth_event_m.clone(),
@@ -4208,7 +4209,7 @@ mod tests {
             )
             .unwrap();
 
-        let birth_event = uuid::Uuid::new_v4().to_string();
+        let birth_event = generate_handle(rng);
         graph
             .add_node(
                 birth_event.clone(),
@@ -4256,7 +4257,7 @@ mod tests {
             )
             .unwrap();
 
-        let birth_event = uuid::Uuid::new_v4().to_string();
+        let birth_event = generate_handle(rng);
         graph
             .add_node(
                 birth_event.clone(),
@@ -4320,7 +4321,7 @@ mod tests {
             )
             .unwrap();
 
-        let birth_event_f = uuid::Uuid::new_v4().to_string();
+        let birth_event_f = generate_handle(rng);
         graph
             .add_node(
                 birth_event_f.clone(),
@@ -4340,7 +4341,7 @@ mod tests {
             })
             .unwrap();
 
-        let birth_event_m = uuid::Uuid::new_v4().to_string();
+        let birth_event_m = generate_handle(rng);
         graph
             .add_node(
                 birth_event_m.clone(),
@@ -4395,7 +4396,7 @@ mod tests {
             )
             .unwrap();
 
-        let death_event = uuid::Uuid::new_v4().to_string();
+        let death_event = generate_handle(rng);
         graph
             .add_node(
                 death_event.clone(),

@@ -32,6 +32,7 @@
 //! ```
 
 use crate::Graph;
+use crate::generate::generate_handle;
 
 // ---------------------------------------------------------------------------
 // AdversarialStrategy — enumerates all available strategies
@@ -358,7 +359,7 @@ pub fn deep_nesting(depth: usize) -> GraphTransform {
             let mut current_parent = place_handle.clone();
 
             for level in 0..depth {
-                let parent_handle = uuid::Uuid::new_v4().to_string();
+                let parent_handle = generate_handle(&mut rand::thread_rng());
 
                 // Get the name of the current place to derive a parent name
                 let parent_name =
@@ -456,7 +457,7 @@ pub fn max_ref_chains(chain_length: usize) -> GraphTransform {
                 let new_handle = match step {
                     0 => {
                         // Citation (will reference Source created in step 1)
-                        let h = uuid::Uuid::new_v4().to_string();
+                        let h = generate_handle(&mut rand::thread_rng());
                         // We'll update source_handle after creating the Source
                         let citation = crate::CitationData {
                             handle: h.clone(),
@@ -474,7 +475,7 @@ pub fn max_ref_chains(chain_length: usize) -> GraphTransform {
                     }
                     1 => {
                         // Source
-                        let h = uuid::Uuid::new_v4().to_string();
+                        let h = generate_handle(&mut rand::thread_rng());
                         let source = crate::SourceData {
                             handle: h.clone(),
                             title: "Generated source".to_string(),
@@ -500,7 +501,7 @@ pub fn max_ref_chains(chain_length: usize) -> GraphTransform {
                     }
                     2 => {
                         // Repository
-                        let h = uuid::Uuid::new_v4().to_string();
+                        let h = generate_handle(&mut rand::thread_rng());
                         let repo = crate::RepositoryData {
                             handle: h.clone(),
                             ..crate::RepositoryData::default()
@@ -516,7 +517,7 @@ pub fn max_ref_chains(chain_length: usize) -> GraphTransform {
                     }
                     3 => {
                         // Note
-                        let h = uuid::Uuid::new_v4().to_string();
+                        let h = generate_handle(&mut rand::thread_rng());
                         let note = crate::NoteData {
                             handle: h.clone(),
                             text: "Generated note for reference chain".to_string(),
@@ -533,7 +534,7 @@ pub fn max_ref_chains(chain_length: usize) -> GraphTransform {
                     }
                     _ => {
                         // Tag (for step 4+)
-                        let h = uuid::Uuid::new_v4().to_string();
+                        let h = generate_handle(&mut rand::thread_rng());
                         let tag = crate::TagData {
                             handle: h.clone(),
                             name: format!("chain-tag-{}", step),

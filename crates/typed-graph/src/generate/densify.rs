@@ -34,6 +34,7 @@
 use rand::Rng;
 
 use crate::generate::builder::GraphBuilder;
+use crate::generate::generate_handle;
 use crate::Edge;
 use crate::Graph;
 use crate::Handle;
@@ -533,7 +534,7 @@ fn create_marriage_family(
     }
 
     *family_counter += 1;
-    let family_handle = uuid::Uuid::new_v4().to_string();
+    let family_handle = generate_handle(&mut rand::thread_rng());
     let gramps_id = format!("F{:04}", *family_counter);
 
     // Use GraphBuilder to create the family (handles required-field init)
@@ -871,7 +872,7 @@ pub(crate) fn upgrade_single_parents(
 
             // Create a new Family node for this marriage
             *family_counter += 1;
-            let new_family_handle = uuid::Uuid::new_v4().to_string();
+            let new_family_handle = generate_handle(rng);
             let gramps_id = format!("F{:04}", *family_counter);
 
             let mut builder = GraphBuilder::new(graph);
