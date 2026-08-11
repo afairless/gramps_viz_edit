@@ -104,6 +104,30 @@ fn map_xml_error(output: &Path, err: quick_xml::Error) -> CleanError {
     }
 }
 
+/// Check if a handle from an XML attribute matches any handle in the deletion
+/// set, and remove it if it does.
+///
+/// Gramps re-exports handles with a leading `_` prefix (e.g. `_e0001` in XML
+/// vs `e0001` in the manifest). We check both the literal handle and the
+/// underscore-prefixed/stripped variant.
+fn remove_matching_handle(remaining: &mut HashSet<String>, handle: &str) -> bool {
+    if remaining.remove(handle) {
+        return true;
+    }
+    // If the XML handle has a leading `_`, also check without it
+    if let Some(stripped) = handle.strip_prefix('_') {
+        if remaining.remove(stripped) {
+            return true;
+        }
+    }
+    // If the XML handle has no leading `_`, also check with it
+    let prefixed = format!("_{}", handle);
+    if remaining.remove(&prefixed) {
+        return true;
+    }
+    false
+}
+
 /// Remove events matching the given handles from a Gramps XML file.
 ///
 /// Reads the input file (with transparent gzip decompression), streams through
@@ -184,7 +208,7 @@ pub fn clean_events_xml(
                 let local_name = strip_prefix(name.as_ref());
                 if local_name == b"event" {
                     if let Some(handle) = read_handle_attr(e) {
-                        if remaining.remove(&handle) {
+                        if remove_matching_handle(&mut remaining, &handle) {
                             // Start skipping this event
                             skip_depth = 1;
                             events_removed += 1;
@@ -209,7 +233,7 @@ pub fn clean_events_xml(
                 let local_name = strip_prefix(name.as_ref());
                 if local_name == b"event" {
                     if let Some(handle) = read_handle_attr(e) {
-                        if remaining.remove(&handle) {
+                        if remove_matching_handle(&mut remaining, &handle) {
                             // Skip this self-closing event
                             events_removed += 1;
                             continue;
@@ -768,5 +792,62 @@ mod tests {
         };
         let b = a.clone();
         assert_eq!(a, b);
+    }
+
+    // -----------------------------------------------------------------------
+    // remove_matching_handle
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn remove_matching_handle_exact_match() {
+        let mut set: HashSet<String> = vec!["e0001".to_string()].into_iter().collect();
+        assert!(remove_matching_handle(&mut set, "e0001"));
+        assert!(set.is_empty());
+    }
+
+    #[test]
+    fn remove_matching_handle_unprefixed_in_xml_but_prefixed_in_set() {
+        // XML has "e0001", set has "_e0001"
+        let mut set: HashSet<String> = vec!["_e0001".to_string()].into_iter().collect();
+        assert!(remove_matching_handle(&mut set, "e0001"));
+        assert!(set.is_empty());
+    }
+
+    #[test]
+    fn remove_matching_handle_prefixed_in_xml_but_unprefixed_in_set() {
+        // XML has "_e0001", set has "e0001"
+        let mut set: HashSet<String> = vec!["e0001".to_string()].into_iter().collect();
+        assert!(remove_matching_handle(&mut set, "_e0001"));
+        assert!(set.is_empty());
+    }
+
+    #[test]
+    fn remove_matching_handle_no_match() {
+        let mut set: HashSet<String> = vec!["e0001".to_string()].into_iter().collect();
+        assert!(!remove_matching_handle(&mut set, "e9999"));
+        assert!(!set.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // underscore_prefix_in_xml
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn underscore_prefix_in_xml() {
+        // Test that an event with Gramps underscore-prefixed handle is matched
+        // against the manifest handle (without underscore).
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database>
+  <events>
+    <event handle="_e0001"><type>Birth</type></event>
+  </events>
+</database>"#;
+        let (input, _dir) = write_temp(xml);
+        let output_dir = tempfile::tempdir().unwrap();
+        let (stats, content) = run_clean(&input, &["e0001"], output_dir.path());
+
+        assert_eq!(stats.events_removed, 1);
+        assert_eq!(stats.events_not_found, 0);
+        assert!(!content.contains("e0001"), "Event should be removed");
     }
 }

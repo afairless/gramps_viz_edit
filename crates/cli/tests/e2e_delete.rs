@@ -688,3 +688,202 @@ fn e2e_delete_gramps_available_guard() {
         eprintln!("gramps_available() = false (Gramps Python libs not found)");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Event cleaning integration tests
+// ---------------------------------------------------------------------------
+
+/// Helper: derive the `-no-events.gramps` path from an input path, matching
+/// the logic in delete.rs::derive_no_events_path.
+fn no_events_path(input: &str) -> String {
+    let stem = if let Some(s) = input.strip_suffix(".gz") {
+        s
+    } else {
+        input
+    };
+    if let Some(dot) = stem.rfind('.') {
+        format!("{}-no-events.gramps", &stem[..dot])
+    } else {
+        format!("{}-no-events.gramps", stem)
+    }
+}
+
+#[test]
+fn e2e_delete_with_event_clean() {
+    // Verify that orphaned events are removed from the -no-events.gramps output.
+    if !gramps_available() {
+        eprintln!("Skipping: Gramps not available");
+        return;
+    }
+
+    let input = temp_path("ec_input.gramps");
+    let selections = temp_path("ec_selections.json");
+    let output = temp_path("ec_output.gramps");
+
+    write_uuid_fixture(&input, UUID_FIXTURE_FAMILY_EVENT);
+    // Delete both people — the event becomes orphaned
+    write_selections(
+        &selections,
+        &[
+            "b0000001-4000-4b3d-8000-000000000001",
+            "b0000002-4000-4b3d-8000-000000000002",
+        ],
+    );
+
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "delete",
+        &input,
+        "--selections",
+        &selections,
+        "--yes",
+        "-o",
+        &output,
+    ]);
+    assert_eq!(code, Some(0), "Delete failed: {}", stderr);
+
+    // Verify -cleaned output has the orphaned event (Gramps kept it)
+    let cleaned_content = std::fs::read_to_string(&output).unwrap();
+    assert!(
+        cleaned_content.contains("e0000001-4000-4b3d-8000-000000000001"),
+        "Orphaned event should survive in -cleaned output"
+    );
+
+    // Verify -no-events output has the event removed
+    let no_events = no_events_path(&input);
+    assert!(
+        std::path::Path::new(&no_events).exists(),
+        "-no-events.gramps file should exist: {}",
+        no_events
+    );
+    let no_events_content = std::fs::read_to_string(&no_events).unwrap();
+    assert!(
+        !no_events_content.contains("e0000001-4000-4b3d-8000-000000000001"),
+        "Orphaned event should be removed from -no-events output"
+    );
+
+    // Verify non-event content is preserved in -no-events
+    // (XML declaration and header should survive)
+    assert!(
+        no_events_content.contains("<?xml"),
+        "XML declaration should be preserved"
+    );
+    assert!(
+        no_events_content.contains("<database"),
+        "Database root element should be preserved"
+    );
+
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&selections);
+    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_file(&no_events);
+}
+
+#[test]
+fn e2e_delete_no_pending_events_noop() {
+    // Verify that when there are no events (and thus no pending events),
+    // the clean step is skipped and no -no-events.gramps file is written.
+    if !gramps_available() {
+        eprintln!("Skipping: Gramps not available");
+        return;
+    }
+
+    let input = temp_path("nope_input.gramps");
+    let selections = temp_path("nope_selections.json");
+    let output = temp_path("nope_output.gramps");
+
+    // UUID_FIXTURE_51 has no events
+    write_uuid_fixture(&input, UUID_FIXTURE_51);
+    write_selections(&selections, &["a5f0c1a2-4000-4b3d-8000-000000000001"]);
+
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "delete",
+        &input,
+        "--selections",
+        &selections,
+        "--yes",
+        "-o",
+        &output,
+    ]);
+    assert_eq!(code, Some(0), "Delete failed: {}", stderr);
+
+    // -cleaned output should exist
+    assert!(
+        std::path::Path::new(&output).exists(),
+        "-cleaned output should exist"
+    );
+
+    // -no-events should NOT exist (no pending events to clean)
+    let no_events = no_events_path(&input);
+    assert!(
+        !std::path::Path::new(&no_events).exists(),
+        "-no-events.gramps should NOT be written when there are no pending events"
+    );
+
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&selections);
+    let _ = std::fs::remove_file(&output);
+}
+
+#[test]
+fn e2e_delete_manifest_re_saved_after_clean() {
+    // Verify that after successful event cleaning, the manifest on disk
+    // has the pending events marked as Deleted.
+    if !gramps_available() {
+        eprintln!("Skipping: Gramps not available");
+        return;
+    }
+
+    let input = temp_path("mrsac_input.gramps");
+    let selections = temp_path("mrsac_selections.json");
+    let output = temp_path("mrsac_output.gramps");
+    let manifest_path = temp_path("mrsac_manifest.json");
+
+    write_uuid_fixture(&input, UUID_FIXTURE_FAMILY_EVENT);
+    write_selections(
+        &selections,
+        &[
+            "b0000001-4000-4b3d-8000-000000000001",
+            "b0000002-4000-4b3d-8000-000000000002",
+        ],
+    );
+
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "delete",
+        &input,
+        "--selections",
+        &selections,
+        "--yes",
+        "-o",
+        &output,
+        "--save-manifest",
+        &manifest_path,
+    ]);
+    assert_eq!(code, Some(0), "Delete failed: {}", stderr);
+
+    // Load the manifest and verify event status
+    let manifest_content = std::fs::read_to_string(&manifest_path).unwrap();
+    let manifest: serde_json::Value = serde_json::from_str(&manifest_content).unwrap();
+
+    // Events plan should exist
+    let events_plan = &manifest["plan"]["events"];
+    let to_delete = &events_plan["to_delete"];
+    assert!(
+        to_delete.as_array().is_some_and(|a| !a.is_empty()),
+        "Events to_delete should not be empty"
+    );
+
+    // All event entries should be 'deleted' (not 'pending')
+    for entry in to_delete.as_array().unwrap() {
+        assert_eq!(
+            entry["status"],
+            "deleted",
+            "Event {} should be marked deleted after clean",
+            entry["handle"]
+        );
+    }
+
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&selections);
+    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_file(&manifest_path);
+}
