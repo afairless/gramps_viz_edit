@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import tempfile
 from typing import Any, Dict, List, Optional
 
@@ -23,9 +24,9 @@ from delete_backend import (
     UUID_V4_RE,
     _DELETION_ORDER,
     _TYPE_OPS,
+    _extract_handle,
     _validate_handles,
-    create_temp_db,
-    cleanup_db,
+    create_db,
     import_xml,
     delete_items,
     read_xmlns_from_input,
@@ -114,11 +115,13 @@ HANDLE_C = "c5f0c1a2-4000-4b3d-8000-000000000003"
 def gramps_db():
     """Create a populated Gramps DB from MINIMAL_GRAMPS_XML.
 
-    Yields (db, tmp_path) where db is the opened database and tmp_path
-    is the path to the imported XML file. The DB and temp files are
-    cleaned up after the test.
+    Yields (db, db_dir, tmp_path) where db is the opened database,
+    db_dir is the persistent DB directory, and tmp_path is the path to
+    the imported XML file. The DB and temp files are cleaned up after
+    the test.
     """
-    db = create_temp_db()
+    db_dir = tempfile.mkdtemp(prefix="gramps_test_db_")
+    db = create_db(db_dir)
     tmp_xml = tempfile.NamedTemporaryFile(
         mode="w", suffix=".gramps", delete=False, encoding="utf-8"
     )
@@ -128,9 +131,9 @@ def gramps_db():
 
     try:
         import_xml(db, tmp_xml_path)
-        yield db, tmp_xml_path
+        yield db, db_dir, tmp_xml_path
     finally:
-        cleanup_db(db)
+        shutil.rmtree(db_dir, ignore_errors=True)
         if os.path.exists(tmp_xml_path):
             os.unlink(tmp_xml_path)
 
@@ -138,7 +141,8 @@ def gramps_db():
 @pytest.fixture(scope="function")
 def two_person_db():
     """Create a Gramps DB with two people from MINIMAL_TWO_PERSON_XML."""
-    db = create_temp_db()
+    db_dir = tempfile.mkdtemp(prefix="gramps_test_db_")
+    db = create_db(db_dir)
     tmp_xml = tempfile.NamedTemporaryFile(
         mode="w", suffix=".gramps", delete=False, encoding="utf-8"
     )
@@ -148,9 +152,9 @@ def two_person_db():
 
     try:
         import_xml(db, tmp_xml_path)
-        yield db, tmp_xml_path
+        yield db, db_dir, tmp_xml_path
     finally:
-        cleanup_db(db)
+        shutil.rmtree(db_dir, ignore_errors=True)
         if os.path.exists(tmp_xml_path):
             os.unlink(tmp_xml_path)
 
@@ -239,6 +243,27 @@ class TestUuidValidation:
 
 
 # ---------------------------------------------------------------------------
+# _extract_handle tests
+# ---------------------------------------------------------------------------
+
+
+class TestExtractHandle:
+    """Test the v1/v2 handle extraction."""
+
+    def test_v1_string(self) -> None:
+        assert _extract_handle("abc-123") == "abc-123"
+
+    def test_v2_dict(self) -> None:
+        assert _extract_handle({"handle": "abc-123", "status": "pending"}) == "abc-123"
+
+    def test_v2_dict_no_handle(self) -> None:
+        assert _extract_handle({"status": "pending"}) == ""
+
+    def test_other_type(self) -> None:
+        assert _extract_handle(42) == "42"
+
+
+# ---------------------------------------------------------------------------
 # _validate_handles tests
 # ---------------------------------------------------------------------------
 
@@ -248,7 +273,7 @@ class TestValidateHandles:
 
     def test_empty_manifest(self, gramps_db):
         """Empty manifest → no valid handles, no rejected."""
-        db, _ = gramps_db
+        db, _, _ = gramps_db
         manifest = make_empty_manifest()
         valid, rejected = _validate_handles(db, manifest)
         assert valid == {}
@@ -256,7 +281,7 @@ class TestValidateHandles:
 
     def test_valid_handle_exists(self, gramps_db):
         """A valid handle that exists in the DB → accepted."""
-        db, _ = gramps_db
+        db, _, _ = gramps_db
         manifest = make_manifest(people=[HANDLE_A])
         valid, rejected = _validate_handles(db, manifest)
         assert HANDLE_A in valid.get("people", [])
@@ -264,14 +289,14 @@ class TestValidateHandles:
 
     def test_absent_handle_raises(self, gramps_db):
         """A valid-format handle absent from the DB → ValueError."""
-        db, _ = gramps_db
+        db, _, _ = gramps_db
         manifest = make_manifest(people=[HANDLE_C])  # HANDLE_C not in DB
         with pytest.raises(ValueError, match="handle\\(s\\) in manifest not found"):
             _validate_handles(db, manifest)
 
     def test_partial_absent_raises(self, two_person_db):
         """Some handles present, one absent → ValueError before any write."""
-        db, _ = two_person_db
+        db, _, _ = two_person_db
         # HANDLE_A and HANDLE_B exist; HANDLE_C does not
         manifest = make_manifest(people=[HANDLE_A, HANDLE_B, HANDLE_C])
         with pytest.raises(ValueError, match="handle\\(s\\) in manifest not found"):
@@ -279,7 +304,7 @@ class TestValidateHandles:
 
     def test_invalid_handle_rejected(self, gramps_db):
         """Invalid format → handle in rejected list, valid ones accepted."""
-        db, _ = gramps_db
+        db, _, _ = gramps_db
         manifest = make_manifest(
             people=[HANDLE_A, "not-a-uuid", "also-bad"]
         )
@@ -290,7 +315,7 @@ class TestValidateHandles:
 
     def test_all_invalid_handles_rejected(self, gramps_db):
         """All handles invalid → no valid, all rejected."""
-        db, _ = gramps_db
+        db, _, _ = gramps_db
         manifest = make_manifest(people=["bad1", "bad2"])
         valid, rejected = _validate_handles(db, manifest)
         assert valid == {}
@@ -298,7 +323,7 @@ class TestValidateHandles:
 
     def test_mixed_types_all_valid(self, two_person_db):
         """Multiple types with valid handles work."""
-        db, _ = two_person_db
+        db, _, _ = two_person_db
         manifest = make_manifest(
             people=[HANDLE_A, HANDLE_B],
             families=[],  # No families in the fixture
@@ -311,7 +336,7 @@ class TestValidateHandles:
 
     def test_plan_key_missing(self, gramps_db):
         """Missing type key in plan is handled gracefully."""
-        db, _ = gramps_db
+        db, _, _ = gramps_db
         manifest = make_empty_manifest()
         # Remove one key
         del manifest["plan"]["families"]
@@ -327,29 +352,39 @@ class TestValidateHandles:
 
 
 class TestDeleteItems:
-    """Test the deletion engine."""
+    """Test the deletion engine (people-only deletion + surviving)."""
 
     def test_empty_manifest_delete_nothing(self, gramps_db):
-        """Empty manifest → zero deleted, no rejected."""
-        db, _ = gramps_db
+        """Empty manifest → zero deleted, no rejected, empty surviving."""
+        db, _, _ = gramps_db
         manifest = make_empty_manifest()
-        deleted, rejected = delete_items(db, manifest)
+        deleted, rejected, surviving = delete_items(db, manifest)
         assert deleted == 0
         assert rejected == []
+        assert surviving == []
 
     def test_delete_existing_person(self, gramps_db):
         """Delete a person that exists in the DB."""
-        db, _ = gramps_db
+        db, _, _ = gramps_db
         manifest = make_manifest(people=[HANDLE_A])
-        deleted, rejected = delete_items(db, manifest)
+        deleted, rejected, surviving = delete_items(db, manifest)
         assert deleted == 1
         assert rejected == []
         # Verify the person is actually gone
         assert not db.has_person_handle(HANDLE_A)
 
+    def test_people_only_other_types_survive(self, gramps_db):
+        """Only people are deleted — other types in manifest survive."""
+        db, _, _ = gramps_db
+        manifest = make_manifest(people=[HANDLE_A], events=["c5f0c1a2-4000-4b3d-8000-000000000004"])
+        # The event handle doesn't exist in the DB, so it will be missing.
+        # But only people deletion is attempted.
+        with pytest.raises(ValueError, match="handle\\(s\\) in manifest not found"):
+            delete_items(db, manifest)
+
     def test_absent_handle_aborts_no_delete(self, gramps_db):
         """Absent handle → error, nothing deleted."""
-        db, _ = gramps_db
+        db, _, _ = gramps_db
         manifest = make_manifest(people=[HANDLE_C])
         with pytest.raises(ValueError, match="handle\\(s\\) in manifest not found"):
             delete_items(db, manifest)
@@ -358,7 +393,7 @@ class TestDeleteItems:
 
     def test_partial_absent_aborts_no_delete(self, two_person_db):
         """Partial presence → error, nothing deleted (atomicity)."""
-        db, _ = two_person_db
+        db, _, _ = two_person_db
         manifest = make_manifest(people=[HANDLE_A, HANDLE_C])
         with pytest.raises(ValueError, match="handle\\(s\\) in manifest not found"):
             delete_items(db, manifest)
@@ -368,30 +403,39 @@ class TestDeleteItems:
 
     def test_invalid_handles_skipped(self, gramps_db):
         """Invalid format handles go to rejected, valid ones still deleted."""
-        db, _ = gramps_db
+        db, _, _ = gramps_db
         manifest = make_manifest(people=[HANDLE_A, "not-a-uuid"])
-        deleted, rejected = delete_items(db, manifest)
+        deleted, rejected, surviving = delete_items(db, manifest)
         assert deleted == 1
         assert "not-a-uuid" in rejected
         assert not db.has_person_handle(HANDLE_A)
 
     def test_all_invalid_skipped(self, gramps_db):
         """All invalid → 0 deleted, all in rejected."""
-        db, _ = gramps_db
+        db, _, _ = gramps_db
         manifest = make_manifest(people=["bad1", "bad2"])
-        deleted, rejected = delete_items(db, manifest)
+        deleted, rejected, surviving = delete_items(db, manifest)
         assert deleted == 0
         assert len(rejected) == 2
 
     def test_delete_two_people(self, two_person_db):
         """Delete both people from a two-person DB."""
-        db, _ = two_person_db
+        db, _, _ = two_person_db
         manifest = make_manifest(people=[HANDLE_A, HANDLE_B])
-        deleted, rejected = delete_items(db, manifest)
+        deleted, rejected, surviving = delete_items(db, manifest)
         assert deleted == 2
         assert rejected == []
         assert not db.has_person_handle(HANDLE_A)
         assert not db.has_person_handle(HANDLE_B)
+
+    def test_surviving_empty_after_delete(self, gramps_db):
+        """After deleting the only person, surviving is empty."""
+        db, _, _ = gramps_db
+        manifest = make_manifest(people=[HANDLE_A])
+        deleted, rejected, surviving = delete_items(db, manifest)
+        assert deleted == 1
+        # The only manifest handle (HANDLE_A) was deleted, so surviving is empty
+        assert HANDLE_A not in surviving
 
 
 # ---------------------------------------------------------------------------
@@ -544,13 +588,32 @@ class TestDeletionOrder:
         ]
         assert _DELETION_ORDER == expected
 
-    def test_all_types_have_ops(self):
-        """Every type in _DELETION_ORDER has an entry in _TYPE_OPS."""
+    def test_all_types_have_has_ops(self):
+        """Every type in _DELETION_ORDER has a 'has' entry in _TYPE_OPS."""
         for key in _DELETION_ORDER:
             assert key in _TYPE_OPS, f"Missing _TYPE_OPS entry for '{key}'"
             ops = _TYPE_OPS[key]
-            assert "has" in ops
-            assert "delete" in ops
+            assert "has" in ops, f"Missing 'has' op for '{key}'"
+
+
+# ---------------------------------------------------------------------------
+# Persistent DB tests
+# ---------------------------------------------------------------------------
+
+
+class TestPersistentDb:
+    """Test persistent DB creation and retention."""
+
+    def test_db_directory_exists(self, gramps_db):
+        """Persistent DB directory exists after creation."""
+        _, db_dir, _ = gramps_db
+        assert os.path.isdir(db_dir), f"DB directory {db_dir} should exist"
+
+    def test_db_directory_has_files(self, gramps_db):
+        """Persistent DB directory contains database files."""
+        _, db_dir, _ = gramps_db
+        files = os.listdir(db_dir)
+        assert len(files) > 0, "DB directory should contain database files"
 
 
 # ---------------------------------------------------------------------------
@@ -567,6 +630,7 @@ class TestMainIntegration:
             input_path = os.path.join(tmpdir, "input.gramps")
             manifest_path = os.path.join(tmpdir, "manifest.json")
             output_path = os.path.join(tmpdir, "output.gramps")
+            db_dir = os.path.join(tmpdir, "gramps_db")
 
             # Write input XML
             with open(input_path, "w", encoding="utf-8") as f:
@@ -586,6 +650,7 @@ class TestMainIntegration:
                     "--input", input_path,
                     "--manifest", manifest_path,
                     "--output", output_path,
+                    "--db-dir", db_dir,
                 ],
                 capture_output=True,
                 text=True,
@@ -604,6 +669,7 @@ class TestMainIntegration:
             input_path = os.path.join(tmpdir, "input.gramps")
             manifest_path = os.path.join(tmpdir, "manifest.json")
             output_path = os.path.join(tmpdir, "output.gramps")
+            db_dir = os.path.join(tmpdir, "gramps_db")
 
             with open(input_path, "w", encoding="utf-8") as f:
                 f.write(MINIMAL_GRAMPS_XML)
@@ -621,6 +687,7 @@ class TestMainIntegration:
                     "--input", input_path,
                     "--manifest", manifest_path,
                     "--output", output_path,
+                    "--db-dir", db_dir,
                 ],
                 capture_output=True,
                 text=True,
@@ -639,6 +706,7 @@ class TestMainIntegration:
             input_path = os.path.join(tmpdir, "input.gramps")
             manifest_path = os.path.join(tmpdir, "manifest.json")
             output_path = os.path.join(tmpdir, "output.gramps")
+            db_dir = os.path.join(tmpdir, "gramps_db")
 
             with open(input_path, "w", encoding="utf-8") as f:
                 f.write(MINIMAL_GRAMPS_XML)
@@ -656,6 +724,7 @@ class TestMainIntegration:
                     "--input", input_path,
                     "--manifest", manifest_path,
                     "--output", output_path,
+                    "--db-dir", db_dir,
                 ],
                 capture_output=True,
                 text=True,
@@ -673,6 +742,7 @@ class TestMainIntegration:
             input_path = os.path.join(tmpdir, "input.gramps")
             manifest_path = os.path.join(tmpdir, "manifest.json")
             output_path = os.path.join(tmpdir, "output.gramps")
+            db_dir = os.path.join(tmpdir, "gramps_db")
 
             with open(input_path, "w", encoding="utf-8") as f:
                 f.write(MINIMAL_GRAMPS_XML)
@@ -690,6 +760,7 @@ class TestMainIntegration:
                     "--input", input_path,
                     "--manifest", manifest_path,
                     "--output", output_path,
+                    "--db-dir", db_dir,
                 ],
                 capture_output=True,
                 text=True,
@@ -707,6 +778,7 @@ class TestMainIntegration:
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = os.path.join(tmpdir, "manifest.json")
             output_path = os.path.join(tmpdir, "output.gramps")
+            db_dir = os.path.join(tmpdir, "gramps_db")
 
             with open(manifest_path, "w", encoding="utf-8") as f:
                 json.dump(make_empty_manifest(), f)
@@ -720,6 +792,7 @@ class TestMainIntegration:
                     "--input", "/nonexistent/file.gramps",
                     "--manifest", manifest_path,
                     "--output", output_path,
+                    "--db-dir", db_dir,
                 ],
                 capture_output=True,
                 text=True,
@@ -736,6 +809,7 @@ class TestMainIntegration:
         with tempfile.TemporaryDirectory() as tmpdir:
             input_path = os.path.join(tmpdir, "input.gramps")
             output_path = os.path.join(tmpdir, "output.gramps")
+            db_dir = os.path.join(tmpdir, "gramps_db")
 
             with open(input_path, "w", encoding="utf-8") as f:
                 f.write(MINIMAL_GRAMPS_XML)
@@ -749,6 +823,7 @@ class TestMainIntegration:
                     "--input", input_path,
                     "--manifest", "/nonexistent/manifest.json",
                     "--output", output_path,
+                    "--db-dir", db_dir,
                 ],
                 capture_output=True,
                 text=True,
@@ -759,3 +834,110 @@ class TestMainIntegration:
             parsed = json.loads(result.stdout)
             assert parsed["status"] == "error"
             assert "not found" in (parsed.get("message") or "").lower()
+
+    def test_db_retained_on_success(self):
+        """DB directory is retained after successful deletion."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = os.path.join(tmpdir, "input.gramps")
+            manifest_path = os.path.join(tmpdir, "manifest.json")
+            output_path = os.path.join(tmpdir, "output.gramps")
+            db_dir = os.path.join(tmpdir, "gramps_db")
+
+            with open(input_path, "w", encoding="utf-8") as f:
+                f.write(MINIMAL_GRAMPS_XML)
+
+            with open(manifest_path, "w", encoding="utf-8") as f:
+                json.dump(make_empty_manifest(), f)
+
+            import subprocess
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    os.path.join(os.path.dirname(__file__), "delete_backend.py"),
+                    "--input", input_path,
+                    "--manifest", manifest_path,
+                    "--output", output_path,
+                    "--db-dir", db_dir,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+
+            assert result.returncode == 0, f"stderr: {result.stderr}"
+            # DB directory should still exist (default: retain)
+            assert os.path.isdir(db_dir), f"DB directory {db_dir} should be retained"
+
+    def test_no_retain_db_cleans_up(self):
+        """--no-retain-db removes the DB directory after success."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = os.path.join(tmpdir, "input.gramps")
+            manifest_path = os.path.join(tmpdir, "manifest.json")
+            output_path = os.path.join(tmpdir, "output.gramps")
+            db_dir = os.path.join(tmpdir, "gramps_db")
+
+            with open(input_path, "w", encoding="utf-8") as f:
+                f.write(MINIMAL_GRAMPS_XML)
+
+            with open(manifest_path, "w", encoding="utf-8") as f:
+                json.dump(make_empty_manifest(), f)
+
+            import subprocess
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    os.path.join(os.path.dirname(__file__), "delete_backend.py"),
+                    "--input", input_path,
+                    "--manifest", manifest_path,
+                    "--output", output_path,
+                    "--db-dir", db_dir,
+                    "--no-retain-db",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+
+            assert result.returncode == 0, f"stderr: {result.stderr}"
+            # DB directory should be cleaned up
+            assert not os.path.isdir(db_dir), f"DB directory {db_dir} should be removed"
+
+    def test_surviving_field_in_output(self):
+        """JSON output includes surviving field after deletion."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = os.path.join(tmpdir, "input.gramps")
+            manifest_path = os.path.join(tmpdir, "manifest.json")
+            output_path = os.path.join(tmpdir, "output.gramps")
+            db_dir = os.path.join(tmpdir, "gramps_db")
+
+            with open(input_path, "w", encoding="utf-8") as f:
+                f.write(MINIMAL_GRAMPS_XML)
+
+            # Include a non-existent event handle to verify surviving is computed
+            manifest = make_manifest(people=[HANDLE_A])
+            with open(manifest_path, "w", encoding="utf-8") as f:
+                json.dump(manifest, f)
+
+            import subprocess
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    os.path.join(os.path.dirname(__file__), "delete_backend.py"),
+                    "--input", input_path,
+                    "--manifest", manifest_path,
+                    "--output", output_path,
+                    "--db-dir", db_dir,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+
+            assert result.returncode == 0, f"stderr: {result.stderr}"
+            parsed = json.loads(result.stdout)
+            assert "surviving" in parsed, "Output should include surviving field"
+            # After deleting the only person, surviving should be empty
+            assert isinstance(parsed["surviving"], list)

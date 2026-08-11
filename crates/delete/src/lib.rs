@@ -7,6 +7,7 @@
 
 pub mod cascade;
 pub mod manifest;
+pub mod reconcile;
 pub mod review;
 pub mod types;
 
@@ -15,7 +16,7 @@ pub use manifest::{
     build_manifest, check_source_file, load_manifest, load_manifest_v1, save_manifest,
     validate_manifest, ManifestError,
 };
-pub use review::{run_interactive_review, ReviewAction, ReviewResult};
+pub use reconcile::{reconcile, ReconciliationError};
 pub use types::{
     DeleteCandidate, DeleteManifest, DeletePlan, NodeKindLabel, ReviewState, TypePlan,
 };

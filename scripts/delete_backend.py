@@ -9,7 +9,9 @@ Usage:
     python3 delete_backend.py \\
         --input in.gramps \\
         --manifest plan.json \\
-        --output out.gramps
+        --output out.gramps \\
+        --db-dir /path/to/db/ \\
+        [--no-retain-db]
 
 This script requires Gramps 5.1/5.2 Python libraries to be importable.
 """
@@ -70,16 +72,14 @@ def select_backend_plugin_id() -> str:
         return ""  # unreachable
 
 
-def create_temp_db() -> Any:
-    """Create an empty, initialized Gramps database in a temporary directory.
+def create_db(db_dir: str) -> Any:
+    """Create an empty, initialized Gramps database at the specified path.
+
+    If the directory already exists, it is removed first (with a warning
+    to stderr) to avoid stale data from a previous run.
 
     Returns the database object. The caller is responsible for cleaning
-    up the temporary directory.
-
-    The init sequence (validated against Gramps 5.1.6):
-    1. make_database(backend_plugin_id) → uninitialized DB
-    2. db.load(tmpdir)  — creates new DB files if person.db doesn't exist,
-       or opens an existing DB. This is the standard Gramps init path.
+    up the directory if desired.
     """
     from gramps.gen.db.utils import make_database
 
@@ -92,18 +92,30 @@ def create_temp_db() -> Any:
         )
         sys.exit(1)
 
-    # Create a temporary directory for the Berkeley DB files.
-    tmpdir = tempfile.mkdtemp(prefix="gramps_delete_")
+    # If the directory already exists, remove it first (with warning).
+    if os.path.isdir(db_dir):
+        sys.stderr.write(
+            f"WARNING: Database directory '{db_dir}' already exists. "
+            f"Removing and creating fresh.\n"
+        )
+        try:
+            shutil.rmtree(db_dir, ignore_errors=True)
+        except Exception:
+            pass
 
     try:
-        db.load(tmpdir)
+        os.makedirs(db_dir, exist_ok=True)
+    except OSError as exc:
+        sys.stderr.write(f"ERROR: Failed to create database directory: {exc}\n")
+        sys.exit(1)
+
+    try:
+        db.load(db_dir)
     except Exception as exc:
-        shutil.rmtree(tmpdir, ignore_errors=True)
+        shutil.rmtree(db_dir, ignore_errors=True)
         sys.stderr.write(f"ERROR: Failed to initialise database: {exc}\n")
         sys.exit(1)
 
-    # Store the temp dir path on the db object for cleanup.
-    db._temp_dir = tmpdir
     return db
 
 
@@ -141,29 +153,14 @@ def import_xml(db: Any, path: str) -> None:
         importxml.importData(db, path, User())
 
 
-def cleanup_db(db: Any) -> None:
-    """Remove the temporary Berkeley DB directory.
-
-    Uses shutil.rmtree with ignore_errors=True because Berkeley DB may
-    hold file locks on some platforms, preventing clean removal.
-    """
-    temp_dir: Optional[str] = getattr(db, "_temp_dir", None)
-    if temp_dir and os.path.isdir(temp_dir):
-        try:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-        except Exception:
-            # Berkeley DB may hold file locks; suppress cleanup errors
-            # so they don't mask the actual operation result.
-            pass
-
-
 # ---------------------------------------------------------------------------
 # Deletion engine
 # ---------------------------------------------------------------------------
 
 # Deletion order respects the dependency chain. People must go first because
 # delete_person_from_database handles family ref cleanup internally. All other
-# types are independent of each other but must follow people.
+# types are no longer explicitly deleted by this script, but the order is
+# retained for the surviving report's has_*_handle checks.
 _DELETION_ORDER: List[str] = [
     "people",
     "families",
@@ -177,18 +174,20 @@ _DELETION_ORDER: List[str] = [
     "tags",
 ]
 
-# Map manifest type keys to Gramps DB existence-check and delete methods.
+# Map manifest type keys to Gramps DB existence-check methods.
+# The 'delete' key is only used for "people" — all other types are
+# advisory-only and are not explicitly deleted.
 _TYPE_OPS: Dict[str, Dict[str, str]] = {
     "people":       {"has": "has_person_handle",     "delete": "delete_person_from_database", "get": "get_person_from_handle"},
-    "families":     {"has": "has_family_handle",     "delete": "remove_family"},
-    "events":       {"has": "has_event_handle",      "delete": "remove_event"},
-    "notes":        {"has": "has_note_handle",       "delete": "remove_note"},
-    "places":       {"has": "has_place_handle",      "delete": "remove_place"},
-    "sources":      {"has": "has_source_handle",     "delete": "remove_source"},
-    "citations":    {"has": "has_citation_handle",   "delete": "remove_citation"},
-    "repositories": {"has": "has_repository_handle", "delete": "remove_repository"},
-    "media":        {"has": "has_media_handle",      "delete": "remove_media"},
-    "tags":         {"has": "has_tag_handle",        "delete": "remove_tag"},
+    "families":     {"has": "has_family_handle"},
+    "events":       {"has": "has_event_handle"},
+    "notes":        {"has": "has_note_handle"},
+    "places":       {"has": "has_place_handle"},
+    "sources":      {"has": "has_source_handle"},
+    "citations":    {"has": "has_citation_handle"},
+    "repositories": {"has": "has_repository_handle"},
+    "media":        {"has": "has_media_handle"},
+    "tags":         {"has": "has_tag_handle"},
 }
 
 
@@ -260,51 +259,73 @@ def _validate_handles(
     return valid, rejected
 
 
-def delete_items(db: Any, manifest: Dict[str, Any]) -> tuple[int, List[str]]:
-    """Delete items from the database per the manifest, in dependency order.
+def delete_items(db: Any, manifest: Dict[str, Any]) -> tuple[int, List[str], List[str]]:
+    """Delete ONLY people from the database per the manifest.
 
-    All deletions run inside a single DbTxn for atomicity. Handles are
-    validated before any deletion begins.
+    Gramps' delete_person_from_database handles family ref cleanup and
+    family deletion internally — we don't touch families, events, or
+    any other type directly.
 
-    Returns (deleted_count, rejected):
-    - deleted_count: total number of handles successfully deleted.
+    Returns (deleted_count, rejected, surviving):
+    - deleted_count: number of people successfully deleted.
     - rejected: handles with invalid UUID v4 format (skipped).
+    - surviving: handles from all manifest entries that still exist in the
+      DB AFTER deletion (for reconciliation with Rust).
     """
     from gramps.gen.db import DbTxn
 
     # Pre-deletion handle validation.
     valid, rejected = _validate_handles(db, manifest)
 
+    # Collect all handles from the manifest for surviving check.
+    all_manifest_handles: List[str] = []
+    plan: Dict[str, Any] = manifest.get("plan", {})
+    for type_key in _DELETION_ORDER:
+        type_plan = plan.get(type_key)
+        if type_plan is None:
+            continue
+        to_delete: List[Any] = type_plan.get("to_delete", [])
+        for entry in to_delete:
+            handle = _extract_handle(entry)
+            if UUID_V4_RE.match(handle):
+                all_manifest_handles.append(handle)
+
     if not valid:
-        return 0, rejected
+        return 0, rejected, []
 
     deleted_count = 0
 
     with DbTxn("gramps-gen delete", db) as trans:
-        for type_key in _DELETION_ORDER:
-            handles = valid.get(type_key)
-            if not handles:
-                continue
+        # Only delete people — all other types are advisory-only.
+        people_ops = _TYPE_OPS.get("people")
+        if people_ops is None:
+            return deleted_count, rejected, []
+        people_handles = valid.get("people", [])
+        delete_fn_name = people_ops.get("delete")
+        get_fn_name = people_ops.get("get")
+        if delete_fn_name is None or get_fn_name is None:
+            return deleted_count, rejected, []
+        delete_fn = getattr(db, delete_fn_name)
+        get_fn = getattr(db, get_fn_name)
 
+        for handle in people_handles:
+            person = get_fn(handle)
+            delete_fn(person, trans)
+            deleted_count += 1
+
+    # Compute surviving handles after deletion.
+    surviving: List[str] = []
+    for handle in all_manifest_handles:
+        for type_key in _DELETION_ORDER:
             ops = _TYPE_OPS.get(type_key)
             if ops is None:
                 continue
+            has_fn = getattr(db, ops["has"])
+            if has_fn(handle):
+                surviving.append(handle)
+                break
 
-            delete_fn = getattr(db, ops["delete"])
-
-            for handle in handles:
-                if type_key == "people":
-                    # delete_person_from_database takes a Person object,
-                    # not a handle.
-                    get_fn = getattr(db, ops["get"])
-                    person = get_fn(handle)
-                    delete_fn(person, trans)
-                else:
-                    delete_fn(handle, trans)
-
-                deleted_count += 1
-
-    return deleted_count, rejected
+    return deleted_count, rejected, surviving
 
 
 # ---------------------------------------------------------------------------
@@ -363,13 +384,14 @@ def export_xml(db: Any, path: str) -> None:
 # Smoke test
 # ---------------------------------------------------------------------------
 def _smoke_test() -> None:
-    """Minimal smoke test: create DB, import empty XML, clean up."""
+    """Minimal smoke test: create persistent DB, import empty XML, clean up."""
     import time
 
-    print("Smoke test: creating temp DB...", file=sys.stderr)
-    db = create_temp_db()
+    tmpdir = tempfile.mkdtemp(prefix="gramps_smoke_")
+    print(f"Smoke test: creating persistent DB at {tmpdir}...", file=sys.stderr)
+    db = create_db(tmpdir)
     try:
-        print(f"  DB dir: {db._temp_dir}", file=sys.stderr)
+        print(f"  DB dir: {tmpdir}", file=sys.stderr)
         print(f"  Version: {detect_version()}", file=sys.stderr)
 
         # Create a minimal valid Gramps XML for import testing
@@ -411,7 +433,7 @@ def _smoke_test() -> None:
         finally:
             os.unlink(tmp_path)
     finally:
-        cleanup_db(db)
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def main() -> None:
@@ -434,6 +456,17 @@ def main() -> None:
         required=True,
         help="Output .gramps file",
     )
+    parser.add_argument(
+        "--db-dir",
+        required=True,
+        help="Persistent Gramps database directory",
+    )
+    parser.add_argument(
+        "--no-retain-db",
+        action="store_true",
+        default=False,
+        help="Remove the Gramps database directory after successful export",
+    )
 
     args = parser.parse_args()
 
@@ -445,6 +478,7 @@ def main() -> None:
             "output": None,
             "deleted": None,
             "rejected": [],
+            "surviving": [],
         }
         json.dump(result, sys.stdout)
         sys.stdout.flush()
@@ -457,6 +491,7 @@ def main() -> None:
             "output": None,
             "deleted": None,
             "rejected": [],
+            "surviving": [],
         }
         json.dump(result, sys.stdout)
         sys.stdout.flush()
@@ -473,23 +508,23 @@ def main() -> None:
             "output": None,
             "deleted": None,
             "rejected": [],
+            "surviving": [],
         }
         json.dump(result, sys.stdout)
         sys.stdout.flush()
         sys.exit(1)
 
     db = None
+    db_dir = args.db_dir
     try:
-        # 1. Create temp DB and import the input file.
-        db = create_temp_db()
+        # 1. Create persistent DB and import the input file.
+        db = create_db(db_dir)
         import_xml(db, args.input)
 
-        # 2. Delete items per the manifest.
-        deleted_count, rejected = delete_items(db, manifest)
+        # 2. Delete items per the manifest (people only).
+        deleted_count, rejected, surviving = delete_items(db, manifest)
 
         # 3. Export to a temp file, then atomically rename.
-        #    (Deletion is already atomic via DbTxn; export is
-        #    separate, so we use os.replace for atomic output.)
         tmp_output = args.output + ".tmp"
         try:
             export_xml(db, tmp_output)
@@ -504,9 +539,15 @@ def main() -> None:
             "deleted": deleted_count,
             "message": None,
             "rejected": rejected,
+            "surviving": surviving,
         }
         json.dump(result, sys.stdout)
         sys.stdout.flush()
+
+        # 4. Clean up DB directory if --no-retain-db was specified.
+        if args.no_retain_db:
+            if os.path.isdir(db_dir):
+                shutil.rmtree(db_dir, ignore_errors=True)
 
     except ValueError as exc:
         # Handle validation errors (missing handles, etc.)
@@ -516,6 +557,7 @@ def main() -> None:
             "output": None,
             "deleted": None,
             "rejected": [],
+            "surviving": [],
         }
         json.dump(result, sys.stdout)
         sys.stdout.flush()
@@ -527,13 +569,15 @@ def main() -> None:
             "output": None,
             "deleted": None,
             "rejected": [],
+            "surviving": [],
         }
         json.dump(result, sys.stdout)
         sys.stdout.flush()
         sys.exit(1)
     finally:
-        if db is not None:
-            cleanup_db(db)
+        # On error/exception, the DB directory is always retained for inspection.
+        # The --no-retain-db cleanup only happens on success (above).
+        pass
 
 
 if __name__ == "__main__":
