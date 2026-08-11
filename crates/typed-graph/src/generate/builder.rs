@@ -42,6 +42,7 @@ use crate::RepositoryData;
 use crate::SourceData;
 use crate::Surname;
 use crate::TagData;
+use crate::generate::generate_handle;
 
 // ---------------------------------------------------------------------------
 // BuilderError
@@ -166,7 +167,7 @@ impl<'a> GraphBuilder<'a> {
         }
     }
 
-    /// Start building a [`Person`](Node::Person) node with an auto-generated UUID v4 handle.
+    /// Start building a [`Person`](Node::Person) node with an auto-generated Gramps-compatible handle.
     ///
     /// # Example
     ///
@@ -182,7 +183,7 @@ impl<'a> GraphBuilder<'a> {
     ///     .unwrap();
     /// ```
     pub fn add_person_auto(&mut self) -> PersonBuilder<'a, '_> {
-        let handle = uuid::Uuid::new_v4().to_string();
+        let handle = generate_handle(&mut rand::thread_rng());
         PersonBuilder {
             builder: self,
             data: PersonData {
@@ -218,7 +219,7 @@ impl<'a> GraphBuilder<'a> {
         }
     }
 
-    /// Start building a [`Family`](Node::Family) node with an auto-generated UUID v4 handle.
+    /// Start building a [`Family`](Node::Family) node with an auto-generated Gramps-compatible handle.
     ///
     /// # Example
     ///
@@ -231,7 +232,7 @@ impl<'a> GraphBuilder<'a> {
     /// let f = builder.add_family_auto().build().unwrap();
     /// ```
     pub fn add_family_auto(&mut self) -> FamilyBuilder<'a, '_> {
-        let handle = uuid::Uuid::new_v4().to_string();
+        let handle = generate_handle(&mut rand::thread_rng());
         FamilyBuilder {
             builder: self,
             data: FamilyData {
@@ -525,7 +526,7 @@ impl<'a, 'b> PersonBuilder<'a, 'b> {
 
         // 2. Create birth event if date was set
         if let Some(date) = self.birth_date {
-            let event_handle = uuid::Uuid::new_v4().to_string();
+            let event_handle = generate_handle(&mut rand::thread_rng());
             let event = EventData {
                 handle: event_handle.clone(),
                 event_type: crate::into_event_type_field(EventType::Birth),
@@ -553,7 +554,7 @@ impl<'a, 'b> PersonBuilder<'a, 'b> {
 
         // 3. Create death event if date was set
         if let Some(date) = self.death_date {
-            let event_handle = uuid::Uuid::new_v4().to_string();
+            let event_handle = generate_handle(&mut rand::thread_rng());
             let event = EventData {
                 handle: event_handle.clone(),
                 event_type: crate::into_event_type_field(EventType::Death),
@@ -774,7 +775,7 @@ impl<'a, 'b> FamilyBuilder<'a, 'b> {
 
         // 5. Create marriage event if date was set
         if let Some(date) = self.marriage_date {
-            let event_handle = uuid::Uuid::new_v4().to_string();
+            let event_handle = generate_handle(&mut rand::thread_rng());
             let event = EventData {
                 handle: event_handle.clone(),
                 event_type: crate::into_event_type_field(EventType::Marriage),
