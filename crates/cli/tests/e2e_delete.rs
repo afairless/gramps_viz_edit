@@ -205,6 +205,110 @@ const UUID_FIXTURE_51: &str = r###"<?xml version="1.0" encoding="UTF-8"?>
 </database>
 "###;
 
+/// Minimal Gramps 5.1 XML fixture with two people in a family and an event.
+const UUID_FIXTURE_FAMILY_EVENT: &str = r###"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE database PUBLIC "-//Gramps//DTD Gramps XML 1.7.1//EN"
+"http://gramps-project.org/xml/1.7.1/grampsxml.dtd">
+<database xmlns="http://gramps-project.org/xml/1.7.1/">
+  <header>
+    <created date="2025-01-15" version="5.1.6"/>
+    <researcher/>
+  </header>
+  <people>
+    <person handle="b0000001-4000-4b3d-8000-000000000001" id="I0001">
+      <gender>1</gender>
+      <name><first>John</first><surname>Doe</surname></name>
+      <eventref hlink="e0000001-4000-4b3d-8000-000000000001" role="Primary"/>
+    </person>
+    <person handle="b0000002-4000-4b3d-8000-000000000002" id="I0002">
+      <gender>2</gender>
+      <name><first>Jane</first><surname>Doe</surname></name>
+    </person>
+  </people>
+  <families>
+    <family handle="f0000001-4000-4b3d-8000-000000000001">
+      <father hlink="b0000001-4000-4b3d-8000-000000000001"/>
+      <mother hlink="b0000002-4000-4b3d-8000-000000000002"/>
+    </family>
+  </families>
+  <events>
+    <event handle="e0000001-4000-4b3d-8000-000000000001" id="E0001">
+      <type>Birth</type>
+      <dateval val="1980-01-15"/>
+    </event>
+  </events>
+</database>
+"###;
+
+/// Write a v1 manifest JSON file (flat string format) for testing.
+fn write_v1_manifest(path: &str, input_file: &str, handles: &[&str]) {
+    let to_delete: Vec<String> = handles
+        .iter()
+        .map(|h| format!("\"{}\"", h))
+        .collect();
+    let json = format!(
+        r#"{{
+  "version": 1,
+  "source_file": "{}",
+  "created_at": "2025-01-15T10:30:00Z",
+  "seed_people": [{}],
+  "plan": {{
+    "people": {{
+      "to_delete": [{}],
+      "kept": []
+    }}
+  }}
+}}"#,
+        input_file,
+        to_delete.join(",\n    "),
+        to_delete.join(",\n        ")
+    );
+    let mut file = std::fs::File::create(path).unwrap();
+    file.write_all(json.as_bytes()).unwrap();
+}
+
+/// Write a v2 reconciled manifest JSON file for testing.
+/// `deleted` handles are marked Deleted, `pending` handles are marked Pending.
+fn write_v2_reconciled_manifest(
+    path: &str,
+    input_file: &str,
+    deleted: &[&str],
+    pending: &[&str],
+) {
+    let mut entries: Vec<String> = Vec::new();
+    for h in deleted {
+        entries.push(format!(
+            r#"{{"handle":"{}","status":"deleted"}}"#,
+            h
+        ));
+    }
+    for h in pending {
+        entries.push(format!(
+            r#"{{"handle":"{}","status":"pending"}}"#,
+            h
+        ));
+    }
+    let json = format!(
+        r#"{{
+  "version": 2,
+  "source_file": "{}",
+  "created_at": "2025-01-15T10:30:00Z",
+  "deletion_mode": "people_only",
+  "seed_people": [],
+  "plan": {{
+    "people": {{
+      "to_delete": [{}],
+      "kept": []
+    }}
+  }}
+}}"#,
+        input_file,
+        entries.join(",\n        ")
+    );
+    let mut file = std::fs::File::create(path).unwrap();
+    file.write_all(json.as_bytes()).unwrap();
+}
+
 #[test]
 fn e2e_delete_gramps_python_roundtrip() {
     // This test requires Gramps to be installed. Skip gracefully if not.
@@ -282,6 +386,290 @@ fn e2e_delete_gramps_python_roundtrip() {
 
     let _ = std::fs::remove_file(&input);
     let _ = std::fs::remove_file(&selections);
+    let _ = std::fs::remove_file(&output);
+}
+
+#[test]
+fn e2e_delete_manifest_v2_reconciliation() {
+    // Verify manifest correctly marks deleted/pending after reconciliation.
+    if !gramps_available() {
+        eprintln!("Skipping: Gramps not available");
+        return;
+    }
+
+    let input = temp_path("recon_input.gramps");
+    let selections = temp_path("recon_selections.json");
+    let output = temp_path("recon_output.gramps");
+    let manifest_path = temp_path("recon_manifest.json");
+
+    write_uuid_fixture(&input, UUID_FIXTURE_51);
+    write_selections(&selections, &["a5f0c1a2-4000-4b3d-8000-000000000001"]);
+
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "delete",
+        &input,
+        "--selections",
+        &selections,
+        "--yes",
+        "-o",
+        &output,
+        "--save-manifest",
+        &manifest_path,
+    ]);
+    assert_eq!(code, Some(0), "Delete failed: {}", stderr);
+
+    // Load the manifest and verify reconciliation.
+    let manifest_content = std::fs::read_to_string(&manifest_path).unwrap();
+    let manifest: serde_json::Value = serde_json::from_str(&manifest_content).unwrap();
+    assert_eq!(manifest["version"], 2);
+
+    // The person should be marked as deleted by Gramps.
+    let people = &manifest["plan"]["people"];
+    let to_delete = &people["to_delete"];
+    assert_eq!(to_delete[0]["handle"], "a5f0c1a2-4000-4b3d-8000-000000000001");
+    assert_eq!(to_delete[0]["status"], "deleted");
+
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&selections);
+    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_file(&manifest_path);
+}
+
+#[test]
+fn e2e_delete_db_retained() {
+    // Verify Gramps DB directory exists after delete.
+    if !gramps_available() {
+        eprintln!("Skipping: Gramps not available");
+        return;
+    }
+
+    let input = temp_path("dbret_input.gramps");
+    let selections = temp_path("dbret_selections.json");
+    let output = temp_path("dbret_output.gramps");
+    let db_dir = temp_path("dbret_db");
+
+    write_uuid_fixture(&input, UUID_FIXTURE_51);
+    write_selections(&selections, &["a5f0c1a2-4000-4b3d-8000-000000000001"]);
+
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "delete",
+        &input,
+        "--selections",
+        &selections,
+        "--yes",
+        "-o",
+        &output,
+        "--db-dir",
+        &db_dir,
+    ]);
+    assert_eq!(code, Some(0), "Delete failed: {}", stderr);
+
+    // Verify DB directory exists and contains files.
+    assert!(std::path::Path::new(&db_dir).exists(), "DB dir should exist");
+    let db_entries: Vec<_> = std::fs::read_dir(&db_dir).into_iter().flatten().flatten().collect();
+    assert!(!db_entries.is_empty(), "DB dir should contain files");
+
+    // Clean up DB dir
+    let _ = std::fs::remove_dir_all(&db_dir);
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&selections);
+    let _ = std::fs::remove_file(&output);
+}
+
+#[test]
+fn e2e_delete_no_retain_db() {
+    // Verify --no-retain-db cleans up the Gramps DB directory.
+    if !gramps_available() {
+        eprintln!("Skipping: Gramps not available");
+        return;
+    }
+
+    let input = temp_path("nordb_input.gramps");
+    let selections = temp_path("nordb_selections.json");
+    let output = temp_path("nordb_output.gramps");
+    let db_dir = temp_path("nordb_db");
+
+    write_uuid_fixture(&input, UUID_FIXTURE_51);
+    write_selections(&selections, &["a5f0c1a2-4000-4b3d-8000-000000000001"]);
+
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "delete",
+        &input,
+        "--selections",
+        &selections,
+        "--yes",
+        "-o",
+        &output,
+        "--db-dir",
+        &db_dir,
+        "--no-retain-db",
+    ]);
+    assert_eq!(code, Some(0), "Delete failed: {}", stderr);
+
+    // Verify DB directory was cleaned up.
+    assert!(
+        !std::path::Path::new(&db_dir).exists(),
+        "DB dir should be removed with --no-retain-db"
+    );
+
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&selections);
+    let _ = std::fs::remove_file(&output);
+}
+
+#[test]
+fn e2e_delete_orphaned_events_survive() {
+    // Verify events referenced only by deleted people still exist in output.
+    if !gramps_available() {
+        eprintln!("Skipping: Gramps not available");
+        return;
+    }
+
+    let input = temp_path("orphan_input.gramps");
+    let selections = temp_path("orphan_selections.json");
+    let output = temp_path("orphan_output.gramps");
+
+    write_uuid_fixture(&input, UUID_FIXTURE_FAMILY_EVENT);
+    // Delete both people — the event should survive as orphan.
+    write_selections(
+        &selections,
+        &[
+            "b0000001-4000-4b3d-8000-000000000001",
+            "b0000002-4000-4b3d-8000-000000000002",
+        ],
+    );
+
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "delete",
+        &input,
+        "--selections",
+        &selections,
+        "--yes",
+        "-o",
+        &output,
+    ]);
+    assert_eq!(code, Some(0), "Delete failed: {}", stderr);
+
+    let content = std::fs::read_to_string(&output).unwrap();
+
+    // Deleted people should NOT appear.
+    assert!(
+        !content.contains("b0000001-4000-4b3d-8000-000000000001"),
+        "Deleted person 1 should not appear in output"
+    );
+    assert!(
+        !content.contains("b0000002-4000-4b3d-8000-000000000002"),
+        "Deleted person 2 should not appear in output"
+    );
+
+    // The event should still exist (orphaned).
+    assert!(
+        content.contains("e0000001-4000-4b3d-8000-000000000001"),
+        "Orphaned event should survive in output"
+    );
+
+    // The family should be gone (Gramps auto-deletes empty families).
+    assert!(
+        !content.contains("f0000001-4000-4b3d-8000-000000000001"),
+        "Empty family should be deleted by Gramps"
+    );
+
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&selections);
+    let _ = std::fs::remove_file(&output);
+}
+
+#[test]
+fn e2e_delete_load_manifest_v1() {
+    // Verify --load-manifest with v1 manifest works (auto-migration).
+    if !gramps_available() {
+        eprintln!("Skipping: Gramps not available");
+        return;
+    }
+
+    let input = temp_path("v1load_input.gramps");
+    let manifest_file = temp_path("v1load_manifest.json");
+    let output = temp_path("v1load_output.gramps");
+
+    write_uuid_fixture(&input, UUID_FIXTURE_51);
+    write_v1_manifest(
+        &manifest_file,
+        "v1load_input.gramps",
+        &["a5f0c1a2-4000-4b3d-8000-000000000001"],
+    );
+
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "delete",
+        &input,
+        "--load-manifest",
+        &manifest_file,
+        "-o",
+        &output,
+    ]);
+    assert_eq!(code, Some(0), "Load manifest v1 failed: {}", stderr);
+
+    // Verify deletion happened.
+    let content = std::fs::read_to_string(&output).unwrap();
+    assert!(
+        !content.contains("a5f0c1a2-4000-4b3d-8000-000000000001"),
+        "Deleted person should not appear in output"
+    );
+
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&manifest_file);
+    let _ = std::fs::remove_file(&output);
+}
+
+#[test]
+fn e2e_delete_load_manifest_v2_reconciled() {
+    // Verify --load-manifest with reconciled v2 manifest skips already-deleted
+    // handles and re-deletes only pending items.
+    if !gramps_available() {
+        eprintln!("Skipping: Gramps not available");
+        return;
+    }
+
+    let input = temp_path("v2load_input.gramps");
+    let manifest_file = temp_path("v2load_manifest.json");
+    let output = temp_path("v2load_output.gramps");
+
+    write_uuid_fixture(&input, UUID_FIXTURE_FAMILY_EVENT);
+    // Write a v2 reconciled manifest where person1 is already deleted and
+    // person2 is still pending.
+    write_v2_reconciled_manifest(
+        &manifest_file,
+        "v2load_input.gramps",
+        &["b0000001-4000-4b3d-8000-000000000001"],
+        &["b0000002-4000-4b3d-8000-000000000002"],
+    );
+
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "delete",
+        &input,
+        "--load-manifest",
+        &manifest_file,
+        "-o",
+        &output,
+    ]);
+    assert_eq!(code, Some(0), "Load manifest v2 reconciled failed: {}", stderr);
+
+    let content = std::fs::read_to_string(&output).unwrap();
+
+    // The already-deleted person should still be present in the original
+    // input and thus appear in the output (the manifest skips re-deleting it).
+    assert!(
+        content.contains("b0000001-4000-4b3d-8000-000000000001"),
+        "Already-deleted person should NOT be re-deleted, so they remain in output"
+    );
+
+    // The pending person should be deleted.
+    assert!(
+        !content.contains("b0000002-4000-4b3d-8000-000000000002"),
+        "Pending person should be deleted in output"
+    );
+
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&manifest_file);
     let _ = std::fs::remove_file(&output);
 }
 
