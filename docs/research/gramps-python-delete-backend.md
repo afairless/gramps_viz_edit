@@ -247,13 +247,12 @@ exporter so the output matches the input format. If the namespace is
 unrecognized (doesn't match any known Gramps version), fall back to
 `"5.2"` as the default and emit a warning to stderr.
 
-**Handle validation:** Before any database operation, validate that every
-handle in the manifest matches the expected UUID v4 format
-(`/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i`).
-Handles that don't match are collected into a `rejected` list in the JSON
-result (dead-letter pattern) and skipped. Handles that match the format
-but don't exist in the DB cause the script to abort *before any deletion*
-— no partial writes.
+**Handle validation** (updated 2025): The UUID v4 format validator was removed
+(see `docs/research/fix-handle-format-mismatch.md`). Handles are now validated
+only by existence via Gramps' `has_*_handle()` methods. Any handle absent from
+the DB causes the script to abort *before any deletion* — no partial writes.
+The `rejected` field in the JSON result is always empty (kept for backward
+compat with the Rust side).
 
 **Atomic output:** Export to a temp file first, then atomically rename to
 the final output path. This prevents a partial/corrupt `.gramps` file if

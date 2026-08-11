@@ -187,7 +187,7 @@ of direct struct field access to support merged schemas.
 - Nodes are stored in `HashMap<Handle, Node>`. `Node` is an enum over 10 primary types: Person, Family, Event, Place, Source, Citation, Repository, Media, Note, Tag.
 - Edges are stored in `Vec<Edge>` with forward (`source → [indices]`) and reverse (`target → [indices]`) indexes.
 - `add_node` and `add_edge` both reset `validation_state` to `Unvalidated`.
-- Handles are plain `String` (type alias, typically UUID v4).
+- Handles are plain `String` (type alias, Gramps-native format: `_` + 16 hex chars).
 
 ### 3. Five-stage pipeline
 
@@ -244,8 +244,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 | `quick-xml` | XML serialization (output, cli, gramps-reader crates) |
 | `clap` (derive) | CLI argument parsing |
 | `serde_yaml` | YAML scenario file parsing |
-| `rand` | RNG for procedural generation |
-| `uuid` (v4) | Auto-generated handles |
+| `rand` | RNG for procedural generation + handle generation via `generate_handle()` |
 | `log` / `env_logger` | Logging in CLI crate |
 | `ureq` | HTTP requests for `schema download` |
 | `csv` | integrate, cli | CSV parsing and serialization for diff-viz merge |
