@@ -3,7 +3,8 @@
 //! Pipeline: parse input file → load selections → run cascade engine →
 //! (optional review) → build manifest v2 → delegate to Python backend
 //! (persistent DB, people-only deletion) → reconcile manifest against
-//! surviving report → save enriched manifest alongside output.
+//! surviving report → save enriched manifest → clean orphaned events
+//! from output XML → save final manifest alongside output.
 //!
 //! XML I/O is delegated to Gramps' own import/delete/export libraries
 //! via a Python subprocess (`scripts/delete_backend.py`). The Rust
@@ -555,6 +556,50 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
     // 14. Save the enriched manifest alongside the output
     save_manifest(&manifest, &manifest_path)?;
 
+    // 15. Clean pending events from the output XML
+    let pending_events: HashSet<String> = manifest
+        .plan
+        .get("events")
+        .map(|p: &TypePlan| {
+            p.to_delete
+                .iter()
+                .filter(|e| e.status == HandleStatus::Pending)
+                .map(|e| e.handle.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if !pending_events.is_empty() {
+        let no_events_path = derive_no_events_path(input_path);
+        log::info!(
+            "Cleaning {} pending events from output -> {}",
+            pending_events.len(),
+            no_events_path.display()
+        );
+        let stats = crate::commands::clean::clean_events_xml(
+            &output_path,
+            &no_events_path,
+            &pending_events,
+        )?;
+        log::info!(
+            "Event cleaning complete: {} removed, {} not found in XML",
+            stats.events_removed,
+            stats.events_not_found,
+        );
+        // Mark these events as Deleted in the manifest
+        if let Some(events_plan) = manifest.plan.get_mut("events") {
+            for entry in &mut events_plan.to_delete {
+                if entry.status == HandleStatus::Pending {
+                    entry.status = HandleStatus::Deleted;
+                }
+            }
+        }
+        // Persist the updated manifest to disk (overwrites checkpoint copy)
+        save_manifest(&manifest, &manifest_path)?;
+    } else {
+        log::info!("No pending events to clean.");
+    }
+
     let deleted_count = result.deleted.unwrap_or(0);
     let pending_count = manifest
         .plan
@@ -601,6 +646,16 @@ pub(crate) fn strip_gramps_extensions(path: &std::path::Path) -> String {
         s.truncate(i);
     }
     s
+}
+
+/// Derive the `-no-events.gramps` path from the input file path.
+///
+/// Strips Gramps extensions (`.gramps`, `.gramps.gz`) and appends
+/// `-no-events.gramps`. Always uses a plain `.gramps` extension,
+/// even if the input was compressed.
+fn derive_no_events_path(input_path: &std::path::Path) -> std::path::PathBuf {
+    let stem = strip_gramps_extensions(input_path);
+    std::path::PathBuf::from(format!("{}-no-events.gramps", stem))
 }
 
 /// Compute the total size of a directory tree in bytes.
