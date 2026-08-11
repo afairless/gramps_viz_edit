@@ -35,15 +35,6 @@ import gi
 
 gi.require_version("Gtk", "3.0")
 
-# ---------------------------------------------------------------------------
-# UUID v4 regex for handle validation
-# ---------------------------------------------------------------------------
-UUID_V4_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-    re.IGNORECASE,
-)
-
-
 def detect_version() -> str:
     """Return the installed Gramps version string (e.g. '5.1.6')."""
     import gramps.gen.const as const
@@ -211,15 +202,15 @@ def _validate_handles(
     """Validate all handles in the manifest.
 
     Returns (valid_handles, rejected):
-    - valid_handles: {type_key: [handle, ...]} for handles that pass UUID
-      validation AND exist in the database.
-    - rejected: handles that don't match UUID v4 format.
+    - valid_handles: {type_key: [handle, ...]} for handles that exist in the
+      database.
+    - rejected: always empty (kept for backward compat with Rust side).
 
-    Raises ValueError if any valid-format handle is absent from the DB.
+    Raises ValueError if any handle is absent from the DB.
     This abort-before-any-deletion rule prevents partial writes.
     """
     plan: Dict[str, Any] = manifest.get("plan", {})
-    rejected: List[str] = []
+    rejected: List[str] = []  # Always empty — no format filter
     valid: Dict[str, List[str]] = {}
     missing: List[str] = []
 
@@ -239,9 +230,6 @@ def _validate_handles(
 
         for entry in to_delete:
             handle = _extract_handle(entry)
-            if not UUID_V4_RE.match(handle):
-                rejected.append(handle)
-                continue
             if not has_fn(handle):
                 missing.append(handle)
                 continue
@@ -268,7 +256,7 @@ def delete_items(db: Any, manifest: Dict[str, Any]) -> tuple[int, List[str], Lis
 
     Returns (deleted_count, rejected, surviving):
     - deleted_count: number of people successfully deleted.
-    - rejected: handles with invalid UUID v4 format (skipped).
+    - rejected: always empty (kept for backward compat with Rust side).
     - surviving: handles from all manifest entries that still exist in the
       DB AFTER deletion (for reconciliation with Rust).
     """
@@ -287,8 +275,7 @@ def delete_items(db: Any, manifest: Dict[str, Any]) -> tuple[int, List[str], Lis
         to_delete: List[Any] = type_plan.get("to_delete", [])
         for entry in to_delete:
             handle = _extract_handle(entry)
-            if UUID_V4_RE.match(handle):
-                all_manifest_handles.append(handle)
+            all_manifest_handles.append(handle)
 
     if not valid:
         return 0, rejected, []
