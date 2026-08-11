@@ -179,7 +179,7 @@ pub fn clean_events_xml(
 
     let mut xml_reader = Reader::from_reader(reader);
     xml_reader.config_mut().trim_text(true);
-    let mut xml_writer = Writer::new(out_file);
+    let mut xml_writer = Writer::new_with_indent(out_file, b' ', 2);
     let mut buf = Vec::new();
 
     // Track which handles we're looking for
