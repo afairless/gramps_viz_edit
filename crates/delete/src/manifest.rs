@@ -80,7 +80,7 @@ impl From<serde_json::Error> for ManifestError {
 }
 
 /// The current manifest format version.
-pub const MANIFEST_VERSION: u32 = 1;
+pub const MANIFEST_VERSION: u32 = 2;
 
 /// Save a `DeleteManifest` to a JSON file.
 ///
@@ -94,12 +94,37 @@ pub fn save_manifest(manifest: &DeleteManifest, path: &Path) -> Result<(), Manif
 
 /// Load a `DeleteManifest` from a JSON file.
 ///
-/// Validates the format version and returns an error for unsupported versions.
+/// Tries v2 format first. If the file is v1 format, auto-migrates to v2:
+/// - All `to_delete` entries get `HandleStatus::Pending`
+/// - All `kept` entries get `HandleStatus::Kept`
+/// - `deletion_mode` is set to `"people_only"`
+/// - `version` is bumped to 2
 pub fn load_manifest(path: &Path) -> Result<DeleteManifest, ManifestError> {
+    let content = std::fs::read_to_string(path)?;
+    let mut manifest: DeleteManifest = serde_json::from_str(&content)?;
+
+    match manifest.version {
+        2 => Ok(manifest),
+        1 => {
+            // Auto-migrate from v1 to v2
+            manifest.version = MANIFEST_VERSION;
+            if manifest.deletion_mode.is_empty() {
+                manifest.deletion_mode = "people_only".to_string();
+            }
+            // Handle entries are already converted by TypePlan's custom
+            // deserializer (v1 flat strings → HandleEntry with Pending/Kept).
+            Ok(manifest)
+        }
+        other => Err(ManifestError::UnsupportedVersion(other)),
+    }
+}
+
+/// Load a v1 `DeleteManifest` from a JSON file, rejecting any other version.
+pub fn load_manifest_v1(path: &Path) -> Result<DeleteManifest, ManifestError> {
     let content = std::fs::read_to_string(path)?;
     let manifest: DeleteManifest = serde_json::from_str(&content)?;
 
-    if manifest.version != MANIFEST_VERSION {
+    if manifest.version != 1 {
         return Err(ManifestError::UnsupportedVersion(manifest.version));
     }
 
@@ -316,7 +341,7 @@ mod tests {
             },
         );
         let manifest = DeleteManifest {
-            version: 1,
+            version: 2,
             source_file: "test.gramps".to_string(),
             selections_file: Some("sel.json".to_string()),
             created_at: "2025-01-15T10:30:00Z".to_string(),
@@ -329,7 +354,7 @@ mod tests {
         let path = dir.join("test_manifest.json");
         save_manifest(&manifest, &path).unwrap();
         let loaded = load_manifest(&path).unwrap();
-        assert_eq!(loaded.version, manifest.version);
+        assert_eq!(loaded.version, 2);
         assert_eq!(loaded.source_file, manifest.source_file);
         assert_eq!(loaded.seed_people, manifest.seed_people);
         assert_eq!(loaded.plan.len(), manifest.plan.len());
@@ -476,7 +501,7 @@ mod tests {
             &graph,
         );
 
-        assert_eq!(manifest.version, 1);
+        assert_eq!(manifest.version, 2);
         assert_eq!(manifest.source_file, "test.gramps");
         assert_eq!(manifest.selections_file, Some("sel.json".to_string()));
         assert_eq!(manifest.seed_people, vec!["p1".to_string()]);

@@ -1,0 +1,77 @@
+{
+  "version": 2,
+  "source_file": "test.gramps",
+  "selections_file": "selections.json",
+  "created_at": "2025-01-15T10:30:00Z",
+  "seed_people": [
+    "a5f0c1a2-4000-4b3d-8000-000000000001"
+  ],
+  "deletion_mode": "people_only",
+  "plan": {
+    "people": {
+      "to_delete": [
+        {"handle": "a5f0c1a2-4000-4b3d-8000-000000000001", "status": "pending"},
+        {"handle": "a5f0c1a2-4000-4b3d-8000-000000000002", "status": "deleted"}
+      ],
+      "kept": [
+        {"handle": "a5f0c1a2-4000-4b3d-8000-000000000003", "status": "kept"}
+      ]
+    },
+    "families": {
+      "to_delete": [
+        {"handle": "b5f0c1a2-4000-4b3d-8000-000000000003", "status": "pending"}
+      ],
+      "kept": []
+    },
+    "events": {
+      "to_delete": [
+        {"handle": "c5f0c1a2-4000-4b3d-8000-000000000004", "status": "pending"}
+      ],
+      "kept": [
+        {"handle": "c5f0c1a2-4000-4b3d-8000-000000000005", "status": "kept"}
+      ]
+    },
+    "notes": {
+      "to_delete": [
+        {"handle": "d5f0c1a2-4000-4b3d-8000-000000000006", "status": "pending"}
+      ],
+      "kept": []
+    },
+    "places": {
+      "to_delete": [
+        {"handle": "e5f0c1a2-4000-4b3d-8000-000000000007", "status": "pending"}
+      ],
+      "kept": []
+    },
+    "sources": {
+      "to_delete": [
+        {"handle": "f5f0c1a2-4000-4b3d-8000-000000000008", "status": "pending"}
+      ],
+      "kept": []
+    },
+    "citations": {
+      "to_delete": [
+        {"handle": "95f0c1a2-4000-4b3d-8000-000000000009", "status": "pending"}
+      ],
+      "kept": []
+    },
+    "repositories": {
+      "to_delete": [
+        {"handle": "85f0c1a2-4000-4b3d-8000-00000000000a", "status": "pending"}
+      ],
+      "kept": []
+    },
+    "media": {
+      "to_delete": [
+        {"handle": "75f0c1a2-4000-4b3d-8000-00000000000b", "status": "pending"}
+      ],
+      "kept": []
+    },
+    "tags": {
+      "to_delete": [
+        {"handle": "65f0c1a2-4000-4b3d-8000-00000000000c", "status": "pending"}
+      ],
+      "kept": []
+    }
+  }
+}

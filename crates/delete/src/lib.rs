@@ -12,8 +12,8 @@ pub mod types;
 
 pub use cascade::cascade;
 pub use manifest::{
-    build_manifest, check_source_file, load_manifest, save_manifest, validate_manifest,
-    ManifestError,
+    build_manifest, check_source_file, load_manifest, load_manifest_v1, save_manifest,
+    validate_manifest, ManifestError,
 };
 pub use review::{run_interactive_review, ReviewAction, ReviewResult};
 pub use types::{
