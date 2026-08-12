@@ -129,11 +129,12 @@ fn remove_matching_handle(remaining: &mut HashSet<String>, handle: &str) -> bool
     false
 }
 
-/// Remove events matching the given handles from a Gramps XML file.
+/// Remove elements matching the given handles from a Gramps XML file.
 ///
 /// Reads the input file (with transparent gzip decompression), streams through
-/// the XML, removes `<event>` elements whose `handle` attribute is in
-/// `event_handles`, and writes the result to `output`.
+/// the XML, removes elements (e.g. `<event>`, `<note>`) whose XML tag name
+/// matches `element_name` and whose `handle` attribute is in `handles`, and
+/// writes the result to `output`.
 ///
 /// The output is always written as plain `.gramps` (no gzip compression).
 /// Writing is atomic: data is written to a temporary file first, then renamed
@@ -141,12 +142,13 @@ fn remove_matching_handle(remaining: &mut HashSet<String>, handle: &str) -> bool
 ///
 /// # Returns
 ///
-/// `CleanStats` with the count of removed events and the count of requested
+/// `CleanStats` with the count of removed elements and the count of requested
 /// handles that were not found in the XML.
-pub fn clean_events_xml(
+pub fn clean_elements_xml(
     input: &Path,
     output: &Path,
-    event_handles: &HashSet<String>,
+    element_name: &str,
+    handles: &HashSet<String>,
 ) -> Result<CleanStats, CleanError> {
     if !input.exists() {
         return Err(CleanError::Io {
@@ -184,7 +186,7 @@ pub fn clean_events_xml(
     let mut buf = Vec::new();
 
     // Track which handles we're looking for
-    let mut remaining: HashSet<String> = event_handles.iter().cloned().collect();
+    let mut remaining: HashSet<String> = handles.iter().cloned().collect();
     let mut elements_removed: usize = 0;
 
     // State machine for skipping elements
@@ -200,17 +202,17 @@ pub fn clean_events_xml(
         match event {
             Event::Start(ref e) => {
                 if skip_depth > 0 {
-                    // We're already inside an event being skipped — increment depth
+                    // We're already inside an element being skipped — increment depth
                     skip_depth += 1;
                     continue;
                 }
 
                 let name = e.name();
                 let local_name = strip_prefix(name.as_ref());
-                if local_name == b"event" {
+                if local_name == element_name.as_bytes() {
                     if let Some(handle) = read_handle_attr(e) {
                         if remove_matching_handle(&mut remaining, &handle) {
-                            // Start skipping this event
+                            // Start skipping this element
                             skip_depth = 1;
                             elements_removed += 1;
                             continue;
@@ -218,7 +220,7 @@ pub fn clean_events_xml(
                     }
                 }
 
-                // Not an event, or not in the deletion set - write through
+                // Not a matching element, or not in the deletion set - write through
                 xml_writer
                     .write_event(Event::Start(e.to_owned()))
                     .map_err(|e| map_xml_error(output, e))?;
@@ -232,17 +234,17 @@ pub fn clean_events_xml(
 
                 let name = e.name();
                 let local_name = strip_prefix(name.as_ref());
-                if local_name == b"event" {
+                if local_name == element_name.as_bytes() {
                     if let Some(handle) = read_handle_attr(e) {
                         if remove_matching_handle(&mut remaining, &handle) {
-                            // Skip this self-closing event
+                            // Skip this self-closing element
                             elements_removed += 1;
                             continue;
                         }
                     }
                 }
 
-                // Not an event to remove — write through
+                // Not a matching element to remove — write through
                 xml_writer
                     .write_event(Event::Empty(e.to_owned()))
                     .map_err(|e| map_xml_error(output, e))?;
@@ -252,7 +254,7 @@ pub fn clean_events_xml(
                 if skip_depth > 0 {
                     skip_depth -= 1;
                     if skip_depth == 0 {
-                        // Done skipping this event — resume writing
+                        // Done skipping this element — resume writing
                     }
                     continue;
                 }
@@ -337,6 +339,17 @@ pub fn clean_events_xml(
         elements_removed,
         elements_not_found,
     })
+}
+
+/// Remove events matching the given handles from a Gramps XML file.
+///
+/// Convenience wrapper around [`clean_elements_xml`] with `element_name = "event"`.
+pub fn clean_events_xml(
+    input: &Path,
+    output: &Path,
+    event_handles: &HashSet<String>,
+) -> Result<CleanStats, CleanError> {
+    clean_elements_xml(input, output, "event", event_handles)
 }
 
 // ---------------------------------------------------------------------------
