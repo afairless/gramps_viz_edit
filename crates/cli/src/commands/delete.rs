@@ -658,6 +658,16 @@ fn derive_no_events_path(input_path: &std::path::Path) -> std::path::PathBuf {
     std::path::PathBuf::from(format!("{}-deleted_2.gramps", stem))
 }
 
+/// Derive the `-deleted_3.gramps` path from the input file path.
+///
+/// Strips Gramps extensions (`.gramps`, `.gramps.gz`) and appends
+/// `-deleted_3.gramps`. Always uses a plain `.gramps` extension.
+#[allow(dead_code)]
+pub(crate) fn derive_deleted_3_path(input_path: &std::path::Path) -> std::path::PathBuf {
+    let stem = strip_gramps_extensions(input_path);
+    std::path::PathBuf::from(format!("{}-deleted_3.gramps", stem))
+}
+
 /// Compute the total size of a directory tree in bytes.
 fn dir_size(path: &std::path::Path) -> u64 {
     let mut total = 0;
@@ -841,6 +851,38 @@ mod tests {
     fn dir_size_empty_path() {
         // Non-existent path should return 0, not panic
         assert_eq!(dir_size(PathBuf::from("/nonexistent/path").as_path()), 0);
+    }
+
+    #[test]
+    fn derive_deleted_3_path_basic() {
+        assert_eq!(
+            derive_deleted_3_path(&PathBuf::from("test.gramps")),
+            PathBuf::from("test-deleted_3.gramps")
+        );
+    }
+
+    #[test]
+    fn derive_deleted_3_path_gz() {
+        assert_eq!(
+            derive_deleted_3_path(&PathBuf::from("test.gramps.gz")),
+            PathBuf::from("test-deleted_3.gramps")
+        );
+    }
+
+    #[test]
+    fn derive_deleted_3_path_no_ext() {
+        assert_eq!(
+            derive_deleted_3_path(&PathBuf::from("noext")),
+            PathBuf::from("noext-deleted_3.gramps")
+        );
+    }
+
+    #[test]
+    fn derive_deleted_3_path_already_cleaned() {
+        assert_eq!(
+            derive_deleted_3_path(&PathBuf::from("test-cleaned.gramps")),
+            PathBuf::from("test-cleaned-deleted_3.gramps")
+        );
     }
 
     #[test]
