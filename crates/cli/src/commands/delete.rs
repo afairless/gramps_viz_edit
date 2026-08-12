@@ -600,6 +600,51 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
         log::info!("No pending events to clean.");
     }
 
+    // 16. Clean pending notes from the output XML
+    let pending_notes: HashSet<String> = manifest
+        .plan
+        .get("notes")
+        .map(|p: &TypePlan| {
+            p.to_delete
+                .iter()
+                .filter(|e| e.status == HandleStatus::Pending)
+                .map(|e| e.handle.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if !pending_notes.is_empty() {
+        let deleted_2_path = derive_no_events_path(input_path);
+        let deleted_3_path = derive_deleted_3_path(input_path);
+        log::info!(
+            "Cleaning {} pending notes from output -> {}",
+            pending_notes.len(),
+            deleted_3_path.display()
+        );
+        let stats = crate::commands::clean::clean_notes_xml(
+            &deleted_2_path,
+            &deleted_3_path,
+            &pending_notes,
+        )?;
+        log::info!(
+            "Note cleaning complete: {} removed, {} not found in XML",
+            stats.elements_removed,
+            stats.elements_not_found,
+        );
+        // Mark these notes as Deleted in the manifest
+        if let Some(notes_plan) = manifest.plan.get_mut("notes") {
+            for entry in &mut notes_plan.to_delete {
+                if entry.status == HandleStatus::Pending {
+                    entry.status = HandleStatus::Deleted;
+                }
+            }
+        }
+        // Persist the updated manifest to disk
+        save_manifest(&manifest, &manifest_path)?;
+    } else {
+        log::info!("No pending notes to clean.");
+    }
+
     let deleted_count = result.deleted.unwrap_or(0);
     let pending_count = manifest
         .plan
@@ -626,7 +671,7 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
         );
     }
 
-    // 15. Clean up temp directory
+    // 17. Clean up temp directory
     let _ = fs::remove_dir_all(&temp_dir);
 
     Ok(())
@@ -662,7 +707,6 @@ fn derive_no_events_path(input_path: &std::path::Path) -> std::path::PathBuf {
 ///
 /// Strips Gramps extensions (`.gramps`, `.gramps.gz`) and appends
 /// `-deleted_3.gramps`. Always uses a plain `.gramps` extension.
-#[allow(dead_code)]
 pub(crate) fn derive_deleted_3_path(input_path: &std::path::Path) -> std::path::PathBuf {
     let stem = strip_gramps_extensions(input_path);
     std::path::PathBuf::from(format!("{}-deleted_3.gramps", stem))
