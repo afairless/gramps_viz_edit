@@ -616,13 +616,23 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
     if !pending_notes.is_empty() {
         let deleted_2_path = derive_no_events_path(input_path);
         let deleted_3_path = derive_deleted_3_path(input_path);
+
+        // Use -deleted_2.gramps as input if it exists (event cleaning ran),
+        // otherwise fall back to the original -cleaned.gramps output.
+        let note_input = if deleted_2_path.exists() {
+            deleted_2_path
+        } else {
+            output_path.clone()
+        };
+
         log::info!(
-            "Cleaning {} pending notes from output -> {}",
+            "Cleaning {} pending notes from {} -> {}",
             pending_notes.len(),
+            note_input.display(),
             deleted_3_path.display()
         );
         let stats = crate::commands::clean::clean_notes_xml(
-            &deleted_2_path,
+            &note_input,
             &deleted_3_path,
             &pending_notes,
         )?;

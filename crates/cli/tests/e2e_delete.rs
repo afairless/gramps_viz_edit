@@ -240,6 +240,42 @@ const UUID_FIXTURE_FAMILY_EVENT: &str = r###"<?xml version="1.0" encoding="UTF-8
 </database>
 "###;
 
+/// Minimal Gramps 5.1 XML fixture with two people, a family, and a note
+/// referenced by both people.
+const UUID_FIXTURE_FAMILY_NOTE: &str = r###"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE database PUBLIC "-//Gramps//DTD Gramps XML 1.7.1//EN"
+"http://gramps-project.org/xml/1.7.1/grampsxml.dtd">
+<database xmlns="http://gramps-project.org/xml/1.7.1/">
+  <header>
+    <created date="2025-01-15" version="5.1.6"/>
+    <researcher/>
+  </header>
+  <people>
+    <person handle="c0000001-4000-4b3d-8000-000000000001" id="I0001">
+      <gender>1</gender>
+      <name><first>John</first><surname>Doe</surname></name>
+      <noteref hlink="n0000001-4000-4b3d-8000-000000000001"/>
+    </person>
+    <person handle="c0000002-4000-4b3d-8000-000000000002" id="I0002">
+      <gender>2</gender>
+      <name><first>Jane</first><surname>Doe</surname></name>
+      <noteref hlink="n0000001-4000-4b3d-8000-000000000001"/>
+    </person>
+  </people>
+  <families>
+    <family handle="f0000001-4000-4b3d-8000-000000000001">
+      <father hlink="c0000001-4000-4b3d-8000-000000000001"/>
+      <mother hlink="c0000002-4000-4b3d-8000-000000000002"/>
+    </family>
+  </families>
+  <notes>
+    <note handle="n0000001-4000-4b3d-8000-000000000001" type="Research" format="0">
+      <text>Shared note referenced by both people.</text>
+    </note>
+  </notes>
+</database>
+"###;
+
 /// Write a v1 manifest JSON file (flat string format) for testing.
 fn write_v1_manifest(path: &str, input_file: &str, handles: &[&str]) {
     let to_delete: Vec<String> = handles
@@ -886,4 +922,170 @@ fn e2e_delete_manifest_re_saved_after_clean() {
     let _ = std::fs::remove_file(&selections);
     let _ = std::fs::remove_file(&output);
     let _ = std::fs::remove_file(&manifest_path);
+}
+
+// ---------------------------------------------------------------------------
+// Note cleaning integration tests
+// ---------------------------------------------------------------------------
+
+/// Helper: derive the `-deleted_3.gramps` path from an input path, matching
+/// the logic in delete.rs::derive_deleted_3_path.
+fn deleted_3_path(input: &str) -> String {
+    let stem = if let Some(s) = input.strip_suffix(".gz") {
+        s
+    } else {
+        input
+    };
+    if let Some(dot) = stem.rfind('.') {
+        format!("{}-deleted_3.gramps", &stem[..dot])
+    } else {
+        format!("{}-deleted_3.gramps", stem)
+    }
+}
+
+#[test]
+fn e2e_delete_with_note_clean() {
+    // Verify the full pipeline: deleting both people orphans the shared note,
+    // event cleaning runs (no events here, so -deleted_2 is a copy), and note
+    // cleaning removes the orphaned note from -deleted_3.gramps.
+    if !gramps_available() {
+        eprintln!("Skipping: Gramps not available");
+        return;
+    }
+
+    let input = temp_path("nc_input.gramps");
+    let selections = temp_path("nc_selections.json");
+    let output = temp_path("nc_output.gramps");
+    let manifest_path = temp_path("nc_manifest.json");
+
+    write_uuid_fixture(&input, UUID_FIXTURE_FAMILY_NOTE);
+    // Delete both people — the note becomes orphaned
+    write_selections(
+        &selections,
+        &[
+            "c0000001-4000-4b3d-8000-000000000001",
+            "c0000002-4000-4b3d-8000-000000000002",
+        ],
+    );
+
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "delete",
+        &input,
+        "--selections",
+        &selections,
+        "--yes",
+        "-o",
+        &output,
+        "--save-manifest",
+        &manifest_path,
+    ]);
+    assert_eq!(code, Some(0), "Delete failed: {}", stderr);
+
+    // -cleaned output should exist and contain the orphaned note (Gramps
+    // Python backend only deletes people, never notes)
+    let cleaned_content = std::fs::read_to_string(&output).unwrap();
+    assert!(
+        cleaned_content.contains("n0000001-4000-4b3d-8000-000000000001"),
+        "Orphaned note should survive in -cleaned output"
+    );
+
+    // -deleted_2 may or may not exist (no pending events here, so it's skipped)
+    // -deleted_3 should exist and have the note removed
+    let no_notes = deleted_3_path(&input);
+    assert!(
+        std::path::Path::new(&no_notes).exists(),
+        "-deleted_3.gramps file should exist: {}",
+        no_notes
+    );
+    let no_notes_content = std::fs::read_to_string(&no_notes).unwrap();
+    assert!(
+        !no_notes_content.contains("n0000001-4000-4b3d-8000-000000000001"),
+        "Orphaned note should be removed from -deleted_3 output"
+    );
+    assert!(
+        no_notes_content.contains("<?xml"),
+        "XML declaration should be preserved"
+    );
+    assert!(
+        no_notes_content.contains("<database"),
+        "Database root element should be preserved"
+    );
+
+    // Manifest should mark the note as deleted (not pending)
+    let manifest_content = std::fs::read_to_string(&manifest_path).unwrap();
+    let manifest: serde_json::Value = serde_json::from_str(&manifest_content).unwrap();
+    let notes_plan = &manifest["plan"]["notes"];
+    let to_delete = &notes_plan["to_delete"];
+    assert!(
+        to_delete.as_array().is_some_and(|a| !a.is_empty()),
+        "Notes to_delete should not be empty"
+    );
+    for entry in to_delete.as_array().unwrap() {
+        assert_eq!(
+            entry["status"],
+            "deleted",
+            "Note {} should be marked deleted after clean",
+            entry["handle"]
+        );
+    }
+
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&selections);
+    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_file(&manifest_path);
+    let _ = std::fs::remove_file(&no_notes);
+}
+
+#[test]
+fn e2e_delete_no_pending_notes_noop() {
+    // Verify that when there are no notes (and thus no pending notes), the
+    // note clean step is skipped and no -deleted_3.gramps file is written.
+    if !gramps_available() {
+        eprintln!("Skipping: Gramps not available");
+        return;
+    }
+
+    let input = temp_path("nopn_input.gramps");
+    let selections = temp_path("nopn_selections.json");
+    let output = temp_path("nopn_output.gramps");
+
+    // UUID_FIXTURE_FAMILY_EVENT has an event but no notes
+    write_uuid_fixture(&input, UUID_FIXTURE_FAMILY_EVENT);
+    write_selections(
+        &selections,
+        &[
+            "b0000001-4000-4b3d-8000-000000000001",
+            "b0000002-4000-4b3d-8000-000000000002",
+        ],
+    );
+
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "delete",
+        &input,
+        "--selections",
+        &selections,
+        "--yes",
+        "-o",
+        &output,
+    ]);
+    assert_eq!(code, Some(0), "Delete failed: {}", stderr);
+
+    // -deleted_2 should exist (event cleaning runs)
+    let no_events = no_events_path(&input);
+    assert!(
+        std::path::Path::new(&no_events).exists(),
+        "-deleted_2.gramps should exist when pending events are cleaned"
+    );
+
+    // -deleted_3 should NOT exist (no pending notes to clean)
+    let no_notes = deleted_3_path(&input);
+    assert!(
+        !std::path::Path::new(&no_notes).exists(),
+        "-deleted_3.gramps should NOT be written when there are no pending notes"
+    );
+
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&selections);
+    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_file(&no_events);
 }
