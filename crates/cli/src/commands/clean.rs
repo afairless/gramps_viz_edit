@@ -352,6 +352,17 @@ pub fn clean_events_xml(
     clean_elements_xml(input, output, "event", event_handles)
 }
 
+/// Remove notes matching the given handles from a Gramps XML file.
+///
+/// Convenience wrapper around [`clean_elements_xml`] with `element_name = "note"`.
+pub fn clean_notes_xml(
+    input: &Path,
+    output: &Path,
+    note_handles: &HashSet<String>,
+) -> Result<CleanStats, CleanError> {
+    clean_elements_xml(input, output, "note", note_handles)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -863,5 +874,277 @@ mod tests {
         assert_eq!(stats.elements_removed, 1);
         assert_eq!(stats.elements_not_found, 0);
         assert!(!content.contains("e0001"), "Event should be removed");
+    }
+
+    // -----------------------------------------------------------------------
+    // clean_notes_xml tests
+    // -----------------------------------------------------------------------
+
+    /// Helper: run clean_notes_xml and return the output content.
+    fn run_clean_notes(
+        input: &Path,
+        handles: &[&str],
+        output_dir: &std::path::Path,
+    ) -> (CleanStats, String) {
+        let output = output_dir.join("output.gramps");
+        let handle_set: HashSet<String> = handles.iter().map(|s| s.to_string()).collect();
+        let stats = clean_notes_xml(input, &output, &handle_set).unwrap();
+        let content = std::fs::read_to_string(&output).unwrap();
+        (stats, content)
+    }
+
+    // -----------------------------------------------------------------------
+    // remove_single_note
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn remove_single_note() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database>
+  <notes>
+    <note handle="n0001"><text>Test note</text></note>
+  </notes>
+</database>"#;
+        let (input, _dir) = write_temp(xml);
+        let output_dir = tempfile::tempdir().unwrap();
+        let (stats, content) = run_clean_notes(&input, &["n0001"], output_dir.path());
+
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 0);
+        assert!(!content.contains("n0001"), "Note handle should be removed");
+        assert!(
+            content.contains("<?xml"),
+            "XML declaration should remain"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // remove_self_closing_note
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn remove_self_closing_note() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database>
+  <notes>
+    <note handle="n0001"/>
+    <note handle="n0002"/>
+  </notes>
+</database>"#;
+        let (input, _dir) = write_temp(xml);
+        let output_dir = tempfile::tempdir().unwrap();
+        let (stats, content) = run_clean_notes(&input, &["n0001"], output_dir.path());
+
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 0);
+        assert!(!content.contains("n0001"), "n0001 should be removed");
+        assert!(content.contains("n0002"), "n0002 should remain");
+    }
+
+    // -----------------------------------------------------------------------
+    // keep_unrelated_note
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn keep_unrelated_note() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database>
+  <notes>
+    <note handle="n0001"><text>Test</text></note>
+  </notes>
+</database>"#;
+        let (input, _dir) = write_temp(xml);
+        let output_dir = tempfile::tempdir().unwrap();
+        let (stats, content) = run_clean_notes(&input, &["n9999"], output_dir.path());
+
+        assert_eq!(stats.elements_removed, 0);
+        assert_eq!(stats.elements_not_found, 1);
+        assert!(content.contains("n0001"), "Note should remain");
+    }
+
+    // -----------------------------------------------------------------------
+    // no_notes_to_remove
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn no_notes_to_remove() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database>
+  <notes>
+    <note handle="n0001"><text>Test</text></note>
+  </notes>
+</database>"#;
+        let (input, _dir) = write_temp(xml);
+        let output_dir = tempfile::tempdir().unwrap();
+        let (stats, content) = run_clean_notes(&input, &[], output_dir.path());
+
+        assert_eq!(stats.elements_removed, 0);
+        assert_eq!(stats.elements_not_found, 0);
+        assert!(content.contains("n0001"), "Note should remain");
+        assert!(content.contains("Test"), "Content should be preserved");
+    }
+
+    // -----------------------------------------------------------------------
+    // note_with_text_body
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn note_with_text_body() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database>
+  <notes>
+    <note handle="n0001"><text>This is the note text. Can be multi-paragraph.</text></note>
+  </notes>
+</database>"#;
+        let (input, _dir) = write_temp(xml);
+        let output_dir = tempfile::tempdir().unwrap();
+        let (stats, content) = run_clean_notes(&input, &["n0001"], output_dir.path());
+
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 0);
+        assert!(!content.contains("n0001"), "Note should be removed");
+        assert!(!content.contains("multi-paragraph"), "Body should be removed");
+    }
+
+    // -----------------------------------------------------------------------
+    // note_with_style
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn note_with_style() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database>
+  <notes>
+    <note handle="n0001" type="Research">
+      <text>Styled note</text>
+      <style name="bold">
+        <range start="0" end="4"/>
+      </style>
+    </note>
+  </notes>
+</database>"#;
+        let (input, _dir) = write_temp(xml);
+        let output_dir = tempfile::tempdir().unwrap();
+        let (stats, content) = run_clean_notes(&input, &["n0001"], output_dir.path());
+
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 0);
+        assert!(!content.contains("n0001"), "Note with style should be removed");
+    }
+
+    // -----------------------------------------------------------------------
+    // note_with_type_attr
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn note_with_type_attr() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database>
+  <notes>
+    <note handle="n0001" type="Research" format="0">
+      <text>Research note</text>
+    </note>
+  </notes>
+</database>"#;
+        let (input, _dir) = write_temp(xml);
+        let output_dir = tempfile::tempdir().unwrap();
+        let (stats, content) = run_clean_notes(&input, &["n0001"], output_dir.path());
+
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 0);
+        assert!(!content.contains("n0001"), "Note with type attr should be removed");
+    }
+
+    // -----------------------------------------------------------------------
+    // notes_not_in_xml
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn notes_not_in_xml() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database>
+  <notes>
+    <note handle="n0001"><text>Test</text></note>
+  </notes>
+</database>"#;
+        let (input, _dir) = write_temp(xml);
+        let output_dir = tempfile::tempdir().unwrap();
+        let (stats, _content) = run_clean_notes(&input, &["n0001", "n9999"], output_dir.path());
+
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // namespace_prefixed_note
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn namespace_prefixed_note() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <notes>
+    <ns:note ns:handle="n0001" xmlns:ns="http://example.com/ns">
+      <ns:text>Namespaced note</ns:text>
+    </ns:note>
+  </notes>
+</database>"#;
+        let (input, _dir) = write_temp(xml);
+        let output_dir = tempfile::tempdir().unwrap();
+        let (stats, content) = run_clean_notes(&input, &["n0001"], output_dir.path());
+
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 0);
+        assert!(!content.contains("n0001"), "Namespaced note should be removed");
+    }
+
+    // -----------------------------------------------------------------------
+    // multiple_notes_mixed
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn multiple_notes_mixed() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database>
+  <notes>
+    <note handle="n0001"><text>First</text></note>
+    <note handle="n0002"><text>Second</text></note>
+    <note handle="n0003"><text>Third</text></note>
+  </notes>
+</database>"#;
+        let (input, _dir) = write_temp(xml);
+        let output_dir = tempfile::tempdir().unwrap();
+        let (stats, content) = run_clean_notes(&input, &["n0001", "n0003"], output_dir.path());
+
+        assert_eq!(stats.elements_removed, 2);
+        assert_eq!(stats.elements_not_found, 0);
+        assert!(!content.contains("n0001"), "n0001 should be removed");
+        assert!(content.contains("n0002"), "n0002 should remain");
+        assert!(!content.contains("n0003"), "n0003 should be removed");
+    }
+
+    // -----------------------------------------------------------------------
+    // notes_section_preserved
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn notes_section_preserved() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database>
+  <header><created date="2024-01-01" version="5.2"/></header>
+  <notes>
+    <note handle="n0001"><text>Only note</text></note>
+  </notes>
+</database>"#;
+        let (input, _dir) = write_temp(xml);
+        let output_dir = tempfile::tempdir().unwrap();
+        let (stats, content) = run_clean_notes(&input, &["n0001"], output_dir.path());
+
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 0);
+        // <notes> section tag should still be present even though all notes removed
+        assert!(content.contains("<notes>"), "<notes> section should be preserved");
+        assert!(content.contains("</notes>"), "</notes> section should be preserved");
+        assert!(content.contains("<header>"), "Header should remain");
     }
 }
