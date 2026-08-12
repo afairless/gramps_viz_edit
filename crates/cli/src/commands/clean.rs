@@ -1,7 +1,8 @@
-//! Streaming XML event filter for removing orphaned events from Gramps XML.
+//! Streaming XML element filter for removing orphaned elements from Gramps XML.
 //!
-//! Reads a `.gramps` (or `.gramps.gz`) file, removes `<event>` elements whose
-//! `handle` attribute matches a given set, and writes the result to a new file.
+//! Reads a `.gramps` (or `.gramps.gz`) file, removes elements (e.g. `<event>`
+//! or `<note>`) whose `handle` attribute matches a given set, and writes the
+//! result to a new file.
 //!
 //! Uses `quick-xml` Reader + Writer for a single-pass, memory-efficient streaming
 //! approach. Gzip decompression is transparent based on file header bytes.
@@ -17,16 +18,16 @@ use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 use quick_xml::writer::Writer;
 
-/// Statistics from an event cleaning run.
+/// Statistics from an element cleaning run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CleanStats {
-    /// Number of events removed from the XML.
-    pub events_removed: usize,
-    /// Number of event handles requested for removal but not found in the XML.
-    pub events_not_found: usize,
+    /// Number of elements removed from the XML.
+    pub elements_removed: usize,
+    /// Number of handles requested for removal but not found in the XML.
+    pub elements_not_found: usize,
 }
 
-/// Errors from event cleaning.
+/// Errors from element cleaning.
 #[derive(Debug)]
 pub enum CleanError {
     /// I/O error with file path context.
@@ -184,7 +185,7 @@ pub fn clean_events_xml(
 
     // Track which handles we're looking for
     let mut remaining: HashSet<String> = event_handles.iter().cloned().collect();
-    let mut events_removed: usize = 0;
+    let mut elements_removed: usize = 0;
 
     // State machine for skipping elements
     let mut skip_depth: usize = 0;
@@ -211,7 +212,7 @@ pub fn clean_events_xml(
                         if remove_matching_handle(&mut remaining, &handle) {
                             // Start skipping this event
                             skip_depth = 1;
-                            events_removed += 1;
+                            elements_removed += 1;
                             continue;
                         }
                     }
@@ -235,7 +236,7 @@ pub fn clean_events_xml(
                     if let Some(handle) = read_handle_attr(e) {
                         if remove_matching_handle(&mut remaining, &handle) {
                             // Skip this self-closing event
-                            events_removed += 1;
+                            elements_removed += 1;
                             continue;
                         }
                     }
@@ -330,11 +331,11 @@ pub fn clean_events_xml(
         source: e,
     })?;
 
-    let events_not_found = remaining.len();
+    let elements_not_found = remaining.len();
 
     Ok(CleanStats {
-        events_removed,
-        events_not_found,
+        elements_removed,
+        elements_not_found,
     })
 }
 
@@ -400,8 +401,8 @@ mod tests {
         let output_dir = tempfile::tempdir().unwrap();
         let (stats, content) = run_clean(&input, &["e0001"], output_dir.path());
 
-        assert_eq!(stats.events_removed, 1);
-        assert_eq!(stats.events_not_found, 0);
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 0);
         assert!(!content.contains("e0001"), "Event handle should be removed");
         assert!(
             content.contains("<event"),
@@ -438,8 +439,8 @@ mod tests {
         let output_dir = tempfile::tempdir().unwrap();
         let (stats, content) = run_clean(&input, &["e0001"], output_dir.path());
 
-        assert_eq!(stats.events_removed, 1);
-        assert_eq!(stats.events_not_found, 0);
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 0);
         assert!(!content.contains("e0001"), "e0001 should be removed");
         assert!(content.contains("e0002"), "e0002 should remain");
     }
@@ -460,8 +461,8 @@ mod tests {
         let output_dir = tempfile::tempdir().unwrap();
         let (stats, content) = run_clean(&input, &["e9999"], output_dir.path());
 
-        assert_eq!(stats.events_removed, 0);
-        assert_eq!(stats.events_not_found, 1);
+        assert_eq!(stats.elements_removed, 0);
+        assert_eq!(stats.elements_not_found, 1);
         assert!(content.contains("e0001"), "Event should remain");
     }
 
@@ -481,8 +482,8 @@ mod tests {
         let output_dir = tempfile::tempdir().unwrap();
         let (stats, content) = run_clean(&input, &[], output_dir.path());
 
-        assert_eq!(stats.events_removed, 0);
-        assert_eq!(stats.events_not_found, 0);
+        assert_eq!(stats.elements_removed, 0);
+        assert_eq!(stats.elements_not_found, 0);
         assert!(content.contains("e0001"), "Event should remain");
         // Output should be identical to input (modulo quick-xml formatting)
         assert!(content.contains("Birth"), "Content should be preserved");
@@ -504,8 +505,8 @@ mod tests {
         let output_dir = tempfile::tempdir().unwrap();
         let (stats, _content) = run_clean(&input, &["e0001", "e9999"], output_dir.path());
 
-        assert_eq!(stats.events_removed, 1);
-        assert_eq!(stats.events_not_found, 1);
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 1);
     }
 
     // -----------------------------------------------------------------------
@@ -526,8 +527,8 @@ mod tests {
         let output_dir = tempfile::tempdir().unwrap();
         let (stats, content) = run_clean(&input, &["e0001"], output_dir.path());
 
-        assert_eq!(stats.events_removed, 1);
-        assert_eq!(stats.events_not_found, 0);
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 0);
         assert!(!content.contains("e0001"), "Event should be removed");
     }
 
@@ -558,8 +559,8 @@ mod tests {
         let output_dir = tempfile::tempdir().unwrap();
         let (stats, content) = run_clean(&input, &["e0001"], output_dir.path());
 
-        assert_eq!(stats.events_removed, 1);
-        assert_eq!(stats.events_not_found, 0);
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 0);
         assert!(!content.contains("e0001"), "e0001 should be removed");
         assert!(content.contains("e0002"), "e0002 should remain");
         assert!(
@@ -587,8 +588,8 @@ mod tests {
         let output_dir = tempfile::tempdir().unwrap();
         let (stats, content) = run_clean(&input, &["e0001"], output_dir.path());
 
-        assert_eq!(stats.events_removed, 1);
-        assert_eq!(stats.events_not_found, 0);
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 0);
         assert!(!content.contains("e0001"), "Event should be removed");
         assert!(!content.contains("Birth"), "Event body should be removed");
     }
@@ -612,8 +613,8 @@ mod tests {
         let output_dir = tempfile::tempdir().unwrap();
         let (stats, content) = run_clean(&input, &["e0001", "e0003"], output_dir.path());
 
-        assert_eq!(stats.events_removed, 2);
-        assert_eq!(stats.events_not_found, 0);
+        assert_eq!(stats.elements_removed, 2);
+        assert_eq!(stats.elements_not_found, 0);
         assert!(!content.contains("e0001"), "e0001 should be removed");
         assert!(content.contains("e0002"), "e0002 should remain");
         assert!(!content.contains("e0003"), "e0003 should be removed");
@@ -656,8 +657,8 @@ mod tests {
         let output_dir = tempfile::tempdir().unwrap();
         let (stats, content) = run_clean(&input, &["e0001"], output_dir.path());
 
-        assert_eq!(stats.events_removed, 1);
-        assert_eq!(stats.events_not_found, 0);
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 0);
 
         // All non-event structures should be preserved
         assert!(content.contains("<?xml"), "XML declaration");
@@ -698,8 +699,8 @@ mod tests {
         let stats = clean_events_xml(&input, &output, &handle_set).unwrap();
         let content = std::fs::read_to_string(&output).unwrap();
 
-        assert_eq!(stats.events_removed, 1);
-        assert_eq!(stats.events_not_found, 0);
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 0);
         assert!(!content.contains("e0001"), "e0001 should be removed");
         assert!(content.contains("e0002"), "e0002 should remain");
         // Output should be plain .gramps, not gzip
@@ -777,18 +778,18 @@ mod tests {
     #[test]
     fn clean_stats_default() {
         let stats = CleanStats {
-            events_removed: 0,
-            events_not_found: 0,
+            elements_removed: 0,
+            elements_not_found: 0,
         };
-        assert_eq!(stats.events_removed, 0);
-        assert_eq!(stats.events_not_found, 0);
+        assert_eq!(stats.elements_removed, 0);
+        assert_eq!(stats.elements_not_found, 0);
     }
 
     #[test]
     fn clean_stats_clone_and_eq() {
         let a = CleanStats {
-            events_removed: 5,
-            events_not_found: 2,
+            elements_removed: 5,
+            elements_not_found: 2,
         };
         let b = a.clone();
         assert_eq!(a, b);
@@ -846,8 +847,8 @@ mod tests {
         let output_dir = tempfile::tempdir().unwrap();
         let (stats, content) = run_clean(&input, &["e0001"], output_dir.path());
 
-        assert_eq!(stats.events_removed, 1);
-        assert_eq!(stats.events_not_found, 0);
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 0);
         assert!(!content.contains("e0001"), "Event should be removed");
     }
 }

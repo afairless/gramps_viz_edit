@@ -583,8 +583,8 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
         )?;
         log::info!(
             "Event cleaning complete: {} removed, {} not found in XML",
-            stats.events_removed,
-            stats.events_not_found,
+            stats.elements_removed,
+            stats.elements_not_found,
         );
         // Mark these events as Deleted in the manifest
         if let Some(events_plan) = manifest.plan.get_mut("events") {
