@@ -648,14 +648,14 @@ pub(crate) fn strip_gramps_extensions(path: &std::path::Path) -> String {
     s
 }
 
-/// Derive the `-no-events.gramps` path from the input file path.
+/// Derive the `-deleted_2.gramps` path from the input file path.
 ///
 /// Strips Gramps extensions (`.gramps`, `.gramps.gz`) and appends
-/// `-no-events.gramps`. Always uses a plain `.gramps` extension,
+/// `-deleted_2.gramps`. Always uses a plain `.gramps` extension,
 /// even if the input was compressed.
 fn derive_no_events_path(input_path: &std::path::Path) -> std::path::PathBuf {
     let stem = strip_gramps_extensions(input_path);
-    std::path::PathBuf::from(format!("{}-no-events.gramps", stem))
+    std::path::PathBuf::from(format!("{}-deleted_2.gramps", stem))
 }
 
 /// Compute the total size of a directory tree in bytes.

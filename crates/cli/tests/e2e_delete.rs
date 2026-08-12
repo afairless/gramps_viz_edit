@@ -693,7 +693,7 @@ fn e2e_delete_gramps_available_guard() {
 // Event cleaning integration tests
 // ---------------------------------------------------------------------------
 
-/// Helper: derive the `-no-events.gramps` path from an input path, matching
+/// Helper: derive the `-deleted_2.gramps` path from an input path, matching
 /// the logic in delete.rs::derive_no_events_path.
 fn no_events_path(input: &str) -> String {
     let stem = if let Some(s) = input.strip_suffix(".gz") {
@@ -702,15 +702,15 @@ fn no_events_path(input: &str) -> String {
         input
     };
     if let Some(dot) = stem.rfind('.') {
-        format!("{}-no-events.gramps", &stem[..dot])
+        format!("{}-deleted_2.gramps", &stem[..dot])
     } else {
-        format!("{}-no-events.gramps", stem)
+        format!("{}-deleted_2.gramps", stem)
     }
 }
 
 #[test]
 fn e2e_delete_with_event_clean() {
-    // Verify that orphaned events are removed from the -no-events.gramps output.
+    // Verify that orphaned events are removed from the -deleted_2.gramps output.
     if !gramps_available() {
         eprintln!("Skipping: Gramps not available");
         return;
@@ -748,20 +748,20 @@ fn e2e_delete_with_event_clean() {
         "Orphaned event should survive in -cleaned output"
     );
 
-    // Verify -no-events output has the event removed
+    // Verify -deleted_2 output has the event removed
     let no_events = no_events_path(&input);
     assert!(
         std::path::Path::new(&no_events).exists(),
-        "-no-events.gramps file should exist: {}",
+        "-deleted_2.gramps file should exist: {}",
         no_events
     );
     let no_events_content = std::fs::read_to_string(&no_events).unwrap();
     assert!(
         !no_events_content.contains("e0000001-4000-4b3d-8000-000000000001"),
-        "Orphaned event should be removed from -no-events output"
+        "Orphaned event should be removed from -deleted_2 output"
     );
 
-    // Verify non-event content is preserved in -no-events
+    // Verify non-event content is preserved in -deleted_2
     // (XML declaration and header should survive)
     assert!(
         no_events_content.contains("<?xml"),
@@ -781,7 +781,7 @@ fn e2e_delete_with_event_clean() {
 #[test]
 fn e2e_delete_no_pending_events_noop() {
     // Verify that when there are no events (and thus no pending events),
-    // the clean step is skipped and no -no-events.gramps file is written.
+    // the clean step is skipped and no -deleted_2.gramps file is written.
     if !gramps_available() {
         eprintln!("Skipping: Gramps not available");
         return;
@@ -812,11 +812,11 @@ fn e2e_delete_no_pending_events_noop() {
         "-cleaned output should exist"
     );
 
-    // -no-events should NOT exist (no pending events to clean)
+    // -deleted_2 should NOT exist (no pending events to clean)
     let no_events = no_events_path(&input);
     assert!(
         !std::path::Path::new(&no_events).exists(),
-        "-no-events.gramps should NOT be written when there are no pending events"
+        "-deleted_2.gramps should NOT be written when there are no pending events"
     );
 
     let _ = std::fs::remove_file(&input);
