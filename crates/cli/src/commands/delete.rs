@@ -4,7 +4,8 @@
 //! (optional review) → build manifest v2 → delegate to Python backend
 //! (persistent DB, people-only deletion) → reconcile manifest against
 //! surviving report → save enriched manifest → clean orphaned events
-//! from output XML → save final manifest alongside output.
+//! from output XML → clean orphaned notes from output XML → clean
+//! orphaned places from output XML → save final manifest alongside output.
 //!
 //! XML I/O is delegated to Gramps' own import/delete/export libraries
 //! via a Python subprocess (`scripts/delete_backend.py`). The Rust
@@ -655,6 +656,63 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
         log::info!("No pending notes to clean.");
     }
 
+    // 17. Clean pending places from the output XML
+    let pending_places: HashSet<String> = manifest
+        .plan
+        .get("places")
+        .map(|p: &TypePlan| {
+            p.to_delete
+                .iter()
+                .filter(|e| e.status == HandleStatus::Pending)
+                .map(|e| e.handle.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if !pending_places.is_empty() {
+        let deleted_2_path = derive_no_events_path(input_path);
+        let deleted_3_path = derive_deleted_3_path(input_path);
+        let deleted_4_path = derive_deleted_4_path(input_path);
+
+        // Use the latest available cleaned output as input.
+        let place_input = if deleted_3_path.exists() {
+            deleted_3_path
+        } else if deleted_2_path.exists() {
+            deleted_2_path
+        } else {
+            output_path.clone()
+        };
+
+        log::info!(
+            "Cleaning {} pending places from {} -> {}",
+            pending_places.len(),
+            place_input.display(),
+            deleted_4_path.display()
+        );
+        let stats = crate::commands::clean::clean_places_xml(
+            &place_input,
+            &deleted_4_path,
+            &pending_places,
+        )?;
+        log::info!(
+            "Place cleaning complete: {} removed, {} not found in XML",
+            stats.elements_removed,
+            stats.elements_not_found,
+        );
+        // Mark these places as Deleted in the manifest
+        if let Some(places_plan) = manifest.plan.get_mut("places") {
+            for entry in &mut places_plan.to_delete {
+                if entry.status == HandleStatus::Pending {
+                    entry.status = HandleStatus::Deleted;
+                }
+            }
+        }
+        // Persist the updated manifest to disk
+        save_manifest(&manifest, &manifest_path)?;
+    } else {
+        log::info!("No pending places to clean.");
+    }
+
     let deleted_count = result.deleted.unwrap_or(0);
     let pending_count = manifest
         .plan
@@ -681,7 +739,7 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
         );
     }
 
-    // 17. Clean up temp directory
+    // 18. Clean up temp directory
     let _ = fs::remove_dir_all(&temp_dir);
 
     Ok(())
@@ -720,6 +778,15 @@ fn derive_no_events_path(input_path: &std::path::Path) -> std::path::PathBuf {
 pub(crate) fn derive_deleted_3_path(input_path: &std::path::Path) -> std::path::PathBuf {
     let stem = strip_gramps_extensions(input_path);
     std::path::PathBuf::from(format!("{}-deleted_3.gramps", stem))
+}
+
+/// Derive the `-deleted_4.gramps` path from the input file path.
+///
+/// Strips Gramps extensions (`.gramps`, `.gramps.gz`) and appends
+/// `-deleted_4.gramps`. Always uses a plain `.gramps` extension.
+pub(crate) fn derive_deleted_4_path(input_path: &std::path::Path) -> std::path::PathBuf {
+    let stem = strip_gramps_extensions(input_path);
+    std::path::PathBuf::from(format!("{}-deleted_4.gramps", stem))
 }
 
 /// Compute the total size of a directory tree in bytes.
@@ -936,6 +1003,38 @@ mod tests {
         assert_eq!(
             derive_deleted_3_path(&PathBuf::from("test-cleaned.gramps")),
             PathBuf::from("test-cleaned-deleted_3.gramps")
+        );
+    }
+
+    #[test]
+    fn derive_deleted_4_path_basic() {
+        assert_eq!(
+            derive_deleted_4_path(&PathBuf::from("test.gramps")),
+            PathBuf::from("test-deleted_4.gramps")
+        );
+    }
+
+    #[test]
+    fn derive_deleted_4_path_gz() {
+        assert_eq!(
+            derive_deleted_4_path(&PathBuf::from("test.gramps.gz")),
+            PathBuf::from("test-deleted_4.gramps")
+        );
+    }
+
+    #[test]
+    fn derive_deleted_4_path_no_ext() {
+        assert_eq!(
+            derive_deleted_4_path(&PathBuf::from("noext")),
+            PathBuf::from("noext-deleted_4.gramps")
+        );
+    }
+
+    #[test]
+    fn derive_deleted_4_path_already_cleaned() {
+        assert_eq!(
+            derive_deleted_4_path(&PathBuf::from("test-cleaned.gramps")),
+            PathBuf::from("test-cleaned-deleted_4.gramps")
         );
     }
 
