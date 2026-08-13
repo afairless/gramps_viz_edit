@@ -1089,3 +1089,388 @@ fn e2e_delete_no_pending_notes_noop() {
     let _ = std::fs::remove_file(&output);
     let _ = std::fs::remove_file(&no_events);
 }
+
+// ---------------------------------------------------------------------------
+// Place cleaning integration tests
+// ---------------------------------------------------------------------------
+
+/// Minimal Gramps 5.1 XML fixture with two people, a family, an event, a note,
+/// and a place referenced by the event.
+const UUID_FIXTURE_FAMILY_EVENT_NOTE_PLACE: &str = r###"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE database PUBLIC "-//Gramps//DTD Gramps XML 1.7.1//EN"
+"http://gramps-project.org/xml/1.7.1/grampsxml.dtd">
+<database xmlns="http://gramps-project.org/xml/1.7.1/">
+  <header>
+    <created date="2025-01-15" version="5.1.6"/>
+    <researcher/>
+  </header>
+  <people>
+    <person handle="d0000001-4000-4b3d-8000-000000000001" id="I0001">
+      <gender>1</gender>
+      <name><first>John</first><surname>Doe</surname></name>
+      <eventref hlink="d0000001-4000-4b3d-8000-000000000003" role="Primary"/>
+      <noteref hlink="d0000001-4000-4b3d-8000-000000000004"/>
+    </person>
+    <person handle="d0000002-4000-4b3d-8000-000000000002" id="I0002">
+      <gender>2</gender>
+      <name><first>Jane</first><surname>Doe</surname></name>
+      <eventref hlink="d0000001-4000-4b3d-8000-000000000003" role="Primary"/>
+      <noteref hlink="d0000001-4000-4b3d-8000-000000000004"/>
+    </person>
+  </people>
+  <families>
+    <family handle="f0000001-4000-4b3d-8000-000000000001">
+      <father hlink="d0000001-4000-4b3d-8000-000000000001"/>
+      <mother hlink="d0000002-4000-4b3d-8000-000000000002"/>
+    </family>
+  </families>
+  <events>
+    <event handle="d0000001-4000-4b3d-8000-000000000003" id="E0001">
+      <type>Birth</type>
+      <dateval val="1980-01-15"/>
+      <place hlink="d0000001-4000-4b3d-8000-000000000005"/>
+    </event>
+  </events>
+  <notes>
+    <note handle="d0000001-4000-4b3d-8000-000000000004" type="Research" format="0">
+      <text>Shared note referenced by both people.</text>
+    </note>
+  </notes>
+  <places>
+    <place handle="d0000001-4000-4b3d-8000-000000000005" id="P0001">
+      <ptitle>New York City</ptitle>
+      <coord lat="40.7128" long="-74.0060"/>
+    </place>
+  </places>
+</database>
+"###;
+
+/// Helper: derive the `-deleted_4.gramps` path from an input path, matching
+/// the logic in delete.rs::derive_deleted_4_path.
+fn deleted_4_path(input: &str) -> String {
+    let stem = if let Some(s) = input.strip_suffix(".gz") {
+        s
+    } else {
+        input
+    };
+    if let Some(dot) = stem.rfind('.') {
+        format!("{}-deleted_4.gramps", &stem[..dot])
+    } else {
+        format!("{}-deleted_4.gramps", stem)
+    }
+}
+
+#[test]
+fn e2e_delete_with_place_clean() {
+    // Verify the full pipeline: deleting both people orphans the event, note,
+    // and place; event cleaning runs, note cleaning runs, and place cleaning
+    // removes the orphaned place from -deleted_4.gramps.
+    if !gramps_available() {
+        eprintln!("Skipping: Gramps not available");
+        return;
+    }
+
+    let input = temp_path("pc_input.gramps");
+    let selections = temp_path("pc_selections.json");
+    let output = temp_path("pc_output.gramps");
+    let manifest_path = temp_path("pc_manifest.json");
+
+    write_uuid_fixture(&input, UUID_FIXTURE_FAMILY_EVENT_NOTE_PLACE);
+    // Delete both people — the event, note, and place become orphaned
+    write_selections(
+        &selections,
+        &[
+            "d0000001-4000-4b3d-8000-000000000001",
+            "d0000002-4000-4b3d-8000-000000000002",
+        ],
+    );
+
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "delete",
+        &input,
+        "--selections",
+        &selections,
+        "--yes",
+        "-o",
+        &output,
+        "--save-manifest",
+        &manifest_path,
+    ]);
+    assert_eq!(code, Some(0), "Delete failed: {}", stderr);
+
+    // -cleaned output should exist and contain the orphaned place (Gramps
+    // Python backend only deletes people, never places)
+    let cleaned_content = std::fs::read_to_string(&output).unwrap();
+    assert!(
+        cleaned_content.contains("d0000001-4000-4b3d-8000-000000000005"),
+        "Orphaned place should survive in -cleaned output"
+    );
+
+    // -deleted_2 should exist (event cleaning runs) and still contain the place
+    let no_events = no_events_path(&input);
+    assert!(
+        std::path::Path::new(&no_events).exists(),
+        "-deleted_2.gramps file should exist: {}",
+        no_events
+    );
+    let no_events_content = std::fs::read_to_string(&no_events).unwrap();
+    assert!(
+        no_events_content.contains("d0000001-4000-4b3d-8000-000000000005"),
+        "Place should survive in -deleted_2 (event cleaning only removes events)"
+    );
+
+    // -deleted_3 should exist (note cleaning runs) and still contain the place
+    let no_notes = deleted_3_path(&input);
+    assert!(
+        std::path::Path::new(&no_notes).exists(),
+        "-deleted_3.gramps file should exist: {}",
+        no_notes
+    );
+    let no_notes_content = std::fs::read_to_string(&no_notes).unwrap();
+    assert!(
+        no_notes_content.contains("d0000001-4000-4b3d-8000-000000000005"),
+        "Place should survive in -deleted_3 (note cleaning only removes notes)"
+    );
+
+    // -deleted_4 should exist and have the place removed
+    let no_places = deleted_4_path(&input);
+    assert!(
+        std::path::Path::new(&no_places).exists(),
+        "-deleted_4.gramps file should exist: {}",
+        no_places
+    );
+    let no_places_content = std::fs::read_to_string(&no_places).unwrap();
+    assert!(
+        !no_places_content.contains("d0000001-4000-4b3d-8000-000000000005"),
+        "Orphaned place should be removed from -deleted_4 output"
+    );
+    assert!(
+        no_places_content.contains("<?xml"),
+        "XML declaration should be preserved"
+    );
+    assert!(
+        no_places_content.contains("<database"),
+        "Database root element should be preserved"
+    );
+
+    // Manifest should mark the place as deleted (not pending)
+    let manifest_content = std::fs::read_to_string(&manifest_path).unwrap();
+    let manifest: serde_json::Value = serde_json::from_str(&manifest_content).unwrap();
+    let places_plan = &manifest["plan"]["places"];
+    let to_delete = &places_plan["to_delete"];
+    assert!(
+        to_delete.as_array().is_some_and(|a| !a.is_empty()),
+        "Places to_delete should not be empty"
+    );
+    for entry in to_delete.as_array().unwrap() {
+        assert_eq!(
+            entry["status"],
+            "deleted",
+            "Place {} should be marked deleted after clean",
+            entry["handle"]
+        );
+    }
+
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&selections);
+    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_file(&manifest_path);
+    let _ = std::fs::remove_file(&no_events);
+    let _ = std::fs::remove_file(&no_notes);
+    let _ = std::fs::remove_file(&no_places);
+}
+
+#[test]
+fn e2e_delete_no_pending_places_noop() {
+    // Verify that when there are no pending places, the place clean step is
+    // skipped and no -deleted_4.gramps file is written.
+    if !gramps_available() {
+        eprintln!("Skipping: Gramps not available");
+        return;
+    }
+
+    let input = temp_path("nopp_input.gramps");
+    let selections = temp_path("nopp_selections.json");
+    let output = temp_path("nopp_output.gramps");
+
+    // UUID_FIXTURE_FAMILY_EVENT has an event but no places and no notes
+    write_uuid_fixture(&input, UUID_FIXTURE_FAMILY_EVENT);
+    write_selections(
+        &selections,
+        &[
+            "b0000001-4000-4b3d-8000-000000000001",
+            "b0000002-4000-4b3d-8000-000000000002",
+        ],
+    );
+
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "delete",
+        &input,
+        "--selections",
+        &selections,
+        "--yes",
+        "-o",
+        &output,
+    ]);
+    assert_eq!(code, Some(0), "Delete failed: {}", stderr);
+
+    // -deleted_2 should exist (event cleaning runs)
+    let no_events = no_events_path(&input);
+    assert!(
+        std::path::Path::new(&no_events).exists(),
+        "-deleted_2.gramps should exist when pending events are cleaned"
+    );
+
+    // -deleted_4 should NOT exist (no pending places to clean)
+    let no_places = deleted_4_path(&input);
+    assert!(
+        !std::path::Path::new(&no_places).exists(),
+        "-deleted_4.gramps should NOT be written when there are no pending places"
+    );
+
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&selections);
+    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_file(&no_events);
+}
+
+#[test]
+fn e2e_delete_deleted_2_and_3_unchanged() {
+    // Verify that -deleted_2.gramps and -deleted_3.gramps still contain the
+    // orphaned place; only -deleted_4.gramps drops it.
+    if !gramps_available() {
+        eprintln!("Skipping: Gramps not available");
+        return;
+    }
+
+    let input = temp_path("dc_input.gramps");
+    let selections = temp_path("dc_selections.json");
+    let output = temp_path("dc_output.gramps");
+
+    write_uuid_fixture(&input, UUID_FIXTURE_FAMILY_EVENT_NOTE_PLACE);
+    write_selections(
+        &selections,
+        &[
+            "d0000001-4000-4b3d-8000-000000000001",
+            "d0000002-4000-4b3d-8000-000000000002",
+        ],
+    );
+
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "delete",
+        &input,
+        "--selections",
+        &selections,
+        "--yes",
+        "-o",
+        &output,
+    ]);
+    assert_eq!(code, Some(0), "Delete failed: {}", stderr);
+
+    // -deleted_2 still contains the place
+    let no_events = no_events_path(&input);
+    assert!(
+        std::path::Path::new(&no_events).exists(),
+        "-deleted_2.gramps should exist"
+    );
+    let no_events_content = std::fs::read_to_string(&no_events).unwrap();
+    assert!(
+        no_events_content.contains("d0000001-4000-4b3d-8000-000000000005"),
+        "Place should survive in -deleted_2"
+    );
+
+    // -deleted_3 still contains the place
+    let no_notes = deleted_3_path(&input);
+    assert!(
+        std::path::Path::new(&no_notes).exists(),
+        "-deleted_3.gramps should exist"
+    );
+    let no_notes_content = std::fs::read_to_string(&no_notes).unwrap();
+    assert!(
+        no_notes_content.contains("d0000001-4000-4b3d-8000-000000000005"),
+        "Place should survive in -deleted_3"
+    );
+
+    // -deleted_4 drops the place
+    let no_places = deleted_4_path(&input);
+    assert!(
+        std::path::Path::new(&no_places).exists(),
+        "-deleted_4.gramps should exist"
+    );
+    let no_places_content = std::fs::read_to_string(&no_places).unwrap();
+    assert!(
+        !no_places_content.contains("d0000001-4000-4b3d-8000-000000000005"),
+        "Place should be removed from -deleted_4"
+    );
+
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&selections);
+    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_file(&no_events);
+    let _ = std::fs::remove_file(&no_notes);
+    let _ = std::fs::remove_file(&no_places);
+}
+
+#[test]
+fn e2e_delete_manifest_places_marked_deleted() {
+    // Verify that after successful place cleaning, the manifest on disk has
+    // the pending places marked as Deleted.
+    if !gramps_available() {
+        eprintln!("Skipping: Gramps not available");
+        return;
+    }
+
+    let input = temp_path("mpmd_input.gramps");
+    let selections = temp_path("mpmd_selections.json");
+    let output = temp_path("mpmd_output.gramps");
+    let manifest_path = temp_path("mpmd_manifest.json");
+
+    write_uuid_fixture(&input, UUID_FIXTURE_FAMILY_EVENT_NOTE_PLACE);
+    write_selections(
+        &selections,
+        &[
+            "d0000001-4000-4b3d-8000-000000000001",
+            "d0000002-4000-4b3d-8000-000000000002",
+        ],
+    );
+
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "delete",
+        &input,
+        "--selections",
+        &selections,
+        "--yes",
+        "-o",
+        &output,
+        "--save-manifest",
+        &manifest_path,
+    ]);
+    assert_eq!(code, Some(0), "Delete failed: {}", stderr);
+
+    // Load the manifest and verify place status
+    let manifest_content = std::fs::read_to_string(&manifest_path).unwrap();
+    let manifest: serde_json::Value = serde_json::from_str(&manifest_content).unwrap();
+
+    // Places plan should exist
+    let places_plan = &manifest["plan"]["places"];
+    let to_delete = &places_plan["to_delete"];
+    assert!(
+        to_delete.as_array().is_some_and(|a| !a.is_empty()),
+        "Places to_delete should not be empty"
+    );
+
+    // All place entries should be 'deleted' (not 'pending')
+    for entry in to_delete.as_array().unwrap() {
+        assert_eq!(
+            entry["status"],
+            "deleted",
+            "Place {} should be marked deleted after clean",
+            entry["handle"]
+        );
+    }
+
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&selections);
+    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_file(&manifest_path);
+}

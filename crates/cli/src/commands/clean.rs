@@ -365,13 +365,15 @@ pub fn clean_notes_xml(
 
 /// Remove places matching the given handles from a Gramps XML file.
 ///
-/// Convenience wrapper around [`clean_elements_xml`] with `element_name = "place"`.
+/// Convenience wrapper around [`clean_elements_xml`] with `element_name = "placeobj"`.
+/// Gramps 5.1 uses `<placeobj>` for place definitions; the `<place hlink>`
+/// reference in events is a different element and is not matched.
 pub fn clean_places_xml(
     input: &Path,
     output: &Path,
     place_handles: &HashSet<String>,
 ) -> Result<CleanStats, CleanError> {
-    clean_elements_xml(input, output, "place", place_handles)
+    clean_elements_xml(input, output, "placeobj", place_handles)
 }
 
 // ---------------------------------------------------------------------------
@@ -1185,9 +1187,9 @@ mod tests {
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
 <database>
   <places>
-    <place handle="pl0001">
+    <placeobj handle="pl0001">
       <ptitle>New York City</ptitle>
-    </place>
+    </placeobj>
   </places>
 </database>"#;
         let (input, _dir) = write_temp(xml);
@@ -1216,8 +1218,8 @@ mod tests {
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
 <database>
   <places>
-    <place handle="pl0001"/>
-    <place handle="pl0002"/>
+    <placeobj handle="pl0001"/>
+    <placeobj handle="pl0002"/>
   </places>
 </database>"#;
         let (input, _dir) = write_temp(xml);
@@ -1239,9 +1241,9 @@ mod tests {
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
 <database>
   <places>
-    <place handle="pl0001">
+    <placeobj handle="pl0001">
       <ptitle>New York City</ptitle>
-    </place>
+    </placeobj>
   </places>
 </database>"#;
         let (input, _dir) = write_temp(xml);
@@ -1262,14 +1264,14 @@ mod tests {
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
 <database>
   <places>
-    <place handle="pl0001">
+    <placeobj handle="pl0001">
       <ptitle>New York City</ptitle>
       <coord lat="40.7128" long="-74.0060"/>
       <placeref hlink="pl0002"/>
-    </place>
-    <place handle="pl0002">
+    </placeobj>
+    <placeobj handle="pl0002">
       <ptitle>New York</ptitle>
-    </place>
+    </placeobj>
   </places>
 </database>"#;
         let (input, _dir) = write_temp(xml);
@@ -1313,9 +1315,9 @@ mod tests {
     </event>
   </events>
   <places>
-    <place handle="pl0001">
+    <placeobj handle="pl0001">
       <ptitle>New York City</ptitle>
-    </place>
+    </placeobj>
   </places>
 </database>"#;
         let (input, _dir) = write_temp(xml);
@@ -1345,9 +1347,9 @@ mod tests {
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
 <database>
   <places>
-    <place handle="pl0001"><ptitle>New York</ptitle></place>
-    <place handle="pl0002"><ptitle>Boston</ptitle></place>
-    <place handle="pl0003"><ptitle>Chicago</ptitle></place>
+    <placeobj handle="pl0001"><ptitle>New York</ptitle></placeobj>
+    <placeobj handle="pl0002"><ptitle>Boston</ptitle></placeobj>
+    <placeobj handle="pl0003"><ptitle>Chicago</ptitle></placeobj>
   </places>
 </database>"#;
         let (input, _dir) = write_temp(xml);
@@ -1370,9 +1372,9 @@ mod tests {
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
 <database xmlns="http://gramps-project.org/xml/1.7.2/">
   <places>
-    <ns:place ns:handle="pl0001" xmlns:ns="http://example.com/ns">
+    <ns:placeobj ns:handle="pl0001" xmlns:ns="http://example.com/ns">
       <ns:ptitle>Namespaced place</ns:ptitle>
-    </ns:place>
+    </ns:placeobj>
   </places>
 </database>"#;
         let (input, _dir) = write_temp(xml);
@@ -1394,7 +1396,7 @@ mod tests {
 <database>
   <header><created date="2024-01-01" version="5.2"/></header>
   <places>
-    <place handle="pl0001"><ptitle>Only place</ptitle></place>
+    <placeobj handle="pl0001"><ptitle>Only place</ptitle></placeobj>
   </places>
 </database>"#;
         let (input, _dir) = write_temp(xml);
