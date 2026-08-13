@@ -1381,6 +1381,7 @@ dependencies = [
 name = "gramps-reader"
 version = "0.1.0"
 dependencies = [
+ "delete",
  "flate2",
  "log",
  "output",

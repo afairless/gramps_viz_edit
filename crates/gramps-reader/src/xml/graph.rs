@@ -2340,4 +2340,23 @@ mod tests {
             panic!("Expected Place node");
         }
     }
+
+    #[test]
+    fn parse_and_describe_place_pname() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header>
+    <created date="2025-01-15" version="5.1"/>
+  </header>
+  <places>
+    <placeobj handle="pl0001" id="P0001">
+      <pname value="Furida"/>
+    </placeobj>
+  </places>
+</database>"#
+            .to_string();
+        let (graph, _) = parse_gramps_xml(&xml).unwrap();
+        let (desc, _) = delete::review::describe_node(&graph, &"pl0001".to_string());
+        assert_eq!(desc, "Furida");
+    }
 }

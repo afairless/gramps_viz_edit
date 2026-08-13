@@ -371,7 +371,7 @@ fn place_display_name(data: &typed_graph::PlaceData) -> String {
 ///
 /// Returns `(description, gramps_id)` where `gramps_id` is `None` when the
 /// node type has no gramps_id set.
-fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
+pub fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
     match graph.get_node(handle) {
         Some(Node::Person(data)) => {
             let full_name = person_full_name(data);
