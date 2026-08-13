@@ -1,79 +1,30 @@
-# Implementation Plan: Add Descriptive Metadata to Deletion Manifest
+# Implementation Plan: Output Directory Semantics + DB Retention Default Flip
 
-Source: `docs/research/manifest-descriptive-metadata.md`
+Source: `docs/research/output-dir-and-retain-db-defaults.md`
 
 ## Summary
 
-Add `gramps_id` and `description` fields to `HandleEntry` in the deletion manifest so that saved manifests are self-documenting. Bump manifest format from v2 to v3.
+Two changes to the `gramps-gen delete` command:
+
+1. **`--output` becomes a directory** (not a file). All output files are saved
+   inside that directory with hyphenated `-deleted-N.gramps` naming. When omitted,
+   defaults to the input file's directory.
+2. **DB retention default flips**: the Berkeley DB is **not saved** by default.
+   A new `--retain-db` flag opts in to keeping it. The old `--no-retain-db` flag
+   is removed.
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `feat: add gramps_id and description fields to HandleEntry` | HandleEntry schema | `crates/delete/src/types.rs` (add fields, serde attrs, update V1 deserializer branches); update all struct literals in `manifest.rs`, `reconcile.rs`, `manifest_contract.rs` | unit: `handle_entry_v3_roundtrip`, `handle_entry_v2_deserialization`, `handle_entry_serialization_skips_empty`, `type_plan_v1_to_v3_migration` |
-| 2 | `feat: bump manifest version to 3` | Version migration | `crates/delete/src/types.rs` (move `MANIFEST_VERSION` here, bump to 3); `crates/delete/src/manifest.rs` (update imports, `load_manifest` match 1\|2→3, drop local const); `crates/delete/tests/manifest_contract.rs` (update `contract_v1_fixture_load_migrates_to_v2` → v3) | unit: `v1_manifest_loads_as_v3`, `v2_manifest_loads_as_v3`; update `save_load_roundtrip`, `build_manifest_includes_all_types`, `contract_v1_fixture_load_migrates_to_v2` assertions |
-| 3 | `feat: populate manifest entries with descriptions from graph` | Build description population | `crates/delete/src/manifest.rs` (call `describe_node()` in `build_manifest`) | unit: `build_manifest_populates_descriptions`, `build_manifest_empty_node`, `save_load_v3_roundtrip`; integration: new v3 manifest roundtrip test |
-| 4 | `docs: update manifest format documentation to v3` | Documentation | `docs/ARCHITECTURE.md` (update v2 → v3, add gramps_id/description to example) | — |
+| 1 | `refactor: replace path helpers with hyphenated \`-deleted-N\` naming` | Path helper functions | `crates/cli/src/commands/delete.rs` — add `deleted_1_path`, `deleted_2_path`, `deleted_3_path`, `deleted_4_path`; remove `derive_no_events_path`, `derive_deleted_3_path`, `derive_deleted_4_path`; update pipeline call sites to use new helpers | Unit |
+| 2 | `feat: change \`--output\` to directory, add \`--retain-db\` flag` | Args struct + output directory resolution | `crates/cli/src/commands/delete.rs` — rename `output`→`output_dir` in `DeleteArgs`, replace `no_retain_db` with `retain_db`, add output directory resolution + `create_dir_all`, update manifest path derivation, add "File exists" error mapping | Unit |
+| 3 | `feat: invert DB retention default to temp-dir + cleanup` | DB retention default flip | `crates/cli/src/commands/delete.rs` — default `db_dir` to timestamped temp dir, invert `--no-retain-db` pass-through to `delete_backend.py`, add conditional temp cleanup, remove `dir_size()` function + its unit test, update module docstring and final log lines | Unit |
+| 4 | `test: update e2e tests for new output directory and retention semantics` | E2E test suite update | `crates/cli/tests/e2e_delete.rs` — add `temp_dir` helper, replace all `--output <file>` with `--output <dir>`, retarget file reads to `<dir>/<stem>-deleted-N.gramps`, add tests for old-usage error, default DB cleanup, `--retain-db` | Integration |
+| 5 | `docs: rewrite delete-tool.md for new CLI semantics` | User documentation | `docs/delete-tool.md` — update all examples, tables, argument descriptions, add "Which file is the final output?" callout | — |
+| 6 | `docs: update ARCHITECTURE.md delete pipeline section` | Architecture documentation | `docs/ARCHITECTURE.md` — update architecture diagram/footnotes for new output naming and DB retention default | — |
 
-## Per-Step Detail
+## Notes
 
-### Step 1 — HandleEntry fields
-
-- Add `gramps_id: Option<String>` and `description: String` to `HandleEntry` in `crates/delete/src/types.rs`
-- Annotate with `#[serde(default, skip_serializing_if = "Option::is_none")]` on `gramps_id` and `#[serde(default, skip_serializing_if = "String::is_empty")]` on `description`
-- Update the two `HandleOrEntry::V1(s)` struct literals in `TypePlan`'s custom deserializer (`types.rs` lines 137, 149) to include `gramps_id: None, description: String::new()`
-- Update all test struct literals across the crate:
-  - `types.rs` tests: `handle_entry_serde_v2`, `type_plan_v2_roundtrip`, `type_plan_v1_deserialization`, `type_plan_mixed_v1_v2_still_works`, `delete_manifest_roundtrip` (3 entries)
-  - `manifest.rs` tests: `make_entry` helper, `build_manifest_includes_all_types` (via `make_entry`)
-  - `reconcile.rs` tests: `make_manifest` and `make_manifest_multi` helpers (4 literals total)
-  - `manifest_contract.rs` test: `contract_v2_serialize_from_rust_matches_fixture_shape` entry
-- Add tests:
-  - `handle_entry_v3_roundtrip`: serialize/deserialize with gramps_id + description
-  - `handle_entry_v2_deserialization`: v2 JSON (no new fields) loads with defaults
-  - `handle_entry_serialization_skips_empty`: empty description + None gramps_id omitted from JSON
-  - `type_plan_v1_to_v3_migration`: v1 flat strings produce HandleEntry with defaults for new fields
-
-### Step 2 — Version bump
-
-- Move `pub const MANIFEST_VERSION: u32` from `manifest.rs` to `types.rs` (next to `DeleteManifest`), bump from 2 to 3
-- Update `manifest.rs` imports: add `MANIFEST_VERSION` to `use crate::types::{...}`, remove local `pub const`
-- Update `load_manifest` version match: `3 => Ok`, `1 | 2 => migrate (version = MANIFEST_VERSION, fix deletion_mode)`, `other => Err`
-- Undo the `load_manifest_v1` change (still rejects non-1 — unchanged)
-- Unit tests to update:
-  - `manifest.rs save_load_roundtrip`: expects `loaded.version == 2` → `3`
-  - `manifest.rs build_manifest_includes_all_types`: expects `manifest.version == 2` → `3`
-- Integration test to update:
-  - `manifest_contract.rs contract_v1_fixture_load_migrates_to_v2`: rename to `contract_v1_fixture_load_migrates_to_v3`, assert `version == 3`
-- Add tests:
-  - `v1_manifest_loads_as_v3`: write v1 fixture, load via `load_manifest`, assert version 3 and auto-migrated fields
-  - `v2_manifest_loads_as_v3`: write v2 fixture, load via `load_manifest`, assert version 3 and entries preserved
-
-### Step 3 — Populate descriptions
-
-- In `build_manifest` (`manifest.rs`), replace the `|h| HandleEntry { handle: h.clone(), status: HandleStatus::Pending }` closure with one that calls `describe_node(graph, h)`:
-
-  ```rust
-  .map(|h| {
-      let (desc, gramps_id) = describe_node(graph, h);
-      HandleEntry {
-          handle: h.clone(),
-          status: HandleStatus::Pending,
-          gramps_id,
-          description: desc,
-      }
-  })
-  ```
-
-- Add `use crate::review::describe_node;` to `manifest.rs`
-- Add tests:
-  - `build_manifest_populates_descriptions`: build graph with a named person (gramps_id, birth event), run `build_manifest`, assert gramps_id + description are non-empty
-  - `build_manifest_empty_node`: add node with no name/date, assert fallback description + no gramps_id
-  - `save_load_v3_roundtrip`: construct v3 manifest with all fields, save/load, assert equality
-- Add integration test: new file in `crates/delete/tests/` (e.g. `manifest_descriptions.rs`) that builds a graph with a person (name, gramps_id, birth event), runs `build_manifest`, serializes to JSON, and asserts `gramps_id` and `description` fields are present in the output
-
-### Step 4 — Documentation
-
-- Update `docs/ARCHITECTURE.md`:
-  - "JSON manifest v2" → "JSON manifest v3" in the ASCII diagram (line ~131)
-  - "Deletion manifests use **v2 format**" → "**v3 format**" (line ~849)
-  - Update the example JSON to include `gramps_id` and `description` fields
-  - Update the version note: "v2 manifests are auto-migrated to v3 on load"
-  - Update the Status table as needed (no new statuses, same three)
+- `scripts/delete_backend.py` and `scripts/test_delete_backend.py` require **no changes**.
+- `crates/cli/src/main.rs` requires **no changes** (confirmed by inspection — no mention of `--no-retain-db` or output file semantics).
+- The Python backend's `--no-retain-db` flag stays as-is; only the Rust call site inverts the pass-through (step 3).
+- Each step includes its unit tests alongside the code changes, following incremental-development principles. E2E tests (step 4) are updated separately since they span the full pipeline.
