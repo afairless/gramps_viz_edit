@@ -13,6 +13,12 @@
 //! distinguishes "newly orphaned" (was in use, then all connections severed)
 //! from "already orphaned" (had zero connections before the operation).
 //!
+//! For places, an additional pre-existing **in-use** count is recorded:
+//! the number of incoming keep-alive edges (`EventPlace` and `PlacePlaceRef`
+//! where the place is the `target`). A place with zero incoming keep-alive
+//! edges before the operation was already orphaned — even if it has outgoing
+//! references such as `PlaceNote` — and is never flagged by the cascade.
+//!
 //! ## Phase B — Fixed-point loop
 //!
 //! Starting with the seed set, repeatedly iterate over all non-deleted nodes
@@ -117,6 +123,23 @@ fn edge_other_endpoint(edge: &Edge, handle: &Handle) -> Handle {
     }
 }
 
+/// Count a place's pre-existing incoming keep-alive edges.
+///
+/// Incoming keep-alive edges are `EventPlace` and `PlacePlaceRef` where the
+/// place is the `target`. Outgoing edges (`PlaceCitation`, `PlaceMediaRef`,
+/// `PlaceNote`, `PlaceTag`, and outgoing `PlacePlaceRef`) do not count.
+fn pre_place_in_use_count(graph: &Graph, handle: &Handle) -> usize {
+    graph
+        .edges_incident_to(handle)
+        .iter()
+        .filter(|e| match e {
+            Edge::EventPlace { target, .. } => target == handle,
+            Edge::PlacePlaceRef { target, .. } => target == handle,
+            _ => false,
+        })
+        .count()
+}
+
 /// Run the deletion cascade on a graph starting from a set of seed handles
 /// (typically people selected for deletion).
 ///
@@ -127,9 +150,13 @@ fn edge_other_endpoint(edge: &Edge, handle: &Handle) -> Handle {
 pub fn cascade(graph: &Graph, seeds: &HashSet<Handle>) -> DeletePlan {
     // Phase A: Record pre-existing connectivity
     let mut pre_connectivity: HashMap<Handle, usize> = HashMap::new();
-    for (handle, _) in graph.iter_nodes() {
+    let mut pre_place_in_use: HashMap<Handle, usize> = HashMap::new();
+    for (handle, node) in graph.iter_nodes() {
         let count = graph.edges_incident_to(handle).len();
         pre_connectivity.insert(handle.clone(), count);
+        if matches!(node, Node::Place(_)) {
+            pre_place_in_use.insert(handle.clone(), pre_place_in_use_count(graph, handle));
+        }
     }
 
     // Phase B: Frontier-based BFS cascade
@@ -161,6 +188,18 @@ pub fn cascade(graph: &Graph, seeds: &HashSet<Handle>) -> DeletePlan {
             let pre_count = pre_connectivity.get(&neighbor).copied().unwrap_or(0);
             if pre_count == 0 {
                 continue;
+            }
+
+            // A place with zero incoming keep-alive edges before the operation
+            // was already orphaned — never flag it, even if it has outgoing refs.
+            // (A place may have pre_count > 0 solely from outgoing edges such as
+            // PlaceNote; such a place is semantically already orphaned.)
+            if let Some(node) = graph.get_node(&neighbor) {
+                if matches!(node, Node::Place(_))
+                    && pre_place_in_use.get(&neighbor).copied().unwrap_or(0) == 0
+                {
+                    continue;
+                }
             }
 
             if type_specific_orphan_rule(&neighbor, graph, &to_delete) {
@@ -2957,5 +2996,185 @@ mod tests {
         for seed in &seeds {
             assert!(plan.to_delete.contains(seed), "Seed must be in to_delete");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Category I: Place hardening — pre_place_in_use + already-orphaned skip
+    // -----------------------------------------------------------------------
+
+    // I1: pre_place_in_use_count counts only incoming keep-alive edges
+    #[test]
+    fn pre_place_in_use_counts_incoming_only() {
+        let mut graph = Graph::new();
+
+        // Create a place
+        let pl1 = "pl1".to_string();
+        graph
+            .add_node(
+                pl1.clone(),
+                Node::Place(typed_graph::PlaceData {
+                    handle: pl1.clone(),
+                    ..typed_graph::PlaceData::default()
+                }),
+            )
+            .unwrap();
+
+        // Attach outgoing edges: PlaceNote, PlaceCitation, PlaceMediaRef, PlaceTag
+        // These should NOT count as incoming keep-alive edges.
+        let n1 = "n1".to_string();
+        graph
+            .add_node(
+                n1.clone(),
+                Node::Note(typed_graph::NoteData {
+                    handle: n1.clone(),
+                    ..typed_graph::NoteData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::PlaceNote {
+                source: pl1.clone(),
+                target: n1.clone(),
+            })
+            .unwrap();
+
+        let c1 = "c1".to_string();
+        graph
+            .add_node(
+                c1.clone(),
+                Node::Citation(typed_graph::CitationData {
+                    handle: c1.clone(),
+                    ..typed_graph::CitationData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::PlaceCitation {
+                source: pl1.clone(),
+                target: c1.clone(),
+            })
+            .unwrap();
+
+        // pre_place_in_use_count should be 0 — only outgoing edges exist
+        assert_eq!(pre_place_in_use_count(&graph, &pl1), 0);
+
+        // Now add an incoming EventPlace edge — should count as 1
+        let e1 = "e1".to_string();
+        graph
+            .add_node(
+                e1.clone(),
+                Node::Event(typed_graph::EventData {
+                    handle: e1.clone(),
+                    ..typed_graph::EventData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::EventPlace {
+                source: e1.clone(),
+                target: pl1.clone(),
+            })
+            .unwrap();
+
+        assert_eq!(pre_place_in_use_count(&graph, &pl1), 1);
+
+        // Add an incoming PlacePlaceRef — should count as 2
+        let pl2 = "pl2".to_string();
+        graph
+            .add_node(
+                pl2.clone(),
+                Node::Place(typed_graph::PlaceData {
+                    handle: pl2.clone(),
+                    ..typed_graph::PlaceData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::PlacePlaceRef {
+                source: pl2.clone(),
+                target: pl1.clone(),
+                metadata: Box::new(typed_graph::PlaceRef {
+                    ref_field: pl1.clone(),
+                    ..typed_graph::PlaceRef::default()
+                }),
+            })
+            .unwrap();
+
+        assert_eq!(pre_place_in_use_count(&graph, &pl1), 2);
+    }
+
+    // I2: already-orphaned place with only outgoing refs is NOT deleted
+    #[test]
+    fn already_orphaned_place_with_outgoing_refs_not_deleted() {
+        let mut graph = Graph::new();
+
+        // Person 1 -> Event 1 -> Place 1 (newly orphaned, should be deleted)
+        let p1 = make_person(&mut graph, "p1");
+        let e1 = make_event(&mut graph, "e1", &p1);
+        let pl1 = make_place(&mut graph, "pl1", &e1);
+
+        // Place 2 has only outgoing PlaceNote (no incoming keep-alive edges)
+        // — already orphaned, should NOT be deleted
+        let pl2 = "pl2".to_string();
+        graph
+            .add_node(
+                pl2.clone(),
+                Node::Place(typed_graph::PlaceData {
+                    handle: pl2.clone(),
+                    ..typed_graph::PlaceData::default()
+                }),
+            )
+            .unwrap();
+        let n1 = "n1".to_string();
+        graph
+            .add_node(
+                n1.clone(),
+                Node::Note(typed_graph::NoteData {
+                    handle: n1.clone(),
+                    ..typed_graph::NoteData::default()
+                }),
+            )
+            .unwrap();
+        graph
+            .add_edge(Edge::PlaceNote {
+                source: pl2.clone(),
+                target: n1.clone(),
+            })
+            .unwrap();
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+
+        // pl1 is newly orphaned — should be deleted
+        assert!(plan.to_delete.contains(&pl1), "Newly-orphaned place pl1 should be deleted");
+        // pl2 is already orphaned — should NOT be deleted
+        assert!(
+            !plan.to_delete.contains(&pl2),
+            "Already-orphaned place pl2 should NOT be deleted"
+        );
+        // The note referenced by pl2 should also not be deleted (since pl2 is not deleted)
+        assert!(!plan.to_delete.contains(&n1), "Note n1 should not be deleted");
+    }
+
+    // I3: newly-orphaned place is still deleted (regression)
+    #[test]
+    fn newly_orphaned_place_still_deleted() {
+        let mut graph = Graph::new();
+
+        // Person 1 -> Event 1 -> Place 1
+        let p1 = make_person(&mut graph, "p1");
+        let e1 = make_event(&mut graph, "e1", &p1);
+        let pl1 = make_place(&mut graph, "pl1", &e1);
+
+        let mut seeds = HashSet::new();
+        seeds.insert(p1.clone());
+        let plan = cascade(&graph, &seeds);
+
+        // The place should still be deleted when the only referencing event is deleted
+        assert!(plan.to_delete.contains(&pl1), "Place pl1 should be transitively cascaded");
+        assert!(plan.to_delete.contains(&e1), "Event e1 should be cascaded");
+        assert!(plan.to_delete.contains(&p1), "Person p1 should be deleted");
+        assert_eq!(plan.to_delete.len(), 3);
     }
 }
