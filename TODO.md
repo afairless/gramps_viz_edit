@@ -1,188 +1,79 @@
-# Implementation Plan: Place Name Display in Delete Review
+# Implementation Plan: Add Descriptive Metadata to Deletion Manifest
 
-Source: `docs/research/place-name-display-in-delete-review.md`
+Source: `docs/research/manifest-descriptive-metadata.md`
 
 ## Summary
 
-Show real place names (`Furida`, `Furmany`) instead of `"Unnamed Place"` in the `gramps-gen delete` interactive review. The root cause is two-fold: (1) the Gramps 5.1 XML parser never reads `<pname value="..."/>` or `<ptitle>` elements, so `PlaceData.title` is always `None` for 5.1 files; (2) the review display only falls back to `data.title.as_deref().unwrap_or("Unnamed Place")`.
+Add `gramps_id` and `description` fields to `HandleEntry` in the deletion manifest so that saved manifests are self-documenting. Bump manifest format from v2 to v3.
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `feat: parse pname/ptitle in gramps-reader XML graph parser` | Parsing: extend `PlaceBuilder` with `place_names`, read `<pname>` (Empty event) and `<ptitle>` (Start event), populate `alt_names` on `into_data()` | `crates/gramps-reader/src/xml/graph.rs` | Unit: `parse_place_pname`, `parse_place_ptitle`, `parse_place_pname_plus_ptitle`, `parse_place_multiple_pnames` |
-| 2 | `feat: display real place names in delete review` | Display: add `location_display_name` and `place_display_name` helpers, update `Node::Place` arm in `describe_node` | `crates/delete/src/review.rs` | Unit: `describe_place_node_name_first`, `describe_place_node_title_fallback`, `describe_place_node_location_fallback`, `describe_place_node_unnamed`, `location_display_name_empty` |
-| 3 | `test: add end-to-end parser→display integration test for place names` | Integration: cross-crate test via `gramps-reader` dev-dep on `delete`, parse XML and check `describe_node` output | `crates/gramps-reader/Cargo.toml`, `crates/gramps-reader/src/xml/graph.rs` | Integration: `parse_and_describe_place_pname` |
-| 4 | `chore: run full workspace test and verify all outputs` | Full workspace verification | — | Workspace: `cargo test --workspace`, `cargo clippy --all-targets --all-features -- -D warnings` |
+| 1 | `feat: add gramps_id and description fields to HandleEntry` | HandleEntry schema | `crates/delete/src/types.rs` (add fields, serde attrs, update V1 deserializer branches); update all struct literals in `manifest.rs`, `reconcile.rs`, `manifest_contract.rs` | unit: `handle_entry_v3_roundtrip`, `handle_entry_v2_deserialization`, `handle_entry_serialization_skips_empty`, `type_plan_v1_to_v3_migration` |
+| 2 | `feat: bump manifest version to 3` | Version migration | `crates/delete/src/types.rs` (move `MANIFEST_VERSION` here, bump to 3); `crates/delete/src/manifest.rs` (update imports, `load_manifest` match 1\|2→3, drop local const); `crates/delete/tests/manifest_contract.rs` (update `contract_v1_fixture_load_migrates_to_v2` → v3) | unit: `v1_manifest_loads_as_v3`, `v2_manifest_loads_as_v3`; update `save_load_roundtrip`, `build_manifest_includes_all_types`, `contract_v1_fixture_load_migrates_to_v2` assertions |
+| 3 | `feat: populate manifest entries with descriptions from graph` | Build description population | `crates/delete/src/manifest.rs` (call `describe_node()` in `build_manifest`) | unit: `build_manifest_populates_descriptions`, `build_manifest_empty_node`, `save_load_v3_roundtrip`; integration: new v3 manifest roundtrip test |
+| 4 | `docs: update manifest format documentation to v3` | Documentation | `docs/ARCHITECTURE.md` (update v2 → v3, add gramps_id/description to example) | — |
 
-## Details
+## Per-Step Detail
 
-### Step 1 — Parse pname/ptitle in gramps-reader
+### Step 1 — HandleEntry fields
 
-**File: `crates/gramps-reader/src/xml/graph.rs`**
+- Add `gramps_id: Option<String>` and `description: String` to `HandleEntry` in `crates/delete/src/types.rs`
+- Annotate with `#[serde(default, skip_serializing_if = "Option::is_none")]` on `gramps_id` and `#[serde(default, skip_serializing_if = "String::is_empty")]` on `description`
+- Update the two `HandleOrEntry::V1(s)` struct literals in `TypePlan`'s custom deserializer (`types.rs` lines 137, 149) to include `gramps_id: None, description: String::new()`
+- Update all test struct literals across the crate:
+  - `types.rs` tests: `handle_entry_serde_v2`, `type_plan_v2_roundtrip`, `type_plan_v1_deserialization`, `type_plan_mixed_v1_v2_still_works`, `delete_manifest_roundtrip` (3 entries)
+  - `manifest.rs` tests: `make_entry` helper, `build_manifest_includes_all_types` (via `make_entry`)
+  - `reconcile.rs` tests: `make_manifest` and `make_manifest_multi` helpers (4 literals total)
+  - `manifest_contract.rs` test: `contract_v2_serialize_from_rust_matches_fixture_shape` entry
+- Add tests:
+  - `handle_entry_v3_roundtrip`: serialize/deserialize with gramps_id + description
+  - `handle_entry_v2_deserialization`: v2 JSON (no new fields) loads with defaults
+  - `handle_entry_serialization_skips_empty`: empty description + None gramps_id omitted from JSON
+  - `type_plan_v1_to_v3_migration`: v1 flat strings produce HandleEntry with defaults for new fields
 
-**1a. Extend `PlaceBuilder`** (≈ line 1533) with a `place_names: Vec<PlaceName>` field:
+### Step 2 — Version bump
 
-```rust
-#[derive(Default)]
-struct PlaceBuilder {
-    handle: Handle,
-    gramps_id: Option<String>,
-    title: Option<String>,
-    code: Option<String>,
-    lat: Option<String>,
-    long: Option<String>,
-    name: Location,
-    place_names: Vec<PlaceName>,
-}
-```
+- Move `pub const MANIFEST_VERSION: u32` from `manifest.rs` to `types.rs` (next to `DeleteManifest`), bump from 2 to 3
+- Update `manifest.rs` imports: add `MANIFEST_VERSION` to `use crate::types::{...}`, remove local `pub const`
+- Update `load_manifest` version match: `3 => Ok`, `1 | 2 => migrate (version = MANIFEST_VERSION, fix deletion_mode)`, `other => Err`
+- Undo the `load_manifest_v1` change (still rejects non-1 — unchanged)
+- Unit tests to update:
+  - `manifest.rs save_load_roundtrip`: expects `loaded.version == 2` → `3`
+  - `manifest.rs build_manifest_includes_all_types`: expects `manifest.version == 2` → `3`
+- Integration test to update:
+  - `manifest_contract.rs contract_v1_fixture_load_migrates_to_v2`: rename to `contract_v1_fixture_load_migrates_to_v3`, assert `version == 3`
+- Add tests:
+  - `v1_manifest_loads_as_v3`: write v1 fixture, load via `load_manifest`, assert version 3 and auto-migrated fields
+  - `v2_manifest_loads_as_v3`: write v2 fixture, load via `load_manifest`, assert version 3 and entries preserved
 
-**1b. Add `<ptitle>` text-element case** in the `Start` event block (next to the `code` case, ≈ line 564). Read the element text into `p.title`:
+### Step 3 — Populate descriptions
 
-```rust
-b"ptitle" if current_place.is_some() => {
-    let name_q = e.name().to_owned();
-    if let Ok(text) = reader.read_text(name_q) {
-        let text = text.trim().to_string();
-        if !text.is_empty() {
-            if let Some(ref mut p) = current_place {
-                p.title = Some(text);
-            }
-        }
-    }
-}
-```
+- In `build_manifest` (`manifest.rs`), replace the `|h| HandleEntry { handle: h.clone(), status: HandleStatus::Pending }` closure with one that calls `describe_node(graph, h)`:
 
-**1c. Add `<pname>` case** in the `Ok(Event::Empty(ref e))` match block (≈ line 974). Read the `value` attribute via `read_attr` and push a `PlaceName`:
+  ```rust
+  .map(|h| {
+      let (desc, gramps_id) = describe_node(graph, h);
+      HandleEntry {
+          handle: h.clone(),
+          status: HandleStatus::Pending,
+          gramps_id,
+          description: desc,
+      }
+  })
+  ```
 
-```rust
-b"pname" => {
-    if let Some(value) = read_attr(e, b"value").filter(|v| !v.is_empty()) {
-        if let Some(ref mut p) = current_place {
-            p.place_names.push(PlaceName { value: Some(value), date: None });
-        }
-    }
-}
-```
+- Add `use crate::review::describe_node;` to `manifest.rs`
+- Add tests:
+  - `build_manifest_populates_descriptions`: build graph with a named person (gramps_id, birth event), run `build_manifest`, assert gramps_id + description are non-empty
+  - `build_manifest_empty_node`: add node with no name/date, assert fallback description + no gramps_id
+  - `save_load_v3_roundtrip`: construct v3 manifest with all fields, save/load, assert equality
+- Add integration test: new file in `crates/delete/tests/` (e.g. `manifest_descriptions.rs`) that builds a graph with a person (name, gramps_id, birth event), runs `build_manifest`, serializes to JSON, and asserts `gramps_id` and `description` fields are present in the output
 
-**1d. Populate `alt_names` in `into_data()`** (≈ line 1546):
+### Step 4 — Documentation
 
-```rust
-fn into_data(self) -> PlaceData {
-    PlaceData {
-        handle: self.handle,
-        gramps_id: self.gramps_id,
-        title: self.title,
-        code: self.code,
-        lat: self.lat,
-        long: self.long,
-        name: self.name,
-        alt_names: self.place_names,
-        ..PlaceData::default()
-    }
-}
-```
-
-**Unit tests** (in `#[cfg(test)] mod tests` at end of `graph.rs`):
-
-- `parse_place_pname` — single `<pname value="Furida"/>` → `alt_names[0].value == Some("Furida")`, `title == None`
-- `parse_place_ptitle` — `<ptitle>Furida</ptitle>` → `title == Some("Furida")`
-- `parse_place_pname_plus_ptitle` — both present; both preserved
-- `parse_place_multiple_pnames` — two `<pname>` → `alt_names == [primary, alternate]`
-
-### Step 2 — Display place names in delete review
-
-**File: `crates/delete/src/review.rs`**
-
-**2a. Add `location_display_name` helper** (near `fallback_source`, ≈ line 316):
-
-```rust
-fn location_display_name(loc: &typed_graph::Location) -> Option<String> {
-    let parts = [
-        loc.street.as_deref(),
-        loc.locality.as_deref(),
-        loc.city.as_deref(),
-        loc.parish.as_deref(),
-        loc.county.as_deref(),
-        loc.state.as_deref(),
-        loc.country.as_deref(),
-    ];
-    let parts: Vec<&str> = parts.into_iter().flatten().filter(|s| !s.is_empty()).collect();
-    if parts.is_empty() { None } else { Some(parts.join(", ")) }
-}
-```
-
-**2b. Add `place_display_name` helper**:
-
-```rust
-fn place_display_name(data: &typed_graph::PlaceData) -> String {
-    // 1. Primary 5.1 name (<pname value>), stored as alt_names[0]
-    if let Some(name) = data
-        .alt_names
-        .first()
-        .and_then(|n| n.value.as_deref())
-        .filter(|v| !v.is_empty())
-    {
-        return name.to_string();
-    }
-    // 2. 5.1 descriptive title (<ptitle>)
-    if let Some(title) = data.title.as_deref().filter(|t| !t.is_empty()) {
-        return title.to_string();
-    }
-    // 3. 5.2 structured Location (joined parts)
-    if let Some(loc) = location_display_name(&data.name) {
-        return loc;
-    }
-    "Unnamed Place".to_string()
-}
-```
-
-**2c. Replace the `Node::Place` arm** (≈ line 509):
-
-```rust
-Some(Node::Place(data)) => {
-    let desc = place_display_name(data);
-    (desc, data.gramps_id.clone())
-}
-```
-
-**Unit tests** (in existing `#[cfg(test)] mod tests`):
-
-- `describe_place_node_name_first` — `alt_names[0] = Some("Furida")`, `title = Some("Furida title")` → renders `"Furida"`
-- `describe_place_node_title_fallback` — empty `alt_names`, `title = Some("New York")` → renders `"New York"` (preserves existing behavior)
-- `describe_place_node_location_fallback` — `name: Location { city: Some("Ur"), country: Some("Mesopotamia") }` → renders `"Ur, Mesopotamia"`
-- `describe_place_node_unnamed` — all empty → `"Unnamed Place"`
-- `location_display_name_empty` — default `Location` → `None`
-
-### Step 3 — Integration test (parser → display)
-
-**Dependency note**: `gramps-reader` does not currently depend on `delete`. Add `delete` as a **dev-dependency** in `crates/gramps-reader/Cargo.toml` (safe because `delete` does not depend on `gramps-reader`, so no cycle).
-
-**File: `crates/gramps-reader/src/xml/graph.rs`** (in the unit test module, or as a separate `#[test]`):
-
-```rust
-#[test]
-fn parse_and_describe_place_pname() {
-    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
-<database xmlns="http://gramps-project.org/xml/1.7.2/">
-  <header>
-    <created date="2025-01-15" version="5.1"/>
-  </header>
-  <places>
-    <placeobj handle="pl0001" id="P0001">
-      <pname value="Furida"/>
-    </placeobj>
-  </places>
-</database>"#.to_string();
-    let (graph, _) = parse_gramps_xml(&xml).unwrap();
-    let (desc, _) = delete::review::describe_node(&graph, &"pl0001".to_string());
-    assert_eq!(desc, "Furida");
-}
-```
-
-### Step 4 — Full workspace verification
-
-Run:
-
-```bash
-cargo test --workspace
-cargo clippy --all-targets --all-features -- -D warnings
-```
+- Update `docs/ARCHITECTURE.md`:
+  - "JSON manifest v2" → "JSON manifest v3" in the ASCII diagram (line ~131)
+  - "Deletion manifests use **v2 format**" → "**v3 format**" (line ~849)
+  - Update the example JSON to include `gramps_id` and `description` fields
+  - Update the version note: "v2 manifests are auto-migrated to v3 on load"
+  - Update the Status table as needed (no new statuses, same three)
