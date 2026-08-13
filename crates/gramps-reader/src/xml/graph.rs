@@ -279,7 +279,7 @@ impl GraphParser {
                                 ..EventBuilder::default()
                             });
                         }
-                        b"place" if self.state.current_section == Section::Places => {
+                        b"place" | b"placeobj" if self.state.current_section == Section::Places => {
                             let handle = read_handle_attr(e).unwrap_or_default();
                             let gramps_id = read_id_attr(e);
                             current_place = Some(PlaceBuilder {
@@ -1330,7 +1330,7 @@ impl GraphParser {
                                 self.nodes.insert(handle, Node::Event(data));
                             }
                         }
-                        b"place" => {
+                        b"place" | b"placeobj" => {
                             if let Some(p) = current_place.take() {
                                 let data = p.into_data();
                                 let handle = data.handle.clone();

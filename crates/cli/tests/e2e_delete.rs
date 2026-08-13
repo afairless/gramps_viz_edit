@@ -1137,10 +1137,10 @@ const UUID_FIXTURE_FAMILY_EVENT_NOTE_PLACE: &str = r###"<?xml version="1.0" enco
     </note>
   </notes>
   <places>
-    <place handle="d0000001-4000-4b3d-8000-000000000005" id="P0001">
+    <placeobj handle="d0000001-4000-4b3d-8000-000000000005" id="P0001">
       <ptitle>New York City</ptitle>
       <coord lat="40.7128" long="-74.0060"/>
-    </place>
+    </placeobj>
   </places>
 </database>
 "###;
