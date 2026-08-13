@@ -3147,14 +3147,20 @@ mod tests {
         let plan = cascade(&graph, &seeds);
 
         // pl1 is newly orphaned — should be deleted
-        assert!(plan.to_delete.contains(&pl1), "Newly-orphaned place pl1 should be deleted");
+        assert!(
+            plan.to_delete.contains(&pl1),
+            "Newly-orphaned place pl1 should be deleted"
+        );
         // pl2 is already orphaned — should NOT be deleted
         assert!(
             !plan.to_delete.contains(&pl2),
             "Already-orphaned place pl2 should NOT be deleted"
         );
         // The note referenced by pl2 should also not be deleted (since pl2 is not deleted)
-        assert!(!plan.to_delete.contains(&n1), "Note n1 should not be deleted");
+        assert!(
+            !plan.to_delete.contains(&n1),
+            "Note n1 should not be deleted"
+        );
     }
 
     // I3: newly-orphaned place is still deleted (regression)
@@ -3172,7 +3178,10 @@ mod tests {
         let plan = cascade(&graph, &seeds);
 
         // The place should still be deleted when the only referencing event is deleted
-        assert!(plan.to_delete.contains(&pl1), "Place pl1 should be transitively cascaded");
+        assert!(
+            plan.to_delete.contains(&pl1),
+            "Place pl1 should be transitively cascaded"
+        );
         assert!(plan.to_delete.contains(&e1), "Event e1 should be cascaded");
         assert!(plan.to_delete.contains(&p1), "Person p1 should be deleted");
         assert_eq!(plan.to_delete.len(), 3);

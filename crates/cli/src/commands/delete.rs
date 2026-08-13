@@ -632,11 +632,8 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
             note_input.display(),
             deleted_3_path.display()
         );
-        let stats = crate::commands::clean::clean_notes_xml(
-            &note_input,
-            &deleted_3_path,
-            &pending_notes,
-        )?;
+        let stats =
+            crate::commands::clean::clean_notes_xml(&note_input, &deleted_3_path, &pending_notes)?;
         log::info!(
             "Note cleaning complete: {} removed, {} not found in XML",
             stats.elements_removed,

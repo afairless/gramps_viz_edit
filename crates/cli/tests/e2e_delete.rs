@@ -278,10 +278,7 @@ const UUID_FIXTURE_FAMILY_NOTE: &str = r###"<?xml version="1.0" encoding="UTF-8"
 
 /// Write a v1 manifest JSON file (flat string format) for testing.
 fn write_v1_manifest(path: &str, input_file: &str, handles: &[&str]) {
-    let to_delete: Vec<String> = handles
-        .iter()
-        .map(|h| format!("\"{}\"", h))
-        .collect();
+    let to_delete: Vec<String> = handles.iter().map(|h| format!("\"{}\"", h)).collect();
     let json = format!(
         r#"{{
   "version": 1,
@@ -305,24 +302,13 @@ fn write_v1_manifest(path: &str, input_file: &str, handles: &[&str]) {
 
 /// Write a v2 reconciled manifest JSON file for testing.
 /// `deleted` handles are marked Deleted, `pending` handles are marked Pending.
-fn write_v2_reconciled_manifest(
-    path: &str,
-    input_file: &str,
-    deleted: &[&str],
-    pending: &[&str],
-) {
+fn write_v2_reconciled_manifest(path: &str, input_file: &str, deleted: &[&str], pending: &[&str]) {
     let mut entries: Vec<String> = Vec::new();
     for h in deleted {
-        entries.push(format!(
-            r#"{{"handle":"{}","status":"deleted"}}"#,
-            h
-        ));
+        entries.push(format!(r#"{{"handle":"{}","status":"deleted"}}"#, h));
     }
     for h in pending {
-        entries.push(format!(
-            r#"{{"handle":"{}","status":"pending"}}"#,
-            h
-        ));
+        entries.push(format!(r#"{{"handle":"{}","status":"pending"}}"#, h));
     }
     let json = format!(
         r#"{{
@@ -462,7 +448,10 @@ fn e2e_delete_manifest_v2_reconciliation() {
     // The person should be marked as deleted by Gramps.
     let people = &manifest["plan"]["people"];
     let to_delete = &people["to_delete"];
-    assert_eq!(to_delete[0]["handle"], "a5f0c1a2-4000-4b3d-8000-000000000001");
+    assert_eq!(
+        to_delete[0]["handle"],
+        "a5f0c1a2-4000-4b3d-8000-000000000001"
+    );
     assert_eq!(to_delete[0]["status"], "deleted");
 
     let _ = std::fs::remove_file(&input);
@@ -501,8 +490,15 @@ fn e2e_delete_db_retained() {
     assert_eq!(code, Some(0), "Delete failed: {}", stderr);
 
     // Verify DB directory exists and contains files.
-    assert!(std::path::Path::new(&db_dir).exists(), "DB dir should exist");
-    let db_entries: Vec<_> = std::fs::read_dir(&db_dir).into_iter().flatten().flatten().collect();
+    assert!(
+        std::path::Path::new(&db_dir).exists(),
+        "DB dir should exist"
+    );
+    let db_entries: Vec<_> = std::fs::read_dir(&db_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .collect();
     assert!(!db_entries.is_empty(), "DB dir should contain files");
 
     // Clean up DB dir
@@ -687,7 +683,12 @@ fn e2e_delete_load_manifest_v2_reconciled() {
         "-o",
         &output,
     ]);
-    assert_eq!(code, Some(0), "Load manifest v2 reconciled failed: {}", stderr);
+    assert_eq!(
+        code,
+        Some(0),
+        "Load manifest v2 reconciled failed: {}",
+        stderr
+    );
 
     let content = std::fs::read_to_string(&output).unwrap();
 
@@ -911,8 +912,7 @@ fn e2e_delete_manifest_re_saved_after_clean() {
     // All event entries should be 'deleted' (not 'pending')
     for entry in to_delete.as_array().unwrap() {
         assert_eq!(
-            entry["status"],
-            "deleted",
+            entry["status"], "deleted",
             "Event {} should be marked deleted after clean",
             entry["handle"]
         );
@@ -1022,8 +1022,7 @@ fn e2e_delete_with_note_clean() {
     );
     for entry in to_delete.as_array().unwrap() {
         assert_eq!(
-            entry["status"],
-            "deleted",
+            entry["status"], "deleted",
             "Note {} should be marked deleted after clean",
             entry["handle"]
         );
@@ -1264,8 +1263,7 @@ fn e2e_delete_with_place_clean() {
     );
     for entry in to_delete.as_array().unwrap() {
         assert_eq!(
-            entry["status"],
-            "deleted",
+            entry["status"], "deleted",
             "Place {} should be marked deleted after clean",
             entry["handle"]
         );
@@ -1462,8 +1460,7 @@ fn e2e_delete_manifest_places_marked_deleted() {
     // All place entries should be 'deleted' (not 'pending')
     for entry in to_delete.as_array().unwrap() {
         assert_eq!(
-            entry["status"],
-            "deleted",
+            entry["status"], "deleted",
             "Place {} should be marked deleted after clean",
             entry["handle"]
         );

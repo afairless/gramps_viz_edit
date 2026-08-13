@@ -31,8 +31,8 @@
 //!   → Category B transforms → Validate (Gate 2) → Serialize
 //! ```
 
-use crate::Graph;
 use crate::generate::generate_handle;
+use crate::Graph;
 
 // ---------------------------------------------------------------------------
 // AdversarialStrategy — enumerates all available strategies

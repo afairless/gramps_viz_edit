@@ -45,11 +45,17 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(42);
         let handle = generate_handle(&mut rng);
         // Should match: underscore + 16 hex chars
-        assert!(handle.starts_with('_'), "Handle should start with underscore");
+        assert!(
+            handle.starts_with('_'),
+            "Handle should start with underscore"
+        );
         assert_eq!(handle.len(), 17, "Handle should be 17 chars: _ + 16 hex");
         // The remaining 16 chars should all be hex digits
         let hex_part = &handle[1..];
-        assert!(hex_part.chars().all(|c| c.is_ascii_hexdigit()), "Handle suffix should be hex digits");
+        assert!(
+            hex_part.chars().all(|c| c.is_ascii_hexdigit()),
+            "Handle suffix should be hex digits"
+        );
     }
 
     #[test]

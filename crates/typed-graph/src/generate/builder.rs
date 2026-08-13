@@ -21,6 +21,7 @@
 //!     .unwrap();
 //! ```
 
+use crate::generate::generate_handle;
 use crate::ChildRefType;
 use crate::CitationData;
 use crate::DateValue;
@@ -42,7 +43,6 @@ use crate::RepositoryData;
 use crate::SourceData;
 use crate::Surname;
 use crate::TagData;
-use crate::generate::generate_handle;
 
 // ---------------------------------------------------------------------------
 // BuilderError

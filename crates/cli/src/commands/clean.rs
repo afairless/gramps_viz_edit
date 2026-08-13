@@ -36,9 +36,7 @@ pub enum CleanError {
         source: std::io::Error,
     },
     /// XML parse error with descriptive message.
-    XmlParse {
-        message: String,
-    },
+    XmlParse { message: String },
 }
 
 impl std::fmt::Display for CleanError {
@@ -195,9 +193,15 @@ pub fn clean_elements_xml(
     // Process XML events
     loop {
         buf.clear();
-        let event = xml_reader.read_event_into(&mut buf).map_err(|e| CleanError::XmlParse {
-            message: format!("XML parse error at byte {}: {}", xml_reader.buffer_position(), e),
-        })?;
+        let event = xml_reader
+            .read_event_into(&mut buf)
+            .map_err(|e| CleanError::XmlParse {
+                message: format!(
+                    "XML parse error at byte {}: {}",
+                    xml_reader.buffer_position(),
+                    e
+                ),
+            })?;
 
         match event {
             Event::Start(ref e) => {
@@ -449,14 +453,8 @@ mod tests {
             content.contains("<person handle=\"p0001\">"),
             "Person should remain"
         );
-        assert!(
-            content.contains("<header>"),
-            "Header should remain"
-        );
-        assert!(
-            content.contains("<?xml"),
-            "XML declaration should remain"
-        );
+        assert!(content.contains("<header>"), "Header should remain");
+        assert!(content.contains("<?xml"), "XML declaration should remain");
     }
 
     // -----------------------------------------------------------------------
@@ -925,10 +923,7 @@ mod tests {
         assert_eq!(stats.elements_removed, 1);
         assert_eq!(stats.elements_not_found, 0);
         assert!(!content.contains("n0001"), "Note handle should be removed");
-        assert!(
-            content.contains("<?xml"),
-            "XML declaration should remain"
-        );
+        assert!(content.contains("<?xml"), "XML declaration should remain");
     }
 
     // -----------------------------------------------------------------------
@@ -1016,7 +1011,10 @@ mod tests {
         assert_eq!(stats.elements_removed, 1);
         assert_eq!(stats.elements_not_found, 0);
         assert!(!content.contains("n0001"), "Note should be removed");
-        assert!(!content.contains("multi-paragraph"), "Body should be removed");
+        assert!(
+            !content.contains("multi-paragraph"),
+            "Body should be removed"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1042,7 +1040,10 @@ mod tests {
 
         assert_eq!(stats.elements_removed, 1);
         assert_eq!(stats.elements_not_found, 0);
-        assert!(!content.contains("n0001"), "Note with style should be removed");
+        assert!(
+            !content.contains("n0001"),
+            "Note with style should be removed"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1065,7 +1066,10 @@ mod tests {
 
         assert_eq!(stats.elements_removed, 1);
         assert_eq!(stats.elements_not_found, 0);
-        assert!(!content.contains("n0001"), "Note with type attr should be removed");
+        assert!(
+            !content.contains("n0001"),
+            "Note with type attr should be removed"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1108,7 +1112,10 @@ mod tests {
 
         assert_eq!(stats.elements_removed, 1);
         assert_eq!(stats.elements_not_found, 0);
-        assert!(!content.contains("n0001"), "Namespaced note should be removed");
+        assert!(
+            !content.contains("n0001"),
+            "Namespaced note should be removed"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1156,8 +1163,14 @@ mod tests {
         assert_eq!(stats.elements_removed, 1);
         assert_eq!(stats.elements_not_found, 0);
         // <notes> section tag should still be present even though all notes removed
-        assert!(content.contains("<notes>"), "<notes> section should be preserved");
-        assert!(content.contains("</notes>"), "</notes> section should be preserved");
+        assert!(
+            content.contains("<notes>"),
+            "<notes> section should be preserved"
+        );
+        assert!(
+            content.contains("</notes>"),
+            "</notes> section should be preserved"
+        );
         assert!(content.contains("<header>"), "Header should remain");
     }
 
@@ -1198,15 +1211,15 @@ mod tests {
 
         assert_eq!(stats.elements_removed, 1);
         assert_eq!(stats.elements_not_found, 0);
-        assert!(!content.contains("pl0001"), "Place handle should be removed");
+        assert!(
+            !content.contains("pl0001"),
+            "Place handle should be removed"
+        );
         assert!(
             !content.contains("New York City"),
             "Place body should be removed"
         );
-        assert!(
-            content.contains("<?xml"),
-            "XML declaration should remain"
-        );
+        assert!(content.contains("<?xml"), "XML declaration should remain");
     }
 
     // -----------------------------------------------------------------------
@@ -1383,7 +1396,10 @@ mod tests {
 
         assert_eq!(stats.elements_removed, 1);
         assert_eq!(stats.elements_not_found, 0);
-        assert!(!content.contains("pl0001"), "Namespaced place should be removed");
+        assert!(
+            !content.contains("pl0001"),
+            "Namespaced place should be removed"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1406,8 +1422,14 @@ mod tests {
         assert_eq!(stats.elements_removed, 1);
         assert_eq!(stats.elements_not_found, 0);
         // <places> section tag should still be present even though all places removed
-        assert!(content.contains("<places>"), "<places> section should be preserved");
-        assert!(content.contains("</places>"), "</places> section should be preserved");
+        assert!(
+            content.contains("<places>"),
+            "<places> section should be preserved"
+        );
+        assert!(
+            content.contains("</places>"),
+            "</places> section should be preserved"
+        );
         assert!(content.contains("<header>"), "Header should remain");
     }
 }
