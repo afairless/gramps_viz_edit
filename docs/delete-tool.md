@@ -98,6 +98,27 @@ gramps-gen delete data.gramps --selections picks.json \
 > `GraphXmlWriter` filter path. The Rust cascade engine (steps 1–4) remains
 > unchanged.
 
+### Post-processing: cleaning orphaned events, notes, and places
+
+The Python backend performs **people-only** deletion. Orphaned events,
+notes, and places identified by the cascade survive in the backend's
+`<stem>-cleaned.gramps` export and are removed by three streaming XML
+passes, each producing its own output file:
+
+| Pass | Output | Removes |
+|---|---|---|
+| Events | `<stem>-deleted_2.gramps` | Orphaned events |
+| Notes | `<stem>-deleted_3.gramps` | Orphaned notes |
+| Places | `<stem>-deleted_4.gramps` | Orphaned places |
+
+Each pass reads the previous pass's output (`-cleaned.gramps` is used when
+`-deleted_2`/`-deleted_3` were never written) and removes only the pending
+handles recorded in the manifest. After a successful pass the manifest is
+re-saved with the corresponding entries marked `deleted`. Only places the
+cascade flagged as **newly orphaned** are removed — places that were already
+orphaned before the operation are never touched (see
+[Per-Type Orphan Rules](#per-type-orphan-rules)).
+
 ---
 
 ## How the Cascade Works
@@ -156,7 +177,7 @@ A Source is only deleted if no surviving Citation references it.
 | **Person** | Explicitly selected as a seed for deletion |
 | **Family** | No remaining father/mother connections to surviving people, **and** no remaining children (via `ChildRef` edges) |
 | **Event** | No remaining `PersonEventRef` or `FamilyEventRef` edges from surviving nodes |
-| **Place** | No remaining `EventPlace`, `PlacePlaceRef`, `PlaceCitation`, `PlaceMediaRef`, `PlaceNote`, or `PlaceTag` edges from surviving nodes |
+| **Place** | No remaining **incoming** `EventPlace` or `PlacePlaceRef` edges from surviving nodes. Outgoing edges (`PlaceCitation`, `PlaceMediaRef`, `PlaceNote`, `PlaceTag`) do **not** keep a place alive. Places already orphaned before the operation (zero incoming keep-alive edges) are never flagged |
 | **Citation** | No remaining `CitationRef` edges from surviving nodes |
 | **Source** | No remaining `source_handle` references from surviving citations, and no remaining `RepoRef` edges |
 | **Repository** | No remaining `repo_handle` references from surviving sources |
