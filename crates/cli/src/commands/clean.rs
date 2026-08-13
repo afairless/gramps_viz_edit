@@ -363,6 +363,17 @@ pub fn clean_notes_xml(
     clean_elements_xml(input, output, "note", note_handles)
 }
 
+/// Remove places matching the given handles from a Gramps XML file.
+///
+/// Convenience wrapper around [`clean_elements_xml`] with `element_name = "place"`.
+pub fn clean_places_xml(
+    input: &Path,
+    output: &Path,
+    place_handles: &HashSet<String>,
+) -> Result<CleanStats, CleanError> {
+    clean_elements_xml(input, output, "place", place_handles)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -1145,6 +1156,256 @@ mod tests {
         // <notes> section tag should still be present even though all notes removed
         assert!(content.contains("<notes>"), "<notes> section should be preserved");
         assert!(content.contains("</notes>"), "</notes> section should be preserved");
+        assert!(content.contains("<header>"), "Header should remain");
+    }
+
+    // -----------------------------------------------------------------------
+    // clean_places_xml tests
+    // -----------------------------------------------------------------------
+
+    /// Helper: run clean_places_xml and return the output content.
+    fn run_clean_places(
+        input: &Path,
+        handles: &[&str],
+        output_dir: &std::path::Path,
+    ) -> (CleanStats, String) {
+        let output = output_dir.join("output.gramps");
+        let handle_set: HashSet<String> = handles.iter().map(|s| s.to_string()).collect();
+        let stats = clean_places_xml(input, &output, &handle_set).unwrap();
+        let content = std::fs::read_to_string(&output).unwrap();
+        (stats, content)
+    }
+
+    // -----------------------------------------------------------------------
+    // remove_single_place
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn remove_single_place() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database>
+  <places>
+    <place handle="pl0001">
+      <ptitle>New York City</ptitle>
+    </place>
+  </places>
+</database>"#;
+        let (input, _dir) = write_temp(xml);
+        let output_dir = tempfile::tempdir().unwrap();
+        let (stats, content) = run_clean_places(&input, &["pl0001"], output_dir.path());
+
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 0);
+        assert!(!content.contains("pl0001"), "Place handle should be removed");
+        assert!(
+            !content.contains("New York City"),
+            "Place body should be removed"
+        );
+        assert!(
+            content.contains("<?xml"),
+            "XML declaration should remain"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // remove_self_closing_place
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn remove_self_closing_place() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database>
+  <places>
+    <place handle="pl0001"/>
+    <place handle="pl0002"/>
+  </places>
+</database>"#;
+        let (input, _dir) = write_temp(xml);
+        let output_dir = tempfile::tempdir().unwrap();
+        let (stats, content) = run_clean_places(&input, &["pl0001"], output_dir.path());
+
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 0);
+        assert!(!content.contains("pl0001"), "pl0001 should be removed");
+        assert!(content.contains("pl0002"), "pl0002 should remain");
+    }
+
+    // -----------------------------------------------------------------------
+    // keep_unrelated_place
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn keep_unrelated_place() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database>
+  <places>
+    <place handle="pl0001">
+      <ptitle>New York City</ptitle>
+    </place>
+  </places>
+</database>"#;
+        let (input, _dir) = write_temp(xml);
+        let output_dir = tempfile::tempdir().unwrap();
+        let (stats, content) = run_clean_places(&input, &["pl9999"], output_dir.path());
+
+        assert_eq!(stats.elements_removed, 0);
+        assert_eq!(stats.elements_not_found, 1);
+        assert!(content.contains("pl0001"), "Place should remain");
+    }
+
+    // -----------------------------------------------------------------------
+    // place_with_body_and_children
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn place_with_body_and_children() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database>
+  <places>
+    <place handle="pl0001">
+      <ptitle>New York City</ptitle>
+      <coord lat="40.7128" long="-74.0060"/>
+      <placeref hlink="pl0002"/>
+    </place>
+    <place handle="pl0002">
+      <ptitle>New York</ptitle>
+    </place>
+  </places>
+</database>"#;
+        let (input, _dir) = write_temp(xml);
+        let output_dir = tempfile::tempdir().unwrap();
+        let (stats, content) = run_clean_places(&input, &["pl0001"], output_dir.path());
+
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 0);
+        assert!(
+            !content.contains("pl0001"),
+            "Place handle should be removed"
+        );
+        assert!(
+            !content.contains("40.7128"),
+            "Nested <coord> should be removed with the place"
+        );
+        assert!(
+            !content.contains("<placeref hlink=\"pl0002\"/>"),
+            "Nested <placeref> should be removed with the place"
+        );
+        assert!(
+            content.contains("pl0002"),
+            "Sibling place pl0002 should remain"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // place_hlink_in_event_not_removed
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn place_hlink_in_event_not_removed() {
+        // An event's <place hlink="..."/> reference has no `handle` attribute,
+        // so it is NOT a place definition and must pass through untouched.
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database>
+  <events>
+    <event handle="e0001">
+      <type>Birth</type>
+      <place hlink="pl0001"/>
+    </event>
+  </events>
+  <places>
+    <place handle="pl0001">
+      <ptitle>New York City</ptitle>
+    </place>
+  </places>
+</database>"#;
+        let (input, _dir) = write_temp(xml);
+        let output_dir = tempfile::tempdir().unwrap();
+        // Remove the actual place definition only
+        let (stats, content) = run_clean_places(&input, &["pl0001"], output_dir.path());
+
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 0);
+        // The event's place hlink reference must survive
+        assert!(
+            content.contains("<place hlink=\"pl0001\"/>"),
+            "Event place hlink reference should not be removed"
+        );
+        assert!(
+            !content.contains("New York City"),
+            "Place definition body should be removed"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // multiple_places_mixed
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn multiple_places_mixed() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database>
+  <places>
+    <place handle="pl0001"><ptitle>New York</ptitle></place>
+    <place handle="pl0002"><ptitle>Boston</ptitle></place>
+    <place handle="pl0003"><ptitle>Chicago</ptitle></place>
+  </places>
+</database>"#;
+        let (input, _dir) = write_temp(xml);
+        let output_dir = tempfile::tempdir().unwrap();
+        let (stats, content) = run_clean_places(&input, &["pl0001", "pl0003"], output_dir.path());
+
+        assert_eq!(stats.elements_removed, 2);
+        assert_eq!(stats.elements_not_found, 0);
+        assert!(!content.contains("New York"), "pl0001 should be removed");
+        assert!(content.contains("Boston"), "pl0002 should remain");
+        assert!(!content.contains("Chicago"), "pl0003 should be removed");
+    }
+
+    // -----------------------------------------------------------------------
+    // namespace_prefixed_place
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn namespace_prefixed_place() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <places>
+    <ns:place ns:handle="pl0001" xmlns:ns="http://example.com/ns">
+      <ns:ptitle>Namespaced place</ns:ptitle>
+    </ns:place>
+  </places>
+</database>"#;
+        let (input, _dir) = write_temp(xml);
+        let output_dir = tempfile::tempdir().unwrap();
+        let (stats, content) = run_clean_places(&input, &["pl0001"], output_dir.path());
+
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 0);
+        assert!(!content.contains("pl0001"), "Namespaced place should be removed");
+    }
+
+    // -----------------------------------------------------------------------
+    // places_section_preserved
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn places_section_preserved() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database>
+  <header><created date="2024-01-01" version="5.2"/></header>
+  <places>
+    <place handle="pl0001"><ptitle>Only place</ptitle></place>
+  </places>
+</database>"#;
+        let (input, _dir) = write_temp(xml);
+        let output_dir = tempfile::tempdir().unwrap();
+        let (stats, content) = run_clean_places(&input, &["pl0001"], output_dir.path());
+
+        assert_eq!(stats.elements_removed, 1);
+        assert_eq!(stats.elements_not_found, 0);
+        // <places> section tag should still be present even though all places removed
+        assert!(content.contains("<places>"), "<places> section should be preserved");
+        assert!(content.contains("</places>"), "</places> section should be preserved");
         assert!(content.contains("<header>"), "Header should remain");
     }
 }
