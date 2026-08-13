@@ -168,10 +168,13 @@ impl<'de> Deserialize<'de> for TypePlan {
     }
 }
 
+/// The current manifest format version.
+pub const MANIFEST_VERSION: u32 = 3;
+
 /// Serializable deletion manifest that can be saved and reloaded.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DeleteManifest {
-    /// Format version (currently 2).
+    /// Format version (currently 3).
     pub version: u32,
     /// Name of the source file.
     pub source_file: String,

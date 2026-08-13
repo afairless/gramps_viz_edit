@@ -443,7 +443,7 @@ fn e2e_delete_manifest_v2_reconciliation() {
     // Load the manifest and verify reconciliation.
     let manifest_content = std::fs::read_to_string(&manifest_path).unwrap();
     let manifest: serde_json::Value = serde_json::from_str(&manifest_content).unwrap();
-    assert_eq!(manifest["version"], 2);
+    assert_eq!(manifest["version"], 3);
 
     // The person should be marked as deleted by Gramps.
     let people = &manifest["plan"]["people"];

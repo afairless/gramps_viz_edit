@@ -20,7 +20,7 @@ use std::path::Path;
 use serde_json;
 use typed_graph::{Graph, Handle};
 
-use crate::types::{DeleteManifest, HandleEntry, HandleStatus, TypePlan};
+use crate::types::{DeleteManifest, HandleEntry, HandleStatus, TypePlan, MANIFEST_VERSION};
 
 /// Errors that can occur during manifest operations.
 #[derive(Debug)]
@@ -79,9 +79,6 @@ impl From<serde_json::Error> for ManifestError {
     }
 }
 
-/// The current manifest format version.
-pub const MANIFEST_VERSION: u32 = 2;
-
 /// Save a `DeleteManifest` to a JSON file.
 ///
 /// The output is pretty-printed with sorted handle arrays for deterministic
@@ -94,19 +91,19 @@ pub fn save_manifest(manifest: &DeleteManifest, path: &Path) -> Result<(), Manif
 
 /// Load a `DeleteManifest` from a JSON file.
 ///
-/// Tries v2 format first. If the file is v1 format, auto-migrates to v2:
+/// Tries v3 format first. If the file is v1 or v2 format, auto-migrates to v3:
 /// - All `to_delete` entries get `HandleStatus::Pending`
 /// - All `kept` entries get `HandleStatus::Kept`
 /// - `deletion_mode` is set to `"people_only"`
-/// - `version` is bumped to 2
+/// - `version` is bumped to 3
 pub fn load_manifest(path: &Path) -> Result<DeleteManifest, ManifestError> {
     let content = std::fs::read_to_string(path)?;
     let mut manifest: DeleteManifest = serde_json::from_str(&content)?;
 
     match manifest.version {
-        2 => Ok(manifest),
-        1 => {
-            // Auto-migrate from v1 to v2
+        3 => Ok(manifest),
+        1 | 2 => {
+            // Auto-migrate from v1/v2 to v3
             manifest.version = MANIFEST_VERSION;
             if manifest.deletion_mode.is_empty() {
                 manifest.deletion_mode = "people_only".to_string();
@@ -358,11 +355,86 @@ mod tests {
         let path = dir.join("test_manifest.json");
         save_manifest(&manifest, &path).unwrap();
         let loaded = load_manifest(&path).unwrap();
-        assert_eq!(loaded.version, 2);
+        assert_eq!(loaded.version, 3);
         assert_eq!(loaded.source_file, manifest.source_file);
         assert_eq!(loaded.seed_people, manifest.seed_people);
         assert_eq!(loaded.plan.len(), manifest.plan.len());
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn v1_manifest_loads_as_v3() {
+        // v1 manifests use flat handle strings; loading must auto-migrate to v3
+        let v1_json = r#"{
+            "version": 1,
+            "source_file": "test.gramps",
+            "selections_file": "selections.json",
+            "created_at": "2025-01-15T10:30:00Z",
+            "seed_people": ["p1"],
+            "plan": {
+                "people": {
+                    "to_delete": ["p1"],
+                    "kept": ["p2"]
+                },
+                "events": {
+                    "to_delete": ["e1"],
+                    "kept": []
+                }
+            }
+        }"#;
+        let dir = std::env::temp_dir();
+        let path = dir.join("v1_manifest_v3_test.json");
+        std::fs::write(&path, v1_json).unwrap();
+        let loaded = load_manifest(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(loaded.version, 3, "v1 manifest must be bumped to 3");
+        assert_eq!(loaded.deletion_mode, "people_only");
+        let people = loaded.plan.get("people").unwrap();
+        assert_eq!(people.to_delete.len(), 1);
+        assert_eq!(people.to_delete[0].handle, "p1");
+        assert_eq!(people.to_delete[0].status, HandleStatus::Pending);
+        assert_eq!(people.to_delete[0].gramps_id, None);
+        assert_eq!(people.to_delete[0].description, "");
+        assert_eq!(people.kept[0].status, HandleStatus::Kept);
+        assert_eq!(people.kept[0].gramps_id, None);
+        assert_eq!(people.kept[0].description, "");
+    }
+
+    #[test]
+    fn v2_manifest_loads_as_v3() {
+        // v2 manifests use handle objects with status; loading must auto-migrate to v3
+        let v2_json = r#"{
+            "version": 2,
+            "source_file": "test.gramps",
+            "selections_file": "selections.json",
+            "created_at": "2025-01-15T10:30:00Z",
+            "seed_people": ["p1"],
+            "deletion_mode": "people_only",
+            "plan": {
+                "people": {
+                    "to_delete": [
+                        {"handle": "p1", "status": "pending"},
+                        {"handle": "p2", "status": "deleted"}
+                    ],
+                    "kept": [{"handle": "p3", "status": "kept"}]
+                }
+            }
+        }"#;
+        let dir = std::env::temp_dir();
+        let path = dir.join("v2_manifest_v3_test.json");
+        std::fs::write(&path, v2_json).unwrap();
+        let loaded = load_manifest(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(loaded.version, 3, "v2 manifest must be bumped to 3");
+        assert_eq!(loaded.deletion_mode, "people_only");
+        let people = loaded.plan.get("people").unwrap();
+        assert_eq!(people.to_delete.len(), 2);
+        assert_eq!(people.to_delete[0].handle, "p1");
+        assert_eq!(people.to_delete[0].status, HandleStatus::Pending);
+        assert_eq!(people.to_delete[1].status, HandleStatus::Deleted);
+        assert_eq!(people.kept[0].status, HandleStatus::Kept);
     }
 
     #[test]
@@ -505,7 +577,7 @@ mod tests {
             &graph,
         );
 
-        assert_eq!(manifest.version, 2);
+        assert_eq!(manifest.version, 3);
         assert_eq!(manifest.source_file, "test.gramps");
         assert_eq!(manifest.selections_file, Some("sel.json".to_string()));
         assert_eq!(manifest.seed_people, vec!["p1".to_string()]);

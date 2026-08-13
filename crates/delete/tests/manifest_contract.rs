@@ -217,9 +217,9 @@ fn contract_v2_people_entries_have_statuses() {
 }
 
 #[test]
-fn contract_v1_fixture_load_migrates_to_v2() {
+fn contract_v1_fixture_load_migrates_to_v3() {
     // Write the v1 fixture to a temp file and load it through load_manifest
-    // (which auto-migrates v1 → v2).
+    // (which auto-migrates v1 → v3).
     let dir = std::env::temp_dir();
     let path = dir.join("contract-v1-load-test.json");
     std::fs::write(&path, CONTRACT_FIXTURE).expect("write v1 fixture");
@@ -227,7 +227,7 @@ fn contract_v1_fixture_load_migrates_to_v2() {
     let manifest = load_manifest(&path).expect("v1 fixture must load and migrate");
     let _ = std::fs::remove_file(&path);
 
-    assert_eq!(manifest.version, 2, "version must be bumped to 2");
+    assert_eq!(manifest.version, 3, "version must be bumped to 3");
     assert_eq!(manifest.deletion_mode, "people_only");
 
     let people = manifest.plan.get("people").expect("people must be present");
