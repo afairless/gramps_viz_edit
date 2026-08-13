@@ -316,6 +316,57 @@ fn fallback_source(data: &typed_graph::SourceData) -> String {
     "Unnamed Source".to_string()
 }
 
+/// Join the populated fields of a Location into a comma-separated string.
+fn location_display_name(loc: &typed_graph::Location) -> Option<String> {
+    let parts = [
+        loc.street.as_deref(),
+        loc.locality.as_deref(),
+        loc.city.as_deref(),
+        loc.parish.as_deref(),
+        loc.county.as_deref(),
+        loc.state.as_deref(),
+        loc.country.as_deref(),
+    ];
+    let parts: Vec<&str> = parts
+        .into_iter()
+        .flatten()
+        .filter(|s| !s.is_empty())
+        .collect();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(", "))
+    }
+}
+
+/// Build a human-readable name for a Place node.
+///
+/// Precedence:
+/// 1. Primary 5.1 name (<pname value>), stored as alt_names[0]
+/// 2. 5.1 descriptive title (<ptitle>)
+/// 3. 5.2 structured Location (joined parts)
+/// 4. Fallback placeholder
+fn place_display_name(data: &typed_graph::PlaceData) -> String {
+    // 1. Primary 5.1 name (<pname value>), stored as alt_names[0]
+    if let Some(name) = data
+        .alt_names
+        .first()
+        .and_then(|n| n.value.as_deref())
+        .filter(|v| !v.is_empty())
+    {
+        return name.to_string();
+    }
+    // 2. 5.1 descriptive title (<ptitle>)
+    if let Some(title) = data.title.as_deref().filter(|t| !t.is_empty()) {
+        return title.to_string();
+    }
+    // 3. 5.2 structured Location (joined parts)
+    if let Some(loc) = location_display_name(&data.name) {
+        return loc;
+    }
+    "Unnamed Place".to_string()
+}
+
 /// Generate a human-readable description of a node and its optional gramps_id.
 ///
 /// Returns `(description, gramps_id)` where `gramps_id` is `None` when the
@@ -507,7 +558,7 @@ fn describe_node(graph: &Graph, handle: &Handle) -> (String, Option<String>) {
             (desc, data.gramps_id.clone())
         }
         Some(Node::Place(data)) => {
-            let desc = data.title.as_deref().unwrap_or("Unnamed Place").to_string();
+            let desc = place_display_name(data);
             (desc, data.gramps_id.clone())
         }
         Some(Node::Source(data)) => {
@@ -786,7 +837,7 @@ mod tests {
     }
 
     #[test]
-    fn describe_place_node() {
+    fn describe_place_node_title_fallback() {
         let mut graph = Graph::new();
         let h = "pl0001".to_string();
         graph
@@ -803,6 +854,81 @@ mod tests {
         let (desc, gramps_id) = describe_node(&graph, &h);
         assert_eq!(desc, "New York");
         assert_eq!(gramps_id, Some("P0001".to_string()));
+    }
+
+    #[test]
+    fn describe_place_node_name_first() {
+        let mut graph = Graph::new();
+        let h = "pl0001".to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Place(typed_graph::PlaceData {
+                    handle: h.clone(),
+                    gramps_id: Some("P0001".to_string()),
+                    title: Some("Furida title".to_string()),
+                    alt_names: vec![typed_graph::PlaceName {
+                        value: Some("Furida".to_string()),
+                        date: None,
+                    }],
+                    ..typed_graph::PlaceData::default()
+                }),
+            )
+            .unwrap();
+        let (desc, gramps_id) = describe_node(&graph, &h);
+        assert_eq!(desc, "Furida");
+        assert_eq!(gramps_id, Some("P0001".to_string()));
+    }
+
+    #[test]
+    fn describe_place_node_location_fallback() {
+        let mut graph = Graph::new();
+        let h = "pl0001".to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Place(typed_graph::PlaceData {
+                    handle: h.clone(),
+                    gramps_id: Some("P0001".to_string()),
+                    name: typed_graph::Location {
+                        city: Some("Ur".to_string()),
+                        country: Some("Mesopotamia".to_string()),
+                        ..typed_graph::Location::default()
+                    },
+                    ..typed_graph::PlaceData::default()
+                }),
+            )
+            .unwrap();
+        let (desc, gramps_id) = describe_node(&graph, &h);
+        assert_eq!(desc, "Ur, Mesopotamia");
+        assert_eq!(gramps_id, Some("P0001".to_string()));
+    }
+
+    #[test]
+    fn describe_place_node_unnamed() {
+        let mut graph = Graph::new();
+        let h = "pl0001".to_string();
+        graph
+            .add_node(
+                h.clone(),
+                Node::Place(typed_graph::PlaceData {
+                    handle: h.clone(),
+                    gramps_id: Some("P0001".to_string()),
+                    ..typed_graph::PlaceData::default()
+                }),
+            )
+            .unwrap();
+        let (desc, gramps_id) = describe_node(&graph, &h);
+        assert_eq!(desc, "Unnamed Place");
+        assert_eq!(gramps_id, Some("P0001".to_string()));
+    }
+
+    #[test]
+    fn location_display_name_empty() {
+        assert_eq!(
+            location_display_name(&typed_graph::Location::default()),
+            None
+        );
     }
 
     #[test]
