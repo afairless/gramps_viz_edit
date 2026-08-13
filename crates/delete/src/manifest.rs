@@ -20,6 +20,7 @@ use std::path::Path;
 use serde_json;
 use typed_graph::{Graph, Handle};
 
+use crate::review::describe_node;
 use crate::types::{DeleteManifest, HandleEntry, HandleStatus, TypePlan, MANIFEST_VERSION};
 
 /// Errors that can occur during manifest operations.
@@ -227,11 +228,14 @@ pub fn build_manifest(
         // Ensure deterministic order
         let mut sorted_entries: Vec<HandleEntry> = type_handles
             .iter()
-            .map(|h| HandleEntry {
-                handle: h.clone(),
-                status: HandleStatus::Pending,
-                gramps_id: None,
-                description: String::new(),
+            .map(|h| {
+                let (desc, gramps_id) = describe_node(graph, h);
+                HandleEntry {
+                    handle: h.clone(),
+                    status: HandleStatus::Pending,
+                    gramps_id,
+                    description: desc,
+                }
             })
             .collect();
         sorted_entries.sort_by(|a, b| a.handle.cmp(&b.handle));
@@ -595,6 +599,137 @@ mod tests {
             manifest.plan["events"].to_delete[0].status,
             HandleStatus::Pending
         );
+    }
+
+    #[test]
+    fn build_manifest_populates_descriptions() {
+        // A person with name, gramps_id, and a birth event must get a
+        // non-empty description and gramps_id in the manifest.
+        let mut graph = Graph::new();
+        let person_h = "p0001".to_string();
+        let event_h = "e0001".to_string();
+
+        // Birth event first (referenced by index 0 from the person)
+        graph
+            .add_node(
+                event_h.clone(),
+                typed_graph::Node::Event(typed_graph::EventData {
+                    handle: event_h.clone(),
+                    gramps_id: None,
+                    event_type: Some(typed_graph::EventType::Birth),
+                    date: Some(typed_graph::DateValue {
+                        year: 1800,
+                        text: Some("1800".to_string()),
+                        ..typed_graph::DateValue::default()
+                    }),
+                    ..typed_graph::EventData::default()
+                }),
+            )
+            .unwrap();
+
+        graph
+            .add_node(
+                person_h.clone(),
+                typed_graph::Node::Person(typed_graph::PersonData {
+                    handle: person_h.clone(),
+                    gramps_id: Some("I0001".to_string()),
+                    primary_name: typed_graph::Name {
+                        first_name: Some("John".to_string()),
+                        surname_list: vec![typed_graph::Surname {
+                            surname: Some("Smith".to_string()),
+                            ..typed_graph::Surname::default()
+                        }],
+                        ..typed_graph::Name::default()
+                    },
+                    birth_ref_index: Some(0),
+                    event_ref_list: vec![typed_graph::EventRef {
+                        ref_field: event_h,
+                        ..typed_graph::EventRef::default()
+                    }],
+                    ..typed_graph::PersonData::default()
+                }),
+            )
+            .unwrap();
+
+        let to_delete = vec![person_h];
+        let manifest = build_manifest(
+            "test.gramps",
+            None,
+            &["p0001".to_string()],
+            &to_delete,
+            &graph,
+        );
+
+        let people = manifest.plan.get("people").unwrap();
+        let entry = &people.to_delete[0];
+        assert_eq!(entry.gramps_id.as_deref(), Some("I0001"));
+        assert_eq!(entry.description, "John Smith (b. 1800)");
+    }
+
+    #[test]
+    fn build_manifest_empty_node() {
+        // A node with no name/date still produces a fallback description
+        // and no gramps_id.
+        let mut graph = Graph::new();
+        graph
+            .add_node(
+                "e0001".to_string(),
+                typed_graph::Node::Event(typed_graph::EventData {
+                    handle: "e0001".to_string(),
+                    ..typed_graph::EventData::default()
+                }),
+            )
+            .unwrap();
+
+        let to_delete = vec!["e0001".to_string()];
+        let manifest = build_manifest("test.gramps", None, &[], &to_delete, &graph);
+
+        let events = manifest.plan.get("events").unwrap();
+        let entry = &events.to_delete[0];
+        assert_eq!(entry.gramps_id, None);
+        // describe_node returns a fallback for an event with no type/date
+        assert!(!entry.description.is_empty());
+    }
+
+    #[test]
+    fn save_load_v3_roundtrip() {
+        // Full v3 manifest roundtrip: all fields survive save + load.
+        let mut plan = HashMap::new();
+        plan.insert(
+            "people".to_string(),
+            TypePlan {
+                to_delete: vec![HandleEntry {
+                    handle: "p0001".to_string(),
+                    status: HandleStatus::Pending,
+                    gramps_id: Some("I0001".to_string()),
+                    description: "John Smith (1800-1875)".to_string(),
+                }],
+                kept: vec![HandleEntry {
+                    handle: "p0002".to_string(),
+                    status: HandleStatus::Kept,
+                    gramps_id: Some("I0002".to_string()),
+                    description: "Jane Doe (b. 1810)".to_string(),
+                }],
+            },
+        );
+        let manifest = DeleteManifest {
+            version: 3,
+            source_file: "test.gramps".to_string(),
+            selections_file: Some("sel.json".to_string()),
+            created_at: "2025-01-15T10:30:00Z".to_string(),
+            seed_people: vec!["p0001".to_string()],
+            deletion_mode: "people_only".to_string(),
+            plan,
+        };
+
+        let dir = std::env::temp_dir();
+        let path = dir.join("v3_roundtrip.json");
+        save_manifest(&manifest, &path).unwrap();
+        let loaded = load_manifest(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(loaded.version, 3);
+        assert_eq!(loaded, manifest);
     }
 
     #[test]
