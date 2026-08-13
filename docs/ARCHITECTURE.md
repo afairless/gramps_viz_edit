@@ -128,7 +128,7 @@ A **Python extractor** (`extract/extract_schema.py`) introspects Gramps Python c
 │  Types     ────────────────── types.rs (DeletePlan, Manifest)  │
 │  Reconcile ────────────────── reconcile.rs (manifest vs DB)    │
 └──────────────────────────────┬─────────────────────────────────┘
-                           │  JSON manifest v2 (with HandleStatus)
+                           │  JSON manifest v3 (with HandleStatus + descriptions)
                            ▼
 ┌────────────────────────────────────────────────────────────────┐
 │  scripts/delete_backend.py  (Python subprocess)                │
@@ -846,17 +846,17 @@ type-by-type (People, Families, Events, etc.) with 6 actions: `y` (delete), `n`
 
 ### Manifest Format
 
-Deletion manifests use **v2 format** with per-handle status tracking:
+Deletion manifests use **v3 format** with per-handle status tracking, Gramps IDs, and human-readable descriptions:
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "deletion_mode": "people_only",
   "plan": {
     "people": {
       "to_delete": [
-        {"handle": "...", "status": "deleted"},
-        {"handle": "...", "status": "pending"}
+        {"handle": "...", "status": "deleted", "gramps_id": "I0001", "description": "John Smith (1800-1875)"},
+        {"handle": "...", "status": "pending", "gramps_id": "I0002", "description": "Jane Doe (b. 1810)"}
       ],
       "kept": [
         {"handle": "...", "status": "kept"}
@@ -873,8 +873,9 @@ Deletion manifests use **v2 format** with per-handle status tracking:
 | `kept` | User chose to keep this during review |
 
 Manifests are always saved alongside the output file (`<output-stem>.manifest.json`).
-`--save-manifest <FILE>` overrides the default path. v1 manifests (flat handle
-strings) are auto-migrated to v2 on load, with all entries set to `pending`.
+`--save-manifest <FILE>` overrides the default path. v1/v2 manifests (flat handle
+strings or objects without descriptions) are auto-migrated to v3 on load, with
+`gramps_id` defaulting to `null` and `description` defaulting to empty.
 
 ### Integration
 
