@@ -572,6 +572,17 @@ impl GraphParser {
                                 }
                             }
                         }
+                        b"ptitle" if current_place.is_some() => {
+                            let name_q = e.name().to_owned();
+                            if let Ok(text) = reader.read_text(name_q) {
+                                let text = text.trim().to_string();
+                                if !text.is_empty() {
+                                    if let Some(ref mut p) = current_place {
+                                        p.title = Some(text);
+                                    }
+                                }
+                            }
+                        }
                         b"lat" if current_place.is_some() => {
                             let name_q = e.name().to_owned();
                             if let Ok(text) = reader.read_text(name_q) {
@@ -1062,6 +1073,16 @@ impl GraphParser {
                                 }
                             }
                         }
+                        b"pname" => {
+                            if let Some(value) = read_attr(e, b"value").filter(|v| !v.is_empty()) {
+                                if let Some(ref mut p) = current_place {
+                                    p.place_names.push(PlaceName {
+                                        value: Some(value),
+                                        date: None,
+                                    });
+                                }
+                            }
+                        }
                         b"citationref" => {
                             if let Some(h) = read_hlink_attr(e) {
                                 if let Some(ref p) = current_person {
@@ -1538,6 +1559,7 @@ struct PlaceBuilder {
     lat: Option<String>,
     long: Option<String>,
     name: Location,
+    place_names: Vec<PlaceName>,
 }
 
 impl PlaceBuilder {
@@ -1550,6 +1572,7 @@ impl PlaceBuilder {
             lat: self.lat,
             long: self.long,
             name: self.name,
+            alt_names: self.place_names,
             ..PlaceData::default()
         }
     }
@@ -2212,5 +2235,109 @@ mod tests {
         assert_eq!(graph.node_count(), 2);
         assert!(graph.get_node(&"e0001".to_string()).is_some());
         assert!(graph.get_node(&"p0001".to_string()).is_some());
+    }
+
+    #[test]
+    fn parse_place_pname() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header>
+    <created date="2025-01-15" version="5.1"/>
+  </header>
+  <places>
+    <placeobj handle="pl0001" id="P0001">
+      <pname value="Furida"/>
+    </placeobj>
+  </places>
+</database>"#
+            .to_string();
+        let (graph, _) = parse_gramps_xml(&xml).unwrap();
+
+        assert_eq!(graph.node_count(), 1);
+        if let Some(Node::Place(data)) = graph.get_node(&"pl0001".to_string()) {
+            assert_eq!(data.alt_names.len(), 1);
+            assert_eq!(data.alt_names[0].value.as_deref(), Some("Furida"));
+            assert_eq!(data.title, None);
+        } else {
+            panic!("Expected Place node");
+        }
+    }
+
+    #[test]
+    fn parse_place_ptitle() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header>
+    <created date="2025-01-15" version="5.1"/>
+  </header>
+  <places>
+    <placeobj handle="pl0001" id="P0001">
+      <ptitle>Furida</ptitle>
+    </placeobj>
+  </places>
+</database>"#
+            .to_string();
+        let (graph, _) = parse_gramps_xml(&xml).unwrap();
+
+        assert_eq!(graph.node_count(), 1);
+        if let Some(Node::Place(data)) = graph.get_node(&"pl0001".to_string()) {
+            assert_eq!(data.title.as_deref(), Some("Furida"));
+        } else {
+            panic!("Expected Place node");
+        }
+    }
+
+    #[test]
+    fn parse_place_pname_plus_ptitle() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header>
+    <created date="2025-01-15" version="5.1"/>
+  </header>
+  <places>
+    <placeobj handle="pl0001" id="P0001">
+      <pname value="Furida"/>
+      <ptitle>Furida Title</ptitle>
+    </placeobj>
+  </places>
+</database>"#
+            .to_string();
+        let (graph, _) = parse_gramps_xml(&xml).unwrap();
+
+        assert_eq!(graph.node_count(), 1);
+        if let Some(Node::Place(data)) = graph.get_node(&"pl0001".to_string()) {
+            assert_eq!(data.alt_names.len(), 1);
+            assert_eq!(data.alt_names[0].value.as_deref(), Some("Furida"));
+            assert_eq!(data.title.as_deref(), Some("Furida Title"));
+        } else {
+            panic!("Expected Place node");
+        }
+    }
+
+    #[test]
+    fn parse_place_multiple_pnames() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header>
+    <created date="2025-01-15" version="5.1"/>
+  </header>
+  <places>
+    <placeobj handle="pl0001" id="P0001">
+      <pname value="Furida"/>
+      <pname value="Furida (alt)"/>
+    </placeobj>
+  </places>
+</database>"#
+            .to_string();
+        let (graph, _) = parse_gramps_xml(&xml).unwrap();
+
+        assert_eq!(graph.node_count(), 1);
+        if let Some(Node::Place(data)) = graph.get_node(&"pl0001".to_string()) {
+            assert_eq!(data.alt_names.len(), 2);
+            assert_eq!(data.alt_names[0].value.as_deref(), Some("Furida"));
+            assert_eq!(data.alt_names[1].value.as_deref(), Some("Furida (alt)"));
+        } else {
+            panic!("Expected Place node");
+        }
     }
 }
