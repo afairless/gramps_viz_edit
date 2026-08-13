@@ -247,6 +247,8 @@ fn contract_v2_serialize_from_rust_matches_fixture_shape() {
             to_delete: vec![delete::types::HandleEntry {
                 handle: "a5f0c1a2-4000-4b3d-8000-000000000001".to_string(),
                 status: HandleStatus::Pending,
+                gramps_id: None,
+                description: String::new(),
             }],
             kept: vec![],
         },

@@ -233,6 +233,8 @@ pub fn build_manifest(
             .map(|h| HandleEntry {
                 handle: h.clone(),
                 status: HandleStatus::Pending,
+                gramps_id: None,
+                description: String::new(),
             })
             .collect();
         sorted_entries.sort_by(|a, b| a.handle.cmp(&b.handle));
@@ -324,6 +326,8 @@ mod tests {
         HandleEntry {
             handle: handle.to_string(),
             status,
+            gramps_id: None,
+            description: String::new(),
         }
     }
 

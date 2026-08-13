@@ -138,6 +138,8 @@ mod tests {
                     .map(|(h, s)| HandleEntry {
                         handle: h.to_string(),
                         status: s.clone(),
+                        gramps_id: None,
+                        description: String::new(),
                     })
                     .collect(),
                 kept: kept
@@ -145,6 +147,8 @@ mod tests {
                     .map(|h| HandleEntry {
                         handle: h.to_string(),
                         status: HandleStatus::Kept,
+                        gramps_id: None,
+                        description: String::new(),
                     })
                     .collect(),
             },
@@ -185,6 +189,8 @@ mod tests {
                         .map(|(h, s)| HandleEntry {
                             handle: h.to_string(),
                             status: s.clone(),
+                            gramps_id: None,
+                            description: String::new(),
                         })
                         .collect(),
                     kept: kept
@@ -192,6 +198,8 @@ mod tests {
                         .map(|h| HandleEntry {
                             handle: h.to_string(),
                             status: HandleStatus::Kept,
+                            gramps_id: None,
+                            description: String::new(),
                         })
                         .collect(),
                 },

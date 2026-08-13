@@ -24,6 +24,12 @@ pub enum HandleStatus {
 pub struct HandleEntry {
     pub handle: Handle,
     pub status: HandleStatus,
+    /// Gramps object ID (e.g. "I0001", "E0001"), if available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gramps_id: Option<String>,
+    /// Human-readable description (name, dates, event type, etc.).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
 }
 
 /// Untagged enum for v1 backward-compatible deserialization.
@@ -137,6 +143,8 @@ impl<'de> Deserialize<'de> for TypePlan {
                 HandleOrEntry::V1(s) => HandleEntry {
                     handle: s,
                     status: HandleStatus::Pending,
+                    gramps_id: None,
+                    description: String::new(),
                 },
                 HandleOrEntry::V2(e) => e,
             })
@@ -149,6 +157,8 @@ impl<'de> Deserialize<'de> for TypePlan {
                 HandleOrEntry::V1(s) => HandleEntry {
                     handle: s,
                     status: HandleStatus::Kept,
+                    gramps_id: None,
+                    description: String::new(),
                 },
                 HandleOrEntry::V2(e) => e,
             })
@@ -250,6 +260,8 @@ mod tests {
         let entry = HandleEntry {
             handle: "a1b2c3d4".to_string(),
             status: HandleStatus::Pending,
+            gramps_id: None,
+            description: String::new(),
         };
         let json = serde_json::to_string(&entry).unwrap();
         assert_eq!(json, r#"{"handle":"a1b2c3d4","status":"pending"}"#);
@@ -264,15 +276,21 @@ mod tests {
                 HandleEntry {
                     handle: "p1".to_string(),
                     status: HandleStatus::Pending,
+                    gramps_id: None,
+                    description: String::new(),
                 },
                 HandleEntry {
                     handle: "p2".to_string(),
                     status: HandleStatus::Deleted,
+                    gramps_id: None,
+                    description: String::new(),
                 },
             ],
             kept: vec![HandleEntry {
                 handle: "p3".to_string(),
                 status: HandleStatus::Kept,
+                gramps_id: None,
+                description: String::new(),
             }],
         };
         let json = serde_json::to_string(&plan).unwrap();
@@ -323,6 +341,8 @@ mod tests {
                 to_delete: vec![HandleEntry {
                     handle: "p1".to_string(),
                     status: HandleStatus::Pending,
+                    gramps_id: None,
+                    description: String::new(),
                 }],
                 kept: vec![],
             },
@@ -333,10 +353,14 @@ mod tests {
                 to_delete: vec![HandleEntry {
                     handle: "e1".to_string(),
                     status: HandleStatus::Pending,
+                    gramps_id: None,
+                    description: String::new(),
                 }],
                 kept: vec![HandleEntry {
                     handle: "e2".to_string(),
                     status: HandleStatus::Kept,
+                    gramps_id: None,
+                    description: String::new(),
                 }],
             },
         );
@@ -384,5 +408,64 @@ mod tests {
             per_type: HashMap::new(),
         };
         assert!(plan.to_delete.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // v3 HandleEntry tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn handle_entry_v3_roundtrip() {
+        let entry = HandleEntry {
+            handle: "p0001".to_string(),
+            status: HandleStatus::Pending,
+            gramps_id: Some("I0001".to_string()),
+            description: "John Smith (1800-1875)".to_string(),
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        let restored: HandleEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, entry);
+        assert!(json.contains("I0001"));
+        assert!(json.contains("John Smith"));
+    }
+
+    #[test]
+    fn handle_entry_v2_deserialization() {
+        // v2 JSON (no gramps_id or description) must deserialize with defaults
+        let json = r#"{"handle":"p1","status":"pending"}"#;
+        let restored: HandleEntry = serde_json::from_str(json).unwrap();
+        assert_eq!(restored.handle, "p1");
+        assert_eq!(restored.status, HandleStatus::Pending);
+        assert_eq!(restored.gramps_id, None);
+        assert_eq!(restored.description, "");
+    }
+
+    #[test]
+    fn handle_entry_serialization_skips_empty() {
+        // Empty description and None gramps_id are omitted from JSON output
+        let entry = HandleEntry {
+            handle: "p1".to_string(),
+            status: HandleStatus::Pending,
+            gramps_id: None,
+            description: String::new(),
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        assert_eq!(json, r#"{"handle":"p1","status":"pending"}"#);
+        assert!(!json.contains("gramps_id"));
+        assert!(!json.contains("description"));
+    }
+
+    #[test]
+    fn type_plan_v1_to_v3_migration() {
+        // v1 flat strings become v3 HandleEntry with defaults for new fields
+        let json = r#"{"to_delete":["p1","p2"],"kept":["p3"]}"#;
+        let restored: TypePlan = serde_json::from_str(json).unwrap();
+        assert_eq!(restored.to_delete.len(), 2);
+        for entry in &restored.to_delete {
+            assert_eq!(entry.gramps_id, None);
+            assert_eq!(entry.description, "");
+        }
+        assert_eq!(restored.kept[0].gramps_id, None);
+        assert_eq!(restored.kept[0].description, "");
     }
 }
