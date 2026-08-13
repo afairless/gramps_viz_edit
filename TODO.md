@@ -1,55 +1,188 @@
-# Implementation Plan: Place Deletion Post-Process
+# Implementation Plan: Place Name Display in Delete Review
 
-Source: `docs/research/place-deletion-postprocess.md`
+Source: `docs/research/place-name-display-in-delete-review.md`
+
+## Summary
+
+Show real place names (`Furida`, `Furmany`) instead of `"Unnamed Place"` in the `gramps-gen delete` interactive review. The root cause is two-fold: (1) the Gramps 5.1 XML parser never reads `<pname value="..."/>` or `<ptitle>` elements, so `PlaceData.title` is always `None` for 5.1 files; (2) the review display only falls back to `data.title.as_deref().unwrap_or("Unnamed Place")`.
 
 | # | Commit message | Logical unit | Key deliverables | Tests |
 |---|---|---|---|---|
-| 1 | `feat: harden cascade to distinguish already-orphaned places` | Cascade hardening — `pre_place_in_use_count` helper, Phase-A map, already-orphaned skip | `crates/delete/src/cascade.rs` | Unit: `pre_place_in_use_counts_incoming_only`, `already_orphaned_place_with_outgoing_refs_not_deleted`, `newly_orphaned_place_still_deleted` |
-| 2 | `feat: add clean_places_xml wrapper for streaming place removal` | Place cleaning wrapper in `clean.rs` | `crates/cli/src/commands/clean.rs` | Unit: `remove_single_place`, `remove_self_closing_place`, `keep_unrelated_place`, `place_with_body_and_children`, `place_hlink_in_event_not_removed`, `multiple_places_mixed`, `namespace_prefixed_place`, `places_section_preserved` |
-| 3 | `feat: add derive_deleted_4_path helper and place-cleaning pipeline step` | Path helper + place-cleaning step 17 in `delete.rs` | `crates/cli/src/commands/delete.rs` | Unit: `derive_deleted_4_path_basic`, `derive_deleted_4_path_gz`, `derive_deleted_4_path_no_ext`, `derive_deleted_4_path_already_cleaned` |
-| 4 | `test: add e2e tests for place cleaning in delete pipeline` | E2E integration tests for place cleaning | `crates/cli/tests/e2e_delete.rs` | Integration: `e2e_delete_with_place_clean`, `e2e_delete_no_pending_places_noop`, `e2e_delete_deleted_2_and_3_unchanged`, `e2e_delete_manifest_places_marked_deleted` |
-| 5 | `docs: update delete-tool.md and delete.rs module docstring for place cleaning` | Documentation updates | `docs/delete-tool.md`, `crates/cli/src/commands/delete.rs` | — |
-| 6 | `chore: run full workspace test and verify all outputs` | Full workspace test run | — | Workspace: `cargo test --workspace` |
+| 1 | `feat: parse pname/ptitle in gramps-reader XML graph parser` | Parsing: extend `PlaceBuilder` with `place_names`, read `<pname>` (Empty event) and `<ptitle>` (Start event), populate `alt_names` on `into_data()` | `crates/gramps-reader/src/xml/graph.rs` | Unit: `parse_place_pname`, `parse_place_ptitle`, `parse_place_pname_plus_ptitle`, `parse_place_multiple_pnames` |
+| 2 | `feat: display real place names in delete review` | Display: add `location_display_name` and `place_display_name` helpers, update `Node::Place` arm in `describe_node` | `crates/delete/src/review.rs` | Unit: `describe_place_node_name_first`, `describe_place_node_title_fallback`, `describe_place_node_location_fallback`, `describe_place_node_unnamed`, `location_display_name_empty` |
+| 3 | `test: add end-to-end parser→display integration test for place names` | Integration: cross-crate test via `gramps-reader` dev-dep on `delete`, parse XML and check `describe_node` output | `crates/gramps-reader/Cargo.toml`, `crates/gramps-reader/src/xml/graph.rs` | Integration: `parse_and_describe_place_pname` |
+| 4 | `chore: run full workspace test and verify all outputs` | Full workspace verification | — | Workspace: `cargo test --workspace`, `cargo clippy --all-targets --all-features -- -D warnings` |
 
 ## Details
 
-### Step 1 — Cascade hardening (`crates/delete/src/cascade.rs`)
+### Step 1 — Parse pname/ptitle in gramps-reader
 
-- Add `pre_place_in_use_count(graph, handle)` helper that counts only incoming keep-alive edges: `EventPlace` (target) and `PlacePlaceRef` (target). Outgoing `PlaceCitation`, `PlaceMediaRef`, `PlaceNote`, `PlaceTag` are excluded.
-- In `cascade()` Phase A, populate `pre_place_in_use: HashMap<Handle, usize>` alongside `pre_connectivity`.
-- In the fixed-point loop, after the existing `pre_count == 0` skip, add a place-specific skip: if the node is a `Place` with `pre_place_in_use == 0`, skip it (already orphaned before the operation).
-- Ensure the existing `type_specific_orphan_rule` for `Node::Place` is unchanged.
+**File: `crates/gramps-reader/src/xml/graph.rs`**
 
-### Step 2 — Place cleaning wrapper (`crates/cli/src/commands/clean.rs`)
+**1a. Extend `PlaceBuilder`** (≈ line 1533) with a `place_names: Vec<PlaceName>` field:
 
-- Add `clean_places_xml(input, output, place_handles)` calling `clean_elements_xml(input, output, "place", place_handles)`.
-- Mirrors the existing `clean_events_xml` / `clean_notes_xml` pattern.
-- Add unit tests covering: single place removal, self-closing place, unrelated place preserved, place with body/children, `<place hlink>` in event not removed, mixed multiple places, namespace-prefixed place, `<places>` section preserved when empty.
+```rust
+#[derive(Default)]
+struct PlaceBuilder {
+    handle: Handle,
+    gramps_id: Option<String>,
+    title: Option<String>,
+    code: Option<String>,
+    lat: Option<String>,
+    long: Option<String>,
+    name: Location,
+    place_names: Vec<PlaceName>,
+}
+```
 
-### Step 3 — Pipeline integration (`crates/cli/src/commands/delete.rs`)
+**1b. Add `<ptitle>` text-element case** in the `Start` event block (next to the `code` case, ≈ line 564). Read the element text into `p.title`:
 
-- Add `derive_deleted_4_path(input_path)` helper alongside `derive_deleted_3_path`.
-- After the note-cleaning step (current step 16), add a new place-cleaning step (step 17):
-  - Collect pending place handles from `manifest.plan["places"]`.
-  - If non-empty, pick input `-deleted_3` → `-deleted_2` → `-cleaned` (fallback chain).
-  - Call `clean_places_xml`, log results, mark places `Deleted` in manifest, re-save.
-- Renumber the existing temp directory cleanup from step 17 to step 18.
-- Update the module-level docstring to reflect the full pipeline: events → notes → places.
+```rust
+b"ptitle" if current_place.is_some() => {
+    let name_q = e.name().to_owned();
+    if let Ok(text) = reader.read_text(name_q) {
+        let text = text.trim().to_string();
+        if !text.is_empty() {
+            if let Some(ref mut p) = current_place {
+                p.title = Some(text);
+            }
+        }
+    }
+}
+```
 
-### Step 4 — E2E tests (`crates/cli/tests/e2e_delete.rs`)
+**1c. Add `<pname>` case** in the `Ok(Event::Empty(ref e))` match block (≈ line 974). Read the `value` attribute via `read_attr` and push a `PlaceName`:
 
-- Add a fixture with people, events, notes, and a place referenced by an event.
-- `e2e_delete_with_place_clean`: Full pipeline; `-deleted_4.gramps` has the orphaned place removed.
-- `e2e_delete_no_pending_places_noop`: With no pending places, `-deleted_4.gramps` is not written.
-- `e2e_delete_deleted_2_and_3_unchanged`: Intermediate files still contain the place.
-- `e2e_delete_manifest_places_marked_deleted`: Manifest marks places `Deleted` after cleaning.
+```rust
+b"pname" => {
+    if let Some(value) = read_attr(e, b"value").filter(|v| !v.is_empty()) {
+        if let Some(ref mut p) = current_place {
+            p.place_names.push(PlaceName { value: Some(value), date: None });
+        }
+    }
+}
+```
 
-### Step 5 — Documentation updates
+**1d. Populate `alt_names` in `into_data()`** (≈ line 1546):
 
-- `docs/delete-tool.md`: Fix the stale place orphan-rule table (line ~159) — remove `PlaceCitation`, `PlaceMediaRef`, `PlaceNote`, `PlaceTag` from keep-alive list; keep only incoming `EventPlace` and `PlacePlaceRef`. Document the `-deleted_4.gramps` output file.
-- `crates/cli/src/commands/delete.rs`: Update module docstring to show events → notes → places pipeline.
+```rust
+fn into_data(self) -> PlaceData {
+    PlaceData {
+        handle: self.handle,
+        gramps_id: self.gramps_id,
+        title: self.title,
+        code: self.code,
+        lat: self.lat,
+        long: self.long,
+        name: self.name,
+        alt_names: self.place_names,
+        ..PlaceData::default()
+    }
+}
+```
 
-### Step 6 — Full workspace verification
+**Unit tests** (in `#[cfg(test)] mod tests` at end of `graph.rs`):
 
-- Run `cargo test --workspace` and verify all tests pass.
-- Verify `cargo clippy --all-targets --all-features -- -D warnings` passes.
+- `parse_place_pname` — single `<pname value="Furida"/>` → `alt_names[0].value == Some("Furida")`, `title == None`
+- `parse_place_ptitle` — `<ptitle>Furida</ptitle>` → `title == Some("Furida")`
+- `parse_place_pname_plus_ptitle` — both present; both preserved
+- `parse_place_multiple_pnames` — two `<pname>` → `alt_names == [primary, alternate]`
+
+### Step 2 — Display place names in delete review
+
+**File: `crates/delete/src/review.rs`**
+
+**2a. Add `location_display_name` helper** (near `fallback_source`, ≈ line 316):
+
+```rust
+fn location_display_name(loc: &typed_graph::Location) -> Option<String> {
+    let parts = [
+        loc.street.as_deref(),
+        loc.locality.as_deref(),
+        loc.city.as_deref(),
+        loc.parish.as_deref(),
+        loc.county.as_deref(),
+        loc.state.as_deref(),
+        loc.country.as_deref(),
+    ];
+    let parts: Vec<&str> = parts.into_iter().flatten().filter(|s| !s.is_empty()).collect();
+    if parts.is_empty() { None } else { Some(parts.join(", ")) }
+}
+```
+
+**2b. Add `place_display_name` helper**:
+
+```rust
+fn place_display_name(data: &typed_graph::PlaceData) -> String {
+    // 1. Primary 5.1 name (<pname value>), stored as alt_names[0]
+    if let Some(name) = data
+        .alt_names
+        .first()
+        .and_then(|n| n.value.as_deref())
+        .filter(|v| !v.is_empty())
+    {
+        return name.to_string();
+    }
+    // 2. 5.1 descriptive title (<ptitle>)
+    if let Some(title) = data.title.as_deref().filter(|t| !t.is_empty()) {
+        return title.to_string();
+    }
+    // 3. 5.2 structured Location (joined parts)
+    if let Some(loc) = location_display_name(&data.name) {
+        return loc;
+    }
+    "Unnamed Place".to_string()
+}
+```
+
+**2c. Replace the `Node::Place` arm** (≈ line 509):
+
+```rust
+Some(Node::Place(data)) => {
+    let desc = place_display_name(data);
+    (desc, data.gramps_id.clone())
+}
+```
+
+**Unit tests** (in existing `#[cfg(test)] mod tests`):
+
+- `describe_place_node_name_first` — `alt_names[0] = Some("Furida")`, `title = Some("Furida title")` → renders `"Furida"`
+- `describe_place_node_title_fallback` — empty `alt_names`, `title = Some("New York")` → renders `"New York"` (preserves existing behavior)
+- `describe_place_node_location_fallback` — `name: Location { city: Some("Ur"), country: Some("Mesopotamia") }` → renders `"Ur, Mesopotamia"`
+- `describe_place_node_unnamed` — all empty → `"Unnamed Place"`
+- `location_display_name_empty` — default `Location` → `None`
+
+### Step 3 — Integration test (parser → display)
+
+**Dependency note**: `gramps-reader` does not currently depend on `delete`. Add `delete` as a **dev-dependency** in `crates/gramps-reader/Cargo.toml` (safe because `delete` does not depend on `gramps-reader`, so no cycle).
+
+**File: `crates/gramps-reader/src/xml/graph.rs`** (in the unit test module, or as a separate `#[test]`):
+
+```rust
+#[test]
+fn parse_and_describe_place_pname() {
+    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<database xmlns="http://gramps-project.org/xml/1.7.2/">
+  <header>
+    <created date="2025-01-15" version="5.1"/>
+  </header>
+  <places>
+    <placeobj handle="pl0001" id="P0001">
+      <pname value="Furida"/>
+    </placeobj>
+  </places>
+</database>"#.to_string();
+    let (graph, _) = parse_gramps_xml(&xml).unwrap();
+    let (desc, _) = delete::review::describe_node(&graph, &"pl0001".to_string());
+    assert_eq!(desc, "Furida");
+}
+```
+
+### Step 4 — Full workspace verification
+
+Run:
+
+```bash
+cargo test --workspace
+cargo clippy --all-targets --all-features -- -D warnings
+```
