@@ -11,8 +11,8 @@
 //! via a Python subprocess (`scripts/delete_backend.py`). The Rust
 //! cascade engine remains intact for computing the deletion set, but is
 //! advisory-only for non-people types — only people are actually deleted
-//! through the Gramps API. The Gramps DB is retained for user inspection
-//! (unless `--no-retain-db` is specified).
+//! through the Gramps API. The Gramps DB is created in a temporary
+//! directory and removed after export (unless `--retain-db` is specified).
 
 use std::collections::HashSet;
 use std::fs;
@@ -82,7 +82,7 @@ pub struct DeleteArgs {
     #[arg(long = "load-manifest")]
     pub load_manifest: Option<PathBuf>,
 
-    /// Gramps database directory (default: <input-stem>-gramps-db/)
+    /// Gramps database directory (default: a temp dir removed after export)
     #[arg(long = "db-dir")]
     pub db_dir: Option<PathBuf>,
 
@@ -408,10 +408,11 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
     let python = resolve_python_interpreter()?;
     let script = resolve_script_path()?;
 
-    // Determine the Gramps DB directory (default: <input-stem>-gramps-db/)
-    let db_dir = args.db_dir.clone().unwrap_or_else(|| {
-        PathBuf::from(format!("{}-gramps-db", strip_gramps_extensions(input_path)))
-    });
+    // Determine the Gramps DB directory. Default: a unique per-run
+    // temporary directory (timestamped so a stale dir from a crashed run
+    // or a recycled PID never collides); removed after export unless the
+    // user opts in with `--retain-db`.
+    let db_dir = args.db_dir.clone().unwrap_or_else(default_db_dir);
     if db_dir.exists() {
         log::warn!(
             "Database directory {} already exists — it will be overwritten.",
@@ -527,15 +528,14 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
     reconcile(&mut manifest, &surviving)
         .map_err(|e: ReconciliationError| CliError::ConfigError(e.to_string()))?;
 
-    // 13. Warn if the retained Gramps DB is unusually large
-    let db_size = dir_size(&db_dir);
-    if db_size > 100 * 1024 * 1024 {
-        log::warn!(
-            "Gramps DB directory {} is large ({} MB). \
-             Use --no-retain-db to remove it after export.",
-            db_dir.display(),
-            db_size / (1024 * 1024)
-        );
+    // 13. Clean up the Gramps DB unless the user opted to retain it.
+    //     The default is a temp directory, so the happy path leaves no
+    //     trace on disk.
+    if args.retain_db {
+        log::info!("Gramps DB retained at: {}", db_dir.display());
+    } else {
+        let _ = fs::remove_dir_all(&db_dir);
+        log::info!("Gramps DB removed (temp dir cleaned up).");
     }
 
     // 14. Save the enriched manifest alongside the output
@@ -700,11 +700,6 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
         pending_count,
     );
     log::info!("Enriched manifest saved to: {}", manifest_path.display());
-    if args.retain_db {
-        log::info!("Gramps DB retained at: {}", db_dir.display());
-    } else {
-        log::info!("Gramps DB removed (--no-retain-db).");
-    }
     if !result.rejected.is_empty() {
         log::warn!(
             "{} handles were rejected (invalid UUID format): {:?}",
@@ -743,6 +738,22 @@ fn derive_stem(input_path: &std::path::Path) -> String {
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "output".to_string())
+}
+
+/// Default Gramps DB directory: a unique per-run temporary directory.
+///
+/// Uses a timestamp suffix so a stale directory left behind by a crashed
+/// run or a recycled PID never collides with (and gets silently deleted
+/// by) a live run's `create_db()`.
+fn default_db_dir() -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "gramps-delete-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default(),
+    ))
 }
 
 /// Resolve the output directory: the `--output` argument if given, otherwise
@@ -795,22 +806,6 @@ fn deleted_3_path(dir: &std::path::Path, stem: &str) -> std::path::PathBuf {
 /// Derive the `-deleted-4.gramps` path in a directory from a file stem.
 fn deleted_4_path(dir: &std::path::Path, stem: &str) -> std::path::PathBuf {
     dir.join(format!("{}-deleted-4.gramps", stem))
-}
-
-/// Compute the total size of a directory tree in bytes.
-fn dir_size(path: &std::path::Path) -> u64 {
-    let mut total = 0;
-    if let Ok(entries) = fs::read_dir(path) {
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if p.is_dir() {
-                total += dir_size(&p);
-            } else if let Ok(meta) = entry.metadata() {
-                total += meta.len();
-            }
-        }
-    }
-    total
 }
 
 // ---------------------------------------------------------------------------
@@ -981,12 +976,6 @@ mod tests {
     }
 
     #[test]
-    fn dir_size_empty_path() {
-        // Non-existent path should return 0, not panic
-        assert_eq!(dir_size(PathBuf::from("/nonexistent/path").as_path()), 0);
-    }
-
-    #[test]
     fn deleted_1_path_joins_dir_and_stem() {
         assert_eq!(
             deleted_1_path(&PathBuf::from("/tmp/out"), "data"),
@@ -1053,6 +1042,22 @@ mod tests {
     fn derive_stem_falls_back_to_output_for_root() {
         assert_eq!(derive_stem(std::path::Path::new("/")), "output");
         assert_eq!(derive_stem(std::path::Path::new("")), "output");
+    }
+
+    #[test]
+    fn default_db_dir_is_unique_and_temp() {
+        let a = default_db_dir();
+        let b = default_db_dir();
+        assert_ne!(a, b, "each call should produce a unique directory");
+        assert!(
+            a.starts_with(std::env::temp_dir()),
+            "default DB dir should live under the system temp dir"
+        );
+        let name = a.file_name().unwrap().to_string_lossy();
+        assert!(
+            name.starts_with("gramps-delete-"),
+            "unexpected name: {name}"
+        );
     }
 
     #[test]

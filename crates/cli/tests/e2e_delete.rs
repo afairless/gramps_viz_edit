@@ -582,6 +582,58 @@ fn e2e_delete_no_retain_db() {
 }
 
 #[test]
+fn e2e_delete_default_db_dir_removed() {
+    // Without --db-dir the DB lives in a per-run temp directory; without
+    // --retain-db it must be removed after the run (no leak on the happy
+    // path). We assert on the CLI's own log line rather than scanning the
+    // system temp dir, which would race with parallel test runs.
+    if !gramps_available() {
+        eprintln!("Skipping: Gramps not available");
+        return;
+    }
+
+    let input = temp_path("dbdef_input.gramps");
+    let selections = temp_path("dbdef_selections.json");
+    let output_dir = temp_dir("dbdef_output");
+
+    write_uuid_fixture(&input, UUID_FIXTURE_51);
+    write_selections(&selections, &["a5f0c1a2-4000-4b3d-8000-000000000001"]);
+
+    let bin = env!("CARGO_BIN_EXE_gramps-gen");
+    let output = std::process::Command::new(bin)
+        .args([
+            "delete",
+            &input,
+            "--selections",
+            &selections,
+            "--yes",
+            "-o",
+            &output_dir,
+        ])
+        .env("RUST_LOG", "info")
+        .output()
+        .expect("Failed to run gramps-gen");
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    assert_eq!(output.status.code(), Some(0), "Delete failed: {}", stderr);
+
+    // The default temp DB directory must be cleaned up, not retained.
+    assert!(
+        stderr.contains("Gramps DB removed (temp dir cleaned up)"),
+        "Expected temp DB cleanup log in stderr: {}",
+        stderr
+    );
+    assert!(
+        !stderr.contains("Gramps DB retained"),
+        "DB should not be retained by default: {}",
+        stderr
+    );
+
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&selections);
+    let _ = std::fs::remove_dir_all(&output_dir);
+}
+
+#[test]
 fn e2e_delete_orphaned_events_survive() {
     // Verify events referenced only by deleted people still exist in output.
     if !gramps_available() {
