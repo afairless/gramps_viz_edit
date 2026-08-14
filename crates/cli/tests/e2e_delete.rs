@@ -35,6 +35,13 @@ fn temp_path(suffix: &str) -> String {
     )
 }
 
+/// Create a unique temporary directory (for `--output`).
+fn temp_dir(suffix: &str) -> String {
+    let dir = temp_path(suffix);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
 /// Create a minimal Gramps XML file with two people in a family.
 fn write_minimal_family(path: &str) {
     let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -132,7 +139,7 @@ fn gramps_available() -> bool {
 fn e2e_delete_dry_run_does_not_write_output() {
     let input = temp_path("dry_run.gramps");
     let selections = temp_path("dry_run_selections.json");
-    let output = temp_path("dry_run_output.gramps");
+    let output_dir = temp_dir("dry_run_output");
 
     write_minimal_family(&input);
     write_selections(&selections, &["p0001"]);
@@ -143,42 +150,65 @@ fn e2e_delete_dry_run_does_not_write_output() {
         "--selections",
         &selections,
         "--output",
-        &output,
+        &output_dir,
         "--dry-run",
         "--yes",
     ]);
     assert_eq!(code, Some(0), "Dry run failed: {}", stderr);
-    // Output file should NOT exist
+    // Output file should NOT exist inside the output directory
+    let output_file = deleted_1_path(&output_dir, &input);
     assert!(
-        !std::path::Path::new(&output).exists(),
+        !std::path::Path::new(&output_file).exists(),
         "Dry run should not write output"
     );
 
     let _ = std::fs::remove_file(&input);
     let _ = std::fs::remove_file(&selections);
+    let _ = std::fs::remove_dir_all(&output_dir);
 }
 
 #[test]
-fn e2e_delete_zero_percent_overlap_errors() {
-    let input = temp_path("no_match.gramps");
-    let selections = temp_path("no_match_selections.json");
+fn e2e_delete_old_output_file_usage_errors() {
+    // The old `--output <filename>` usage must fail cleanly: `--output` now
+    // takes a directory, so a path naming an existing file is rejected with
+    // a clear message (not a raw io error).
+    let input = temp_path("oldusage_input.gramps");
+    let selections = temp_path("oldusage_selections.json");
+    let existing_file = temp_path("oldusage_output.gramps");
 
+    std::fs::write(&existing_file, "i am a file, not a directory").unwrap();
     write_minimal_family(&input);
-    // Write selections with a handle that doesn't exist in the graph
-    write_selections(&selections, &["nonexistent_handle"]);
+    write_selections(&selections, &["p0001"]);
 
-    let (_stdout, stderr, code) =
-        gramps_gen(&["delete", &input, "--selections", &selections, "--yes"]);
-    // Should fail with non-zero exit code
+    let (_stdout, stderr, code) = gramps_gen(&[
+        "delete",
+        &input,
+        "--selections",
+        &selections,
+        "--yes",
+        "-o",
+        &existing_file,
+    ]);
     assert_ne!(
         code,
         Some(0),
-        "Should fail when 0% of selections match\nstderr: {}",
+        "Old-style -o file usage should fail\nstderr: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("--output"),
+        "stderr should mention --output: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("directory"),
+        "stderr should explain --output now takes a directory: {}",
         stderr
     );
 
     let _ = std::fs::remove_file(&input);
     let _ = std::fs::remove_file(&selections);
+    let _ = std::fs::remove_file(&existing_file);
 }
 
 // ---------------------------------------------------------------------------
@@ -341,7 +371,7 @@ fn e2e_delete_gramps_python_roundtrip() {
 
     let input = temp_path("roundtrip_input.gramps");
     let selections = temp_path("roundtrip_selections.json");
-    let output = temp_path("roundtrip_output.gramps");
+    let output_dir = temp_dir("roundtrip_output");
 
     write_uuid_fixture(&input, UUID_FIXTURE_51);
     write_selections(&selections, &["a5f0c1a2-4000-4b3d-8000-000000000001"]);
@@ -354,7 +384,7 @@ fn e2e_delete_gramps_python_roundtrip() {
         &selections,
         "--yes",
         "-o",
-        &output,
+        &output_dir,
     ]);
     assert_eq!(
         code,
@@ -364,12 +394,14 @@ fn e2e_delete_gramps_python_roundtrip() {
         _stdout
     );
 
+    let output_file = deleted_1_path(&output_dir, &input);
+
     // Verify the output file exists and is non-empty.
     assert!(
-        std::path::Path::new(&output).exists(),
+        std::path::Path::new(&output_file).exists(),
         "Output file should exist"
     );
-    let content = std::fs::read_to_string(&output).expect("Output file should be readable");
+    let content = std::fs::read_to_string(&output_file).expect("Output file should be readable");
     assert!(!content.is_empty(), "Output file should not be empty");
 
     // Verify the deleted person handle is NOT present in the output.
@@ -386,7 +418,7 @@ fn e2e_delete_gramps_python_roundtrip() {
 
     // If Gramps CLI is available, verify the output imports cleanly.
     if gramps_cli_available() {
-        let (import_out, import_code) = run_gramps_import(&output);
+        let (import_out, import_code) = run_gramps_import(&output_file);
         // Exit 0 (success) or 124 (timeout) are OK.
         assert!(
             import_code == Some(0) || import_code == Some(124),
@@ -408,7 +440,7 @@ fn e2e_delete_gramps_python_roundtrip() {
 
     let _ = std::fs::remove_file(&input);
     let _ = std::fs::remove_file(&selections);
-    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_dir_all(&output_dir);
 }
 
 #[test]
@@ -421,7 +453,7 @@ fn e2e_delete_manifest_v2_reconciliation() {
 
     let input = temp_path("recon_input.gramps");
     let selections = temp_path("recon_selections.json");
-    let output = temp_path("recon_output.gramps");
+    let output_dir = temp_dir("recon_output");
     let manifest_path = temp_path("recon_manifest.json");
 
     write_uuid_fixture(&input, UUID_FIXTURE_51);
@@ -434,7 +466,7 @@ fn e2e_delete_manifest_v2_reconciliation() {
         &selections,
         "--yes",
         "-o",
-        &output,
+        &output_dir,
         "--save-manifest",
         &manifest_path,
     ]);
@@ -456,7 +488,7 @@ fn e2e_delete_manifest_v2_reconciliation() {
 
     let _ = std::fs::remove_file(&input);
     let _ = std::fs::remove_file(&selections);
-    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_dir_all(&output_dir);
     let _ = std::fs::remove_file(&manifest_path);
 }
 
@@ -470,7 +502,7 @@ fn e2e_delete_db_retained() {
 
     let input = temp_path("dbret_input.gramps");
     let selections = temp_path("dbret_selections.json");
-    let output = temp_path("dbret_output.gramps");
+    let output_dir = temp_dir("dbret_output");
     let db_dir = temp_path("dbret_db");
 
     write_uuid_fixture(&input, UUID_FIXTURE_51);
@@ -483,9 +515,10 @@ fn e2e_delete_db_retained() {
         &selections,
         "--yes",
         "-o",
-        &output,
+        &output_dir,
         "--db-dir",
         &db_dir,
+        "--retain-db",
     ]);
     assert_eq!(code, Some(0), "Delete failed: {}", stderr);
 
@@ -505,7 +538,7 @@ fn e2e_delete_db_retained() {
     let _ = std::fs::remove_dir_all(&db_dir);
     let _ = std::fs::remove_file(&input);
     let _ = std::fs::remove_file(&selections);
-    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_dir_all(&output_dir);
 }
 
 #[test]
@@ -518,7 +551,7 @@ fn e2e_delete_no_retain_db() {
 
     let input = temp_path("nordb_input.gramps");
     let selections = temp_path("nordb_selections.json");
-    let output = temp_path("nordb_output.gramps");
+    let output_dir = temp_dir("nordb_output");
     let db_dir = temp_path("nordb_db");
 
     write_uuid_fixture(&input, UUID_FIXTURE_51);
@@ -531,22 +564,21 @@ fn e2e_delete_no_retain_db() {
         &selections,
         "--yes",
         "-o",
-        &output,
+        &output_dir,
         "--db-dir",
         &db_dir,
-        "--no-retain-db",
     ]);
     assert_eq!(code, Some(0), "Delete failed: {}", stderr);
 
-    // Verify DB directory was cleaned up.
+    // Verify DB directory was cleaned up (--no-retain-db is now the default).
     assert!(
         !std::path::Path::new(&db_dir).exists(),
-        "DB dir should be removed with --no-retain-db"
+        "DB dir should be removed by default"
     );
 
     let _ = std::fs::remove_file(&input);
     let _ = std::fs::remove_file(&selections);
-    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_dir_all(&output_dir);
 }
 
 #[test]
@@ -559,7 +591,7 @@ fn e2e_delete_orphaned_events_survive() {
 
     let input = temp_path("orphan_input.gramps");
     let selections = temp_path("orphan_selections.json");
-    let output = temp_path("orphan_output.gramps");
+    let output_dir = temp_dir("orphan_output");
 
     write_uuid_fixture(&input, UUID_FIXTURE_FAMILY_EVENT);
     // Delete both people — the event should survive as orphan.
@@ -578,11 +610,12 @@ fn e2e_delete_orphaned_events_survive() {
         &selections,
         "--yes",
         "-o",
-        &output,
+        &output_dir,
     ]);
     assert_eq!(code, Some(0), "Delete failed: {}", stderr);
 
-    let content = std::fs::read_to_string(&output).unwrap();
+    let output_file = deleted_1_path(&output_dir, &input);
+    let content = std::fs::read_to_string(&output_file).unwrap();
 
     // Deleted people should NOT appear.
     assert!(
@@ -608,7 +641,7 @@ fn e2e_delete_orphaned_events_survive() {
 
     let _ = std::fs::remove_file(&input);
     let _ = std::fs::remove_file(&selections);
-    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_dir_all(&output_dir);
 }
 
 #[test]
@@ -621,7 +654,7 @@ fn e2e_delete_load_manifest_v1() {
 
     let input = temp_path("v1load_input.gramps");
     let manifest_file = temp_path("v1load_manifest.json");
-    let output = temp_path("v1load_output.gramps");
+    let output_dir = temp_dir("v1load_output");
 
     write_uuid_fixture(&input, UUID_FIXTURE_51);
     write_v1_manifest(
@@ -636,12 +669,13 @@ fn e2e_delete_load_manifest_v1() {
         "--load-manifest",
         &manifest_file,
         "-o",
-        &output,
+        &output_dir,
     ]);
     assert_eq!(code, Some(0), "Load manifest v1 failed: {}", stderr);
 
     // Verify deletion happened.
-    let content = std::fs::read_to_string(&output).unwrap();
+    let output_file = deleted_1_path(&output_dir, &input);
+    let content = std::fs::read_to_string(&output_file).unwrap();
     assert!(
         !content.contains("a5f0c1a2-4000-4b3d-8000-000000000001"),
         "Deleted person should not appear in output"
@@ -649,7 +683,7 @@ fn e2e_delete_load_manifest_v1() {
 
     let _ = std::fs::remove_file(&input);
     let _ = std::fs::remove_file(&manifest_file);
-    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_dir_all(&output_dir);
 }
 
 #[test]
@@ -663,7 +697,7 @@ fn e2e_delete_load_manifest_v2_reconciled() {
 
     let input = temp_path("v2load_input.gramps");
     let manifest_file = temp_path("v2load_manifest.json");
-    let output = temp_path("v2load_output.gramps");
+    let output_dir = temp_dir("v2load_output");
 
     write_uuid_fixture(&input, UUID_FIXTURE_FAMILY_EVENT);
     // Write a v2 reconciled manifest where person1 is already deleted and
@@ -681,7 +715,7 @@ fn e2e_delete_load_manifest_v2_reconciled() {
         "--load-manifest",
         &manifest_file,
         "-o",
-        &output,
+        &output_dir,
     ]);
     assert_eq!(
         code,
@@ -690,7 +724,8 @@ fn e2e_delete_load_manifest_v2_reconciled() {
         stderr
     );
 
-    let content = std::fs::read_to_string(&output).unwrap();
+    let output_file = deleted_1_path(&output_dir, &input);
+    let content = std::fs::read_to_string(&output_file).unwrap();
 
     // The already-deleted person should still be present in the original
     // input and thus appear in the output (the manifest skips re-deleting it).
@@ -707,7 +742,7 @@ fn e2e_delete_load_manifest_v2_reconciled() {
 
     let _ = std::fs::remove_file(&input);
     let _ = std::fs::remove_file(&manifest_file);
-    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_dir_all(&output_dir);
 }
 
 #[test]
@@ -730,19 +765,43 @@ fn e2e_delete_gramps_available_guard() {
 // Event cleaning integration tests
 // ---------------------------------------------------------------------------
 
-/// Helper: derive the `-deleted-2.gramps` path from an input path, matching
-/// the logic in delete.rs::deleted_2_path.
-fn no_events_path(input: &str) -> String {
-    let stem = if let Some(s) = input.strip_suffix(".gz") {
-        s
-    } else {
-        input
+/// Derive the path of a `<stem>-deleted-N.gramps` file inside an output
+/// directory, matching delete.rs naming: the stem is the input file's name
+/// minus Gramps extensions.
+fn deleted_stage_path(out_dir: &str, input: &str, stage: u32) -> String {
+    let stem = input.strip_suffix(".gz").unwrap_or(input);
+    let stem = match stem.rfind('.') {
+        Some(i) => &stem[..i],
+        None => stem,
     };
-    if let Some(dot) = stem.rfind('.') {
-        format!("{}-deleted-2.gramps", &stem[..dot])
-    } else {
-        format!("{}-deleted-2.gramps", stem)
-    }
+    let stem = std::path::Path::new(stem)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "output".to_string());
+    std::path::Path::new(out_dir)
+        .join(format!("{}-deleted-{}.gramps", stem, stage))
+        .to_string_lossy()
+        .to_string()
+}
+
+/// Helper: the `-deleted-1.gramps` file inside the output directory.
+fn deleted_1_path(out_dir: &str, input: &str) -> String {
+    deleted_stage_path(out_dir, input, 1)
+}
+
+/// Helper: the `-deleted-2.gramps` file inside the output directory.
+fn no_events_path(out_dir: &str, input: &str) -> String {
+    deleted_stage_path(out_dir, input, 2)
+}
+
+/// Helper: the `-deleted-3.gramps` file inside the output directory.
+fn deleted_3_path(out_dir: &str, input: &str) -> String {
+    deleted_stage_path(out_dir, input, 3)
+}
+
+/// Helper: the `-deleted-4.gramps` file inside the output directory.
+fn deleted_4_path(out_dir: &str, input: &str) -> String {
+    deleted_stage_path(out_dir, input, 4)
 }
 
 #[test]
@@ -755,7 +814,7 @@ fn e2e_delete_with_event_clean() {
 
     let input = temp_path("ec_input.gramps");
     let selections = temp_path("ec_selections.json");
-    let output = temp_path("ec_output.gramps");
+    let output_dir = temp_dir("ec_output");
 
     write_uuid_fixture(&input, UUID_FIXTURE_FAMILY_EVENT);
     // Delete both people — the event becomes orphaned
@@ -774,31 +833,32 @@ fn e2e_delete_with_event_clean() {
         &selections,
         "--yes",
         "-o",
-        &output,
+        &output_dir,
     ]);
     assert_eq!(code, Some(0), "Delete failed: {}", stderr);
 
-    // Verify -cleaned output has the orphaned event (Gramps kept it)
-    let cleaned_content = std::fs::read_to_string(&output).unwrap();
+    // Verify -deleted-1 output has the orphaned event (Gramps kept it)
+    let output_file = deleted_1_path(&output_dir, &input);
+    let cleaned_content = std::fs::read_to_string(&output_file).unwrap();
     assert!(
         cleaned_content.contains("e0000001-4000-4b3d-8000-000000000001"),
-        "Orphaned event should survive in -cleaned output"
+        "Orphaned event should survive in -deleted-1 output"
     );
 
-    // Verify -deleted_2 output has the event removed
-    let no_events = no_events_path(&input);
+    // Verify -deleted-2 output has the event removed
+    let no_events = no_events_path(&output_dir, &input);
     assert!(
         std::path::Path::new(&no_events).exists(),
-        "-deleted_2.gramps file should exist: {}",
+        "-deleted-2.gramps file should exist: {}",
         no_events
     );
     let no_events_content = std::fs::read_to_string(&no_events).unwrap();
     assert!(
         !no_events_content.contains("e0000001-4000-4b3d-8000-000000000001"),
-        "Orphaned event should be removed from -deleted_2 output"
+        "Orphaned event should be removed from -deleted-2 output"
     );
 
-    // Verify non-event content is preserved in -deleted_2
+    // Verify non-event content is preserved in -deleted-2
     // (XML declaration and header should survive)
     assert!(
         no_events_content.contains("<?xml"),
@@ -811,8 +871,7 @@ fn e2e_delete_with_event_clean() {
 
     let _ = std::fs::remove_file(&input);
     let _ = std::fs::remove_file(&selections);
-    let _ = std::fs::remove_file(&output);
-    let _ = std::fs::remove_file(&no_events);
+    let _ = std::fs::remove_dir_all(&output_dir);
 }
 
 #[test]
@@ -826,7 +885,7 @@ fn e2e_delete_no_pending_events_noop() {
 
     let input = temp_path("nope_input.gramps");
     let selections = temp_path("nope_selections.json");
-    let output = temp_path("nope_output.gramps");
+    let output_dir = temp_dir("nope_output");
 
     // UUID_FIXTURE_51 has no events
     write_uuid_fixture(&input, UUID_FIXTURE_51);
@@ -839,26 +898,27 @@ fn e2e_delete_no_pending_events_noop() {
         &selections,
         "--yes",
         "-o",
-        &output,
+        &output_dir,
     ]);
     assert_eq!(code, Some(0), "Delete failed: {}", stderr);
 
-    // -cleaned output should exist
+    // -deleted-1 output should exist
+    let output_file = deleted_1_path(&output_dir, &input);
     assert!(
-        std::path::Path::new(&output).exists(),
-        "-cleaned output should exist"
+        std::path::Path::new(&output_file).exists(),
+        "-deleted-1 output should exist"
     );
 
-    // -deleted_2 should NOT exist (no pending events to clean)
-    let no_events = no_events_path(&input);
+    // -deleted-2 should NOT exist (no pending events to clean)
+    let no_events = no_events_path(&output_dir, &input);
     assert!(
         !std::path::Path::new(&no_events).exists(),
-        "-deleted_2.gramps should NOT be written when there are no pending events"
+        "-deleted-2.gramps should NOT be written when there are no pending events"
     );
 
     let _ = std::fs::remove_file(&input);
     let _ = std::fs::remove_file(&selections);
-    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_dir_all(&output_dir);
 }
 
 #[test]
@@ -872,7 +932,7 @@ fn e2e_delete_manifest_re_saved_after_clean() {
 
     let input = temp_path("mrsac_input.gramps");
     let selections = temp_path("mrsac_selections.json");
-    let output = temp_path("mrsac_output.gramps");
+    let output_dir = temp_dir("mrsac_output");
     let manifest_path = temp_path("mrsac_manifest.json");
 
     write_uuid_fixture(&input, UUID_FIXTURE_FAMILY_EVENT);
@@ -891,7 +951,7 @@ fn e2e_delete_manifest_re_saved_after_clean() {
         &selections,
         "--yes",
         "-o",
-        &output,
+        &output_dir,
         "--save-manifest",
         &manifest_path,
     ]);
@@ -920,28 +980,13 @@ fn e2e_delete_manifest_re_saved_after_clean() {
 
     let _ = std::fs::remove_file(&input);
     let _ = std::fs::remove_file(&selections);
-    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_dir_all(&output_dir);
     let _ = std::fs::remove_file(&manifest_path);
 }
 
 // ---------------------------------------------------------------------------
 // Note cleaning integration tests
 // ---------------------------------------------------------------------------
-
-/// Helper: derive the `-deleted-3.gramps` path from an input path, matching
-/// the logic in delete.rs::deleted_3_path.
-fn deleted_3_path(input: &str) -> String {
-    let stem = if let Some(s) = input.strip_suffix(".gz") {
-        s
-    } else {
-        input
-    };
-    if let Some(dot) = stem.rfind('.') {
-        format!("{}-deleted-3.gramps", &stem[..dot])
-    } else {
-        format!("{}-deleted-3.gramps", stem)
-    }
-}
 
 #[test]
 fn e2e_delete_with_note_clean() {
@@ -955,7 +1000,7 @@ fn e2e_delete_with_note_clean() {
 
     let input = temp_path("nc_input.gramps");
     let selections = temp_path("nc_selections.json");
-    let output = temp_path("nc_output.gramps");
+    let output_dir = temp_dir("nc_output");
     let manifest_path = temp_path("nc_manifest.json");
 
     write_uuid_fixture(&input, UUID_FIXTURE_FAMILY_NOTE);
@@ -975,32 +1020,33 @@ fn e2e_delete_with_note_clean() {
         &selections,
         "--yes",
         "-o",
-        &output,
+        &output_dir,
         "--save-manifest",
         &manifest_path,
     ]);
     assert_eq!(code, Some(0), "Delete failed: {}", stderr);
 
-    // -cleaned output should exist and contain the orphaned note (Gramps
+    // -deleted-1 output should exist and contain the orphaned note (Gramps
     // Python backend only deletes people, never notes)
-    let cleaned_content = std::fs::read_to_string(&output).unwrap();
+    let output_file = deleted_1_path(&output_dir, &input);
+    let cleaned_content = std::fs::read_to_string(&output_file).unwrap();
     assert!(
         cleaned_content.contains("n0000001-4000-4b3d-8000-000000000001"),
-        "Orphaned note should survive in -cleaned output"
+        "Orphaned note should survive in -deleted-1 output"
     );
 
-    // -deleted_2 may or may not exist (no pending events here, so it's skipped)
-    // -deleted_3 should exist and have the note removed
-    let no_notes = deleted_3_path(&input);
+    // -deleted-2 may or may not exist (no pending events here, so it's skipped)
+    // -deleted-3 should exist and have the note removed
+    let no_notes = deleted_3_path(&output_dir, &input);
     assert!(
         std::path::Path::new(&no_notes).exists(),
-        "-deleted_3.gramps file should exist: {}",
+        "-deleted-3.gramps file should exist: {}",
         no_notes
     );
     let no_notes_content = std::fs::read_to_string(&no_notes).unwrap();
     assert!(
         !no_notes_content.contains("n0000001-4000-4b3d-8000-000000000001"),
-        "Orphaned note should be removed from -deleted_3 output"
+        "Orphaned note should be removed from -deleted-3 output"
     );
     assert!(
         no_notes_content.contains("<?xml"),
@@ -1030,9 +1076,8 @@ fn e2e_delete_with_note_clean() {
 
     let _ = std::fs::remove_file(&input);
     let _ = std::fs::remove_file(&selections);
-    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_dir_all(&output_dir);
     let _ = std::fs::remove_file(&manifest_path);
-    let _ = std::fs::remove_file(&no_notes);
 }
 
 #[test]
@@ -1046,7 +1091,7 @@ fn e2e_delete_no_pending_notes_noop() {
 
     let input = temp_path("nopn_input.gramps");
     let selections = temp_path("nopn_selections.json");
-    let output = temp_path("nopn_output.gramps");
+    let output_dir = temp_dir("nopn_output");
 
     // UUID_FIXTURE_FAMILY_EVENT has an event but no notes
     write_uuid_fixture(&input, UUID_FIXTURE_FAMILY_EVENT);
@@ -1065,28 +1110,27 @@ fn e2e_delete_no_pending_notes_noop() {
         &selections,
         "--yes",
         "-o",
-        &output,
+        &output_dir,
     ]);
     assert_eq!(code, Some(0), "Delete failed: {}", stderr);
 
-    // -deleted_2 should exist (event cleaning runs)
-    let no_events = no_events_path(&input);
+    // -deleted-2 should exist (event cleaning runs)
+    let no_events = no_events_path(&output_dir, &input);
     assert!(
         std::path::Path::new(&no_events).exists(),
-        "-deleted_2.gramps should exist when pending events are cleaned"
+        "-deleted-2.gramps should exist when pending events are cleaned"
     );
 
-    // -deleted_3 should NOT exist (no pending notes to clean)
-    let no_notes = deleted_3_path(&input);
+    // -deleted-3 should NOT exist (no pending notes to clean)
+    let no_notes = deleted_3_path(&output_dir, &input);
     assert!(
         !std::path::Path::new(&no_notes).exists(),
-        "-deleted_3.gramps should NOT be written when there are no pending notes"
+        "-deleted-3.gramps should NOT be written when there are no pending notes"
     );
 
     let _ = std::fs::remove_file(&input);
     let _ = std::fs::remove_file(&selections);
-    let _ = std::fs::remove_file(&output);
-    let _ = std::fs::remove_file(&no_events);
+    let _ = std::fs::remove_dir_all(&output_dir);
 }
 
 // ---------------------------------------------------------------------------
@@ -1144,21 +1188,6 @@ const UUID_FIXTURE_FAMILY_EVENT_NOTE_PLACE: &str = r###"<?xml version="1.0" enco
 </database>
 "###;
 
-/// Helper: derive the `-deleted-4.gramps` path from an input path, matching
-/// the logic in delete.rs::deleted_4_path.
-fn deleted_4_path(input: &str) -> String {
-    let stem = if let Some(s) = input.strip_suffix(".gz") {
-        s
-    } else {
-        input
-    };
-    if let Some(dot) = stem.rfind('.') {
-        format!("{}-deleted-4.gramps", &stem[..dot])
-    } else {
-        format!("{}-deleted-4.gramps", stem)
-    }
-}
-
 #[test]
 fn e2e_delete_with_place_clean() {
     // Verify the full pipeline: deleting both people orphans the event, note,
@@ -1171,7 +1200,7 @@ fn e2e_delete_with_place_clean() {
 
     let input = temp_path("pc_input.gramps");
     let selections = temp_path("pc_selections.json");
-    let output = temp_path("pc_output.gramps");
+    let output_dir = temp_dir("pc_output");
     let manifest_path = temp_path("pc_manifest.json");
 
     write_uuid_fixture(&input, UUID_FIXTURE_FAMILY_EVENT_NOTE_PLACE);
@@ -1191,57 +1220,58 @@ fn e2e_delete_with_place_clean() {
         &selections,
         "--yes",
         "-o",
-        &output,
+        &output_dir,
         "--save-manifest",
         &manifest_path,
     ]);
     assert_eq!(code, Some(0), "Delete failed: {}", stderr);
 
-    // -cleaned output should exist and contain the orphaned place (Gramps
+    // -deleted-1 output should exist and contain the orphaned place (Gramps
     // Python backend only deletes people, never places)
-    let cleaned_content = std::fs::read_to_string(&output).unwrap();
+    let output_file = deleted_1_path(&output_dir, &input);
+    let cleaned_content = std::fs::read_to_string(&output_file).unwrap();
     assert!(
         cleaned_content.contains("d0000001-4000-4b3d-8000-000000000005"),
-        "Orphaned place should survive in -cleaned output"
+        "Orphaned place should survive in -deleted-1 output"
     );
 
-    // -deleted_2 should exist (event cleaning runs) and still contain the place
-    let no_events = no_events_path(&input);
+    // -deleted-2 should exist (event cleaning runs) and still contain the place
+    let no_events = no_events_path(&output_dir, &input);
     assert!(
         std::path::Path::new(&no_events).exists(),
-        "-deleted_2.gramps file should exist: {}",
+        "-deleted-2.gramps file should exist: {}",
         no_events
     );
     let no_events_content = std::fs::read_to_string(&no_events).unwrap();
     assert!(
         no_events_content.contains("d0000001-4000-4b3d-8000-000000000005"),
-        "Place should survive in -deleted_2 (event cleaning only removes events)"
+        "Place should survive in -deleted-2 (event cleaning only removes events)"
     );
 
-    // -deleted_3 should exist (note cleaning runs) and still contain the place
-    let no_notes = deleted_3_path(&input);
+    // -deleted-3 should exist (note cleaning runs) and still contain the place
+    let no_notes = deleted_3_path(&output_dir, &input);
     assert!(
         std::path::Path::new(&no_notes).exists(),
-        "-deleted_3.gramps file should exist: {}",
+        "-deleted-3.gramps file should exist: {}",
         no_notes
     );
     let no_notes_content = std::fs::read_to_string(&no_notes).unwrap();
     assert!(
         no_notes_content.contains("d0000001-4000-4b3d-8000-000000000005"),
-        "Place should survive in -deleted_3 (note cleaning only removes notes)"
+        "Place should survive in -deleted-3 (note cleaning only removes notes)"
     );
 
-    // -deleted_4 should exist and have the place removed
-    let no_places = deleted_4_path(&input);
+    // -deleted-4 should exist and have the place removed
+    let no_places = deleted_4_path(&output_dir, &input);
     assert!(
         std::path::Path::new(&no_places).exists(),
-        "-deleted_4.gramps file should exist: {}",
+        "-deleted-4.gramps file should exist: {}",
         no_places
     );
     let no_places_content = std::fs::read_to_string(&no_places).unwrap();
     assert!(
         !no_places_content.contains("d0000001-4000-4b3d-8000-000000000005"),
-        "Orphaned place should be removed from -deleted_4 output"
+        "Orphaned place should be removed from -deleted-4 output"
     );
     assert!(
         no_places_content.contains("<?xml"),
@@ -1271,11 +1301,8 @@ fn e2e_delete_with_place_clean() {
 
     let _ = std::fs::remove_file(&input);
     let _ = std::fs::remove_file(&selections);
-    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_dir_all(&output_dir);
     let _ = std::fs::remove_file(&manifest_path);
-    let _ = std::fs::remove_file(&no_events);
-    let _ = std::fs::remove_file(&no_notes);
-    let _ = std::fs::remove_file(&no_places);
 }
 
 #[test]
@@ -1289,7 +1316,7 @@ fn e2e_delete_no_pending_places_noop() {
 
     let input = temp_path("nopp_input.gramps");
     let selections = temp_path("nopp_selections.json");
-    let output = temp_path("nopp_output.gramps");
+    let output_dir = temp_dir("nopp_output");
 
     // UUID_FIXTURE_FAMILY_EVENT has an event but no places and no notes
     write_uuid_fixture(&input, UUID_FIXTURE_FAMILY_EVENT);
@@ -1308,28 +1335,27 @@ fn e2e_delete_no_pending_places_noop() {
         &selections,
         "--yes",
         "-o",
-        &output,
+        &output_dir,
     ]);
     assert_eq!(code, Some(0), "Delete failed: {}", stderr);
 
-    // -deleted_2 should exist (event cleaning runs)
-    let no_events = no_events_path(&input);
+    // -deleted-2 should exist (event cleaning runs)
+    let no_events = no_events_path(&output_dir, &input);
     assert!(
         std::path::Path::new(&no_events).exists(),
-        "-deleted_2.gramps should exist when pending events are cleaned"
+        "-deleted-2.gramps should exist when pending events are cleaned"
     );
 
-    // -deleted_4 should NOT exist (no pending places to clean)
-    let no_places = deleted_4_path(&input);
+    // -deleted-4 should NOT exist (no pending places to clean)
+    let no_places = deleted_4_path(&output_dir, &input);
     assert!(
         !std::path::Path::new(&no_places).exists(),
-        "-deleted_4.gramps should NOT be written when there are no pending places"
+        "-deleted-4.gramps should NOT be written when there are no pending places"
     );
 
     let _ = std::fs::remove_file(&input);
     let _ = std::fs::remove_file(&selections);
-    let _ = std::fs::remove_file(&output);
-    let _ = std::fs::remove_file(&no_events);
+    let _ = std::fs::remove_dir_all(&output_dir);
 }
 
 #[test]
@@ -1343,7 +1369,7 @@ fn e2e_delete_deleted_2_and_3_unchanged() {
 
     let input = temp_path("dc_input.gramps");
     let selections = temp_path("dc_selections.json");
-    let output = temp_path("dc_output.gramps");
+    let output_dir = temp_dir("dc_output");
 
     write_uuid_fixture(&input, UUID_FIXTURE_FAMILY_EVENT_NOTE_PLACE);
     write_selections(
@@ -1361,52 +1387,49 @@ fn e2e_delete_deleted_2_and_3_unchanged() {
         &selections,
         "--yes",
         "-o",
-        &output,
+        &output_dir,
     ]);
     assert_eq!(code, Some(0), "Delete failed: {}", stderr);
 
-    // -deleted_2 still contains the place
-    let no_events = no_events_path(&input);
+    // -deleted-2 still contains the place
+    let no_events = no_events_path(&output_dir, &input);
     assert!(
         std::path::Path::new(&no_events).exists(),
-        "-deleted_2.gramps should exist"
+        "-deleted-2.gramps should exist"
     );
     let no_events_content = std::fs::read_to_string(&no_events).unwrap();
     assert!(
         no_events_content.contains("d0000001-4000-4b3d-8000-000000000005"),
-        "Place should survive in -deleted_2"
+        "Place should survive in -deleted-2"
     );
 
-    // -deleted_3 still contains the place
-    let no_notes = deleted_3_path(&input);
+    // -deleted-3 still contains the place
+    let no_notes = deleted_3_path(&output_dir, &input);
     assert!(
         std::path::Path::new(&no_notes).exists(),
-        "-deleted_3.gramps should exist"
+        "-deleted-3.gramps should exist"
     );
     let no_notes_content = std::fs::read_to_string(&no_notes).unwrap();
     assert!(
         no_notes_content.contains("d0000001-4000-4b3d-8000-000000000005"),
-        "Place should survive in -deleted_3"
+        "Place should survive in -deleted-3"
     );
 
-    // -deleted_4 drops the place
-    let no_places = deleted_4_path(&input);
+    // -deleted-4 drops the place
+    let no_places = deleted_4_path(&output_dir, &input);
     assert!(
         std::path::Path::new(&no_places).exists(),
-        "-deleted_4.gramps should exist"
+        "-deleted-4.gramps should exist"
     );
     let no_places_content = std::fs::read_to_string(&no_places).unwrap();
     assert!(
         !no_places_content.contains("d0000001-4000-4b3d-8000-000000000005"),
-        "Place should be removed from -deleted_4"
+        "Place should be removed from -deleted-4"
     );
 
     let _ = std::fs::remove_file(&input);
     let _ = std::fs::remove_file(&selections);
-    let _ = std::fs::remove_file(&output);
-    let _ = std::fs::remove_file(&no_events);
-    let _ = std::fs::remove_file(&no_notes);
-    let _ = std::fs::remove_file(&no_places);
+    let _ = std::fs::remove_dir_all(&output_dir);
 }
 
 #[test]
@@ -1420,7 +1443,7 @@ fn e2e_delete_manifest_places_marked_deleted() {
 
     let input = temp_path("mpmd_input.gramps");
     let selections = temp_path("mpmd_selections.json");
-    let output = temp_path("mpmd_output.gramps");
+    let output_dir = temp_dir("mpmd_output");
     let manifest_path = temp_path("mpmd_manifest.json");
 
     write_uuid_fixture(&input, UUID_FIXTURE_FAMILY_EVENT_NOTE_PLACE);
@@ -1439,7 +1462,7 @@ fn e2e_delete_manifest_places_marked_deleted() {
         &selections,
         "--yes",
         "-o",
-        &output,
+        &output_dir,
         "--save-manifest",
         &manifest_path,
     ]);
@@ -1468,6 +1491,6 @@ fn e2e_delete_manifest_places_marked_deleted() {
 
     let _ = std::fs::remove_file(&input);
     let _ = std::fs::remove_file(&selections);
-    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_dir_all(&output_dir);
     let _ = std::fs::remove_file(&manifest_path);
 }

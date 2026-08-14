@@ -61,9 +61,10 @@ pub struct DeleteArgs {
     #[arg(short = 's', long = "selections")]
     pub selections: Option<PathBuf>,
 
-    /// Output .gramps file (default: <input>-cleaned.gramps)
+    /// Output directory (default: input file's directory).
+    /// All output files are named <file-stem>-deleted-N.gramps.
     #[arg(short = 'o', long = "output")]
-    pub output: Option<PathBuf>,
+    pub output_dir: Option<PathBuf>,
 
     /// Skip all review prompts (delete everything the cascade computed)
     #[arg(short = 'y', long)]
@@ -85,9 +86,9 @@ pub struct DeleteArgs {
     #[arg(long = "db-dir")]
     pub db_dir: Option<PathBuf>,
 
-    /// Clean up Gramps DB after successful export
-    #[arg(long = "no-retain-db")]
-    pub no_retain_db: bool,
+    /// Retain the Gramps Berkeley DB directory after export
+    #[arg(long = "retain-db")]
+    pub retain_db: bool,
 }
 
 /// Resolve the Python interpreter that can import Gramps.
@@ -192,14 +193,9 @@ fn resolve_script_path() -> Result<PathBuf, CliError> {
 pub fn run(args: DeleteArgs) -> Result<(), CliError> {
     let input_path = &args.input;
 
-    // Derive the output directory and file stem used to name all output
-    // files. Interim: files land in the input file's own directory; the
-    // `--output` directory resolution replaces this in a later change.
-    let output_dir = input_path
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."))
-        .to_path_buf();
+    // Derive the file stem used to name all output files.
     let stem = derive_stem(input_path);
+    let output_dir = resolve_output_dir(args.output_dir.clone(), input_path)?;
 
     // 1. Parse the input .gramps file
     log::info!("Reading input file: {}", input_path.display());
@@ -368,40 +364,19 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
         &graph,
     );
 
-    // 6. Compute output path
-    let output_path = args.output.unwrap_or_else(|| {
-        let input_name = input_path
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| "output".to_string());
-        let out = if input_path.extension().is_some_and(|e| e == "gz") {
-            // For .gramps.gz, strip both extensions
-            let base = input_path
-                .file_stem()
-                .and_then(|s| {
-                    let s = s.to_string_lossy();
-                    let s_str = s.as_ref();
-                    let dot = s_str.rfind('.');
-                    dot.map(|i| s_str[..i].to_string())
-                })
-                .unwrap_or_else(|| input_name.clone());
-            format!("{}-cleaned.gramps.gz", base)
-        } else {
-            format!("{}-cleaned.gramps", input_name)
-        };
-        PathBuf::from(out)
-    });
+    // 6. Compute output paths (all inside the output directory)
+    let output_path = deleted_1_path(&output_dir, &stem);
+    let d2_path = deleted_2_path(&output_dir, &stem);
+    let d3_path = deleted_3_path(&output_dir, &stem);
+    let d4_path = deleted_4_path(&output_dir, &stem);
 
     log::info!("Writing output to: {}", output_path.display());
 
-    // 7. Determine manifest output path — always saved alongside output.
-    //    `--save-manifest` overrides the default <output-stem>.manifest.json.
+    // 7. Determine manifest output path — always saved in the output
+    //    directory. `--save-manifest` overrides the default.
     let manifest_path = match args.save_manifest {
         Some(ref p) => p.clone(),
-        None => PathBuf::from(format!(
-            "{}.manifest.json",
-            strip_gramps_extensions(&output_path)
-        )),
+        None => output_dir.join(format!("{}-deleted.manifest.json", stem)),
     };
     log::info!("Saving manifest to: {}", manifest_path.display());
     save_manifest(&manifest, &manifest_path)?;
@@ -458,7 +433,7 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
     let manifest_clone = manifest_temp.clone();
     let output_clone = output_path.clone();
     let db_dir_clone = db_dir.clone();
-    let no_retain_db = args.no_retain_db;
+    let retain_db = args.retain_db;
 
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -472,7 +447,7 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
             .arg(&output_clone)
             .arg("--db-dir")
             .arg(&db_dir_clone);
-        if no_retain_db {
+        if !retain_db {
             cmd.arg("--no-retain-db");
         }
         let result = cmd
@@ -580,7 +555,6 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
         .unwrap_or_default();
 
     if !pending_events.is_empty() {
-        let d2_path = deleted_2_path(&output_dir, &stem);
         log::info!(
             "Cleaning {} pending events from output -> {}",
             pending_events.len(),
@@ -624,13 +598,11 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
         .unwrap_or_default();
 
     if !pending_notes.is_empty() {
-        let d2_path = deleted_2_path(&output_dir, &stem);
-        let d3_path = deleted_3_path(&output_dir, &stem);
-
         // Use `-deleted-2.gramps` as input if it exists (event cleaning ran),
         // otherwise fall back to the original `-deleted-1.gramps` output.
+        // (Clone so the shared d2_path stays available for the place step.)
         let note_input = if d2_path.exists() {
-            d2_path
+            d2_path.clone()
         } else {
             output_path.clone()
         };
@@ -676,10 +648,6 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
         .unwrap_or_default();
 
     if !pending_places.is_empty() {
-        let d2_path = deleted_2_path(&output_dir, &stem);
-        let d3_path = deleted_3_path(&output_dir, &stem);
-        let d4_path = deleted_4_path(&output_dir, &stem);
-
         // Use the latest available cleaned output as input.
         let place_input = if d3_path.exists() {
             d3_path
@@ -732,10 +700,10 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
         pending_count,
     );
     log::info!("Enriched manifest saved to: {}", manifest_path.display());
-    if args.no_retain_db {
-        log::info!("Gramps DB removed (--no-retain-db).");
-    } else {
+    if args.retain_db {
         log::info!("Gramps DB retained at: {}", db_dir.display());
+    } else {
+        log::info!("Gramps DB removed (--no-retain-db).");
     }
     if !result.rejected.is_empty() {
         log::warn!(
@@ -777,8 +745,39 @@ fn derive_stem(input_path: &std::path::Path) -> String {
         .unwrap_or_else(|| "output".to_string())
 }
 
+/// Resolve the output directory: the `--output` argument if given, otherwise
+/// the input file's own directory. Creates the directory if missing, and maps
+/// "File exists" (the path names a regular file — the old `--output <file>`
+/// usage) to a clear configuration error.
+fn resolve_output_dir(
+    output_dir: Option<PathBuf>,
+    input_path: &std::path::Path,
+) -> Result<PathBuf, CliError> {
+    let dir = output_dir.unwrap_or_else(|| {
+        input_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .to_path_buf()
+    });
+    fs::create_dir_all(&dir).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            CliError::ConfigError(format!(
+                "--output path '{}' already exists and is not a directory; \
+                 --output now expects a directory (output files are written \
+                 inside it as <file-stem>-deleted-N.gramps)",
+                dir.display()
+            ))
+        } else {
+            CliError::Io {
+                path: dir.display().to_string(),
+                source: e,
+            }
+        }
+    })?;
+    Ok(dir)
+}
+
 /// Derive the `-deleted-1.gramps` path in a directory from a file stem.
-#[allow(dead_code)] // becomes the default `--output` path in the next change
 fn deleted_1_path(dir: &std::path::Path, stem: &str) -> std::path::PathBuf {
     dir.join(format!("{}-deleted-1.gramps", stem))
 }
@@ -863,13 +862,13 @@ mod tests {
         let args = DeleteArgs {
             input: PathBuf::from("test.gramps"),
             selections: Some(PathBuf::from("sel.json")),
-            output: Some(PathBuf::from("out.gramps")),
+            output_dir: Some(PathBuf::from("out_dir")),
             yes: true,
             dry_run: false,
             save_manifest: None,
             load_manifest: None,
             db_dir: None,
-            no_retain_db: false,
+            retain_db: false,
         };
         let cloned = args.clone();
         assert_eq!(args.input, cloned.input);
@@ -881,13 +880,13 @@ mod tests {
         let args = DeleteArgs {
             input: PathBuf::from("test.gramps"),
             selections: None,
-            output: None,
+            output_dir: None,
             yes: false,
             dry_run: false,
             save_manifest: None,
             load_manifest: None,
             db_dir: None,
-            no_retain_db: false,
+            retain_db: false,
         };
         assert!(!args.yes);
         assert!(!args.dry_run);
@@ -1054,6 +1053,47 @@ mod tests {
     fn derive_stem_falls_back_to_output_for_root() {
         assert_eq!(derive_stem(std::path::Path::new("/")), "output");
         assert_eq!(derive_stem(std::path::Path::new("")), "output");
+    }
+
+    #[test]
+    fn resolve_output_dir_explicit_creates_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("nested/deeper");
+        let resolved = resolve_output_dir(
+            Some(nested.clone()),
+            std::path::Path::new("/tmp/in.gramps"),
+        )
+        .unwrap();
+        assert_eq!(resolved, nested);
+        assert!(nested.is_dir(), "output dir should be created");
+    }
+
+    #[test]
+    fn resolve_output_dir_defaults_to_input_parent() {
+        let input = PathBuf::from("/tmp/data/sample.gramps");
+        let resolved = resolve_output_dir(None, &input).unwrap();
+        assert_eq!(resolved, PathBuf::from("/tmp/data"));
+    }
+
+    #[test]
+    fn resolve_output_dir_file_usage_errors() {
+        let file = tempfile::tempdir().unwrap();
+        let existing = file.path().join("not_a_dir");
+        std::fs::write(&existing, "i am a file").unwrap();
+        let err = resolve_output_dir(
+            Some(existing),
+            std::path::Path::new("/tmp/in.gramps"),
+        )
+        .unwrap_err();
+        match err {
+            CliError::ConfigError(msg) => {
+                assert!(
+                    msg.contains("directory"),
+                    "should explain --output now takes a directory: {msg}"
+                );
+            }
+            other => panic!("expected ConfigError, got: {:?}", other),
+        }
     }
 
     #[test]
