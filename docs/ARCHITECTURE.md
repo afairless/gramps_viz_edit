@@ -135,7 +135,7 @@ A **Python extractor** (`extract/extract_schema.py`) introspects Gramps Python c
 │                                                                │
 │  Persistent Gramps DB ──── import ──── delete PEOPLE ONLY       │
 │  ──── export ──► .gramps + report surviving handles            │
-│  DB retained at <input>-gramps-db/ for inspection              │
+│  DB in temp dir, removed after export (--retain-db keeps it)   │
 │  Gramps' own libraries via gramps.gen + plugins               │
 └──────────────────────────────┬─────────────────────────────────┘
                            │  surviving: [handle, ...]
@@ -150,8 +150,9 @@ A **Python extractor** (`extract/extract_schema.py`) introspects Gramps Python c
                            ▼
 ┌────────────────────────────────────────────────────────────────┐
 │  Output                                                     │
-│  output.gramps + output.manifest.json                         │
-│  <input>-gramps-db/ (retained Gramps DB)                      │
+│  <stem>-deleted-1..4.gramps (inside the --output dir)          │
+│  <stem>-deleted.manifest.json                                  │
+│  Gramps DB removed by default; retained with --retain-db      │
 └────────────────────────────────────────────────────────────────┘
                            │
                            ▼
@@ -872,7 +873,7 @@ Deletion manifests use **v3 format** with per-handle status tracking, Gramps IDs
 | `deleted` | Confirmed: Gramps actually removed this object |
 | `kept` | User chose to keep this during review |
 
-Manifests are always saved alongside the output file (`<output-stem>.manifest.json`).
+Manifests are always saved in the output directory as `<file-stem>-deleted.manifest.json`.
 `--save-manifest <FILE>` overrides the default path. v1/v2 manifests (flat handle
 strings or objects without descriptions) are auto-migrated to v3 on load, with
 `gramps_id` defaulting to `null` and `description` defaulting to empty.
@@ -882,13 +883,13 @@ strings or objects without descriptions) are auto-migrated to v3 on load, with
 The `gramps-gen delete <file>` CLI subcommand supports flags:
 
 - `--selections <FILE>` — visualizer selection JSON (required unless `--load-manifest`)
-- `--output`, `-o <FILE>` — output path
+- `--output`, `-o <DIR>` — output directory (default: input file's directory); all files are named `<file-stem>-deleted-N.gramps`
 - `--yes`, `-y` — skip review prompts
 - `--dry-run`, `-n` — compute cascade, save manifest, exit
 - `--save-manifest <FILE>` — override manifest output path
 - `--load-manifest <FILE>` — load pre-reviewed manifest (skip review, filter pending-only)
-- `--db-dir <DIR>` — Gramps DB directory (default: `<input-stem>-gramps-db/`)
-- `--no-retain-db` — clean up Gramps DB after successful export
+- `--db-dir <DIR>` — Gramps DB directory (default: temp dir removed after run)
+- `--retain-db` — keep the Gramps Berkeley DB directory after export
 
 ### Reconciliation
 
