@@ -31,6 +31,7 @@ repositories, media, notes, and tags become unreachable after deletion.
 
 ```bash
 # Basic deletion with selections from the visualizer
+# (files land in the input file's directory)
 gramps-gen delete data.gramps --selections picks.json
 
 # Dry run — compute cascade without writing output
@@ -45,12 +46,23 @@ gramps-gen delete data.gramps --selections picks.json \
 
 # Re-run from a saved manifest
 gramps-gen delete data.gramps \
-  --load-manifest delete-manifest.json --output cleaned.gramps
+  --load-manifest delete-manifest.json -o out/
 
-# Custom output path
+# Custom output directory
 gramps-gen delete data.gramps --selections picks.json \
-  --output cleaned.gramps
+  --output out/
+
+# Everything lands inside the output directory:
+#   out/data-deleted-1.gramps        ← people deleted
+#   out/data-deleted-2.gramps        ← + orphaned events cleaned
+#   out/data-deleted-3.gramps        ← + orphaned notes cleaned
+#   out/data-deleted-4.gramps        ← + orphaned places cleaned (FINAL)
+#   out/data-deleted.manifest.json   ← audit manifest
 ```
+
+> **Note:** `--output` takes a **directory**, not a file path. All output
+> files are written inside it and named after the input file's stem. When
+> `--output` is omitted, the input file's own directory is used.
 
 ---
 
@@ -100,24 +112,37 @@ gramps-gen delete data.gramps --selections picks.json \
 
 ### Post-processing: cleaning orphaned events, notes, and places
 
-The Python backend performs **people-only** deletion. Orphaned events,
-notes, and places identified by the cascade survive in the backend's
-`<stem>-cleaned.gramps` export and are removed by three streaming XML
-passes, each producing its own output file:
+The Python backend performs **people-only** deletion. The backend export
+`<stem>-deleted-1.gramps` keeps the orphaned events, notes, and places
+identified by the cascade; three streaming XML passes then remove them,
+each producing its own output file:
 
 | Pass | Output | Removes |
 |---|---|---|
-| Events | `<stem>-deleted_2.gramps` | Orphaned events |
-| Notes | `<stem>-deleted_3.gramps` | Orphaned notes |
-| Places | `<stem>-deleted_4.gramps` | Orphaned places |
+| Backend export | `<stem>-deleted-1.gramps` | Selected people |
+| Events | `<stem>-deleted-2.gramps` | Orphaned events |
+| Notes | `<stem>-deleted-3.gramps` | Orphaned notes |
+| Places | `<stem>-deleted-4.gramps` | Orphaned places |
 
-Each pass reads the previous pass's output (`-cleaned.gramps` is used when
-`-deleted_2`/`-deleted_3` were never written) and removes only the pending
-handles recorded in the manifest. After a successful pass the manifest is
-re-saved with the corresponding entries marked `deleted`. Only places the
-cascade flagged as **newly orphaned** are removed — places that were already
-orphaned before the operation are never touched (see
-[Per-Type Orphan Rules](#per-type-orphan-rules)).
+All files are written inside the `--output` directory (default: the input
+file's own directory). The manifest is saved in the same directory as
+`<stem>-deleted.manifest.json` (unless `--save-manifest` overrides it).
+
+Each pass reads the previous pass's output (`-deleted-1.gramps` is used
+when `-deleted-2`/`-deleted-3` were never written) and removes only the
+pending handles recorded in the manifest. After a successful pass the
+manifest is re-saved with the corresponding entries marked `deleted`.
+Only places the cascade flagged as **newly orphaned** are removed —
+places that were already orphaned before the operation are never touched
+(see [Per-Type Orphan Rules](#per-type-orphan-rules)).
+
+> **Which file is the final output?**
+>
+> `<stem>-deleted-4.gramps` is the **finished, fully-cleaned file** —
+> selected people *and* orphaned events, notes, and places removed.
+> Stages `-deleted-1` through `-deleted-3` are intermediate checkpoints
+> kept for debugging and audit. Don't mistake `-deleted-1.gramps`
+> (people-only deletion) for the final result.
 
 ---
 
@@ -208,10 +233,12 @@ gramps-gen delete [OPTIONS] <FILE> --selections <JSON>
 | Option | Default | Description |
 |---|---|---|
 | `--selections <PATH>` | (required) | Path to visualizer selections JSON file containing seed people |
-| `--output <PATH>` | stdout / auto-generated | Write cleaned output to this file |
+| `--output <DIR>` | input file's directory | Output directory; all output files are named `<file-stem>-deleted-N.gramps` |
 | `--yes` | `false` | Skip interactive review and auto-approve all deletions |
 | `--dry-run` | `false` | Compute cascade and print plan, but do not write output |
-| `--save-manifest <PATH>` | (none) | Save the deletion plan as an auditable JSON manifest |
+| `--db-dir <DIR>` | temp dir (removed after run) | Gramps Berkeley DB directory; kept only with `--retain-db` |
+| `--retain-db` | `false` | Keep the Gramps Berkeley DB directory after export |
+| `--save-manifest <PATH>` | `<output-dir>/<file-stem>-deleted.manifest.json` | Save the deletion plan as an auditable JSON manifest |
 | `--load-manifest <PATH>` | (none) | Load a previously saved manifest instead of computing cascade |
 
 ---
@@ -337,10 +364,14 @@ cat plan.json | jq '.plan.people.to_delete | length'
 
 # Step 3: Execute from manifest
 gramps-gen delete data.gramps \
-  --load-manifest plan.json --yes --output cleaned.gramps
+  --load-manifest plan.json --yes -o cleaned/
 
 # Step 4: Archive manifest with the cleaned file
 ```
+
+By default the manifest is saved inside the output directory as
+`<file-stem>-deleted.manifest.json`; `--save-manifest` overrides the
+location (useful for keeping audit trails elsewhere).
 
 ---
 
@@ -385,7 +416,7 @@ gramps-gen visualize data.gramps
 gramps-gen delete data.gramps --selections picks.json --dry-run
 
 # 4. Execute with review
-gramps-gen delete data.gramps --selections picks.json --output cleaned.gramps
+gramps-gen delete data.gramps --selections picks.json --output out/
 ```
 
 ### Reviewing before deletion
@@ -396,16 +427,16 @@ gramps-gen delete data.gramps --selections picks.json \
   --save-manifest audit.json
 
 # Interactive review — approve/deny per type
-gramps-gen delete data.gramps --selections picks.json --output cleaned.gramps
+gramps-gen delete data.gramps --selections picks.json --output out/
 ```
 
 ### Saving manifests for audit
 
 ```bash
-# Always save a manifest alongside the cleaned file
+# Always save a manifest alongside the cleaned files
 gramps-gen delete data.gramps --selections picks.json \
   --yes --save-manifest "$(date +%Y%m%d)-deletion-manifest.json" \
-  --output "cleaned-$(date +%Y%m%d).gramps"
+  --output "cleaned-$(date +%Y%m%d)/"
 ```
 
 ### Re-running from a saved manifest
