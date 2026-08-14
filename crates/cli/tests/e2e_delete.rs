@@ -730,8 +730,8 @@ fn e2e_delete_gramps_available_guard() {
 // Event cleaning integration tests
 // ---------------------------------------------------------------------------
 
-/// Helper: derive the `-deleted_2.gramps` path from an input path, matching
-/// the logic in delete.rs::derive_no_events_path.
+/// Helper: derive the `-deleted-2.gramps` path from an input path, matching
+/// the logic in delete.rs::deleted_2_path.
 fn no_events_path(input: &str) -> String {
     let stem = if let Some(s) = input.strip_suffix(".gz") {
         s
@@ -739,9 +739,9 @@ fn no_events_path(input: &str) -> String {
         input
     };
     if let Some(dot) = stem.rfind('.') {
-        format!("{}-deleted_2.gramps", &stem[..dot])
+        format!("{}-deleted-2.gramps", &stem[..dot])
     } else {
-        format!("{}-deleted_2.gramps", stem)
+        format!("{}-deleted-2.gramps", stem)
     }
 }
 
@@ -928,8 +928,8 @@ fn e2e_delete_manifest_re_saved_after_clean() {
 // Note cleaning integration tests
 // ---------------------------------------------------------------------------
 
-/// Helper: derive the `-deleted_3.gramps` path from an input path, matching
-/// the logic in delete.rs::derive_deleted_3_path.
+/// Helper: derive the `-deleted-3.gramps` path from an input path, matching
+/// the logic in delete.rs::deleted_3_path.
 fn deleted_3_path(input: &str) -> String {
     let stem = if let Some(s) = input.strip_suffix(".gz") {
         s
@@ -937,9 +937,9 @@ fn deleted_3_path(input: &str) -> String {
         input
     };
     if let Some(dot) = stem.rfind('.') {
-        format!("{}-deleted_3.gramps", &stem[..dot])
+        format!("{}-deleted-3.gramps", &stem[..dot])
     } else {
-        format!("{}-deleted_3.gramps", stem)
+        format!("{}-deleted-3.gramps", stem)
     }
 }
 
@@ -1144,8 +1144,8 @@ const UUID_FIXTURE_FAMILY_EVENT_NOTE_PLACE: &str = r###"<?xml version="1.0" enco
 </database>
 "###;
 
-/// Helper: derive the `-deleted_4.gramps` path from an input path, matching
-/// the logic in delete.rs::derive_deleted_4_path.
+/// Helper: derive the `-deleted-4.gramps` path from an input path, matching
+/// the logic in delete.rs::deleted_4_path.
 fn deleted_4_path(input: &str) -> String {
     let stem = if let Some(s) = input.strip_suffix(".gz") {
         s
@@ -1153,9 +1153,9 @@ fn deleted_4_path(input: &str) -> String {
         input
     };
     if let Some(dot) = stem.rfind('.') {
-        format!("{}-deleted_4.gramps", &stem[..dot])
+        format!("{}-deleted-4.gramps", &stem[..dot])
     } else {
-        format!("{}-deleted_4.gramps", stem)
+        format!("{}-deleted-4.gramps", stem)
     }
 }
 

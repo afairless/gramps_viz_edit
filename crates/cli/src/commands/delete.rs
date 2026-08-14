@@ -192,6 +192,15 @@ fn resolve_script_path() -> Result<PathBuf, CliError> {
 pub fn run(args: DeleteArgs) -> Result<(), CliError> {
     let input_path = &args.input;
 
+    // Derive the output directory and file stem used to name all output
+    // files. Interim: files land in the input file's own directory; the
+    // `--output` directory resolution replaces this in a later change.
+    let output_dir = input_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .to_path_buf();
+    let stem = derive_stem(input_path);
+
     // 1. Parse the input .gramps file
     log::info!("Reading input file: {}", input_path.display());
     let content =
@@ -571,15 +580,15 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
         .unwrap_or_default();
 
     if !pending_events.is_empty() {
-        let no_events_path = derive_no_events_path(input_path);
+        let d2_path = deleted_2_path(&output_dir, &stem);
         log::info!(
             "Cleaning {} pending events from output -> {}",
             pending_events.len(),
-            no_events_path.display()
+            d2_path.display()
         );
         let stats = crate::commands::clean::clean_events_xml(
             &output_path,
-            &no_events_path,
+            &d2_path,
             &pending_events,
         )?;
         log::info!(
@@ -615,13 +624,13 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
         .unwrap_or_default();
 
     if !pending_notes.is_empty() {
-        let deleted_2_path = derive_no_events_path(input_path);
-        let deleted_3_path = derive_deleted_3_path(input_path);
+        let d2_path = deleted_2_path(&output_dir, &stem);
+        let d3_path = deleted_3_path(&output_dir, &stem);
 
-        // Use -deleted_2.gramps as input if it exists (event cleaning ran),
-        // otherwise fall back to the original -cleaned.gramps output.
-        let note_input = if deleted_2_path.exists() {
-            deleted_2_path
+        // Use `-deleted-2.gramps` as input if it exists (event cleaning ran),
+        // otherwise fall back to the original `-deleted-1.gramps` output.
+        let note_input = if d2_path.exists() {
+            d2_path
         } else {
             output_path.clone()
         };
@@ -630,10 +639,10 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
             "Cleaning {} pending notes from {} -> {}",
             pending_notes.len(),
             note_input.display(),
-            deleted_3_path.display()
+            d3_path.display()
         );
         let stats =
-            crate::commands::clean::clean_notes_xml(&note_input, &deleted_3_path, &pending_notes)?;
+            crate::commands::clean::clean_notes_xml(&note_input, &d3_path, &pending_notes)?;
         log::info!(
             "Note cleaning complete: {} removed, {} not found in XML",
             stats.elements_removed,
@@ -667,15 +676,15 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
         .unwrap_or_default();
 
     if !pending_places.is_empty() {
-        let deleted_2_path = derive_no_events_path(input_path);
-        let deleted_3_path = derive_deleted_3_path(input_path);
-        let deleted_4_path = derive_deleted_4_path(input_path);
+        let d2_path = deleted_2_path(&output_dir, &stem);
+        let d3_path = deleted_3_path(&output_dir, &stem);
+        let d4_path = deleted_4_path(&output_dir, &stem);
 
         // Use the latest available cleaned output as input.
-        let place_input = if deleted_3_path.exists() {
-            deleted_3_path
-        } else if deleted_2_path.exists() {
-            deleted_2_path
+        let place_input = if d3_path.exists() {
+            d3_path
+        } else if d2_path.exists() {
+            d2_path
         } else {
             output_path.clone()
         };
@@ -684,11 +693,11 @@ pub fn run(args: DeleteArgs) -> Result<(), CliError> {
             "Cleaning {} pending places from {} -> {}",
             pending_places.len(),
             place_input.display(),
-            deleted_4_path.display()
+            d4_path.display()
         );
         let stats = crate::commands::clean::clean_places_xml(
             &place_input,
-            &deleted_4_path,
+            &d4_path,
             &pending_places,
         )?;
         log::info!(
@@ -758,32 +767,35 @@ pub(crate) fn strip_gramps_extensions(path: &std::path::Path) -> String {
     s
 }
 
-/// Derive the `-deleted_2.gramps` path from the input file path.
-///
-/// Strips Gramps extensions (`.gramps`, `.gramps.gz`) and appends
-/// `-deleted_2.gramps`. Always uses a plain `.gramps` extension,
-/// even if the input was compressed.
-fn derive_no_events_path(input_path: &std::path::Path) -> std::path::PathBuf {
-    let stem = strip_gramps_extensions(input_path);
-    std::path::PathBuf::from(format!("{}-deleted_2.gramps", stem))
+/// Derive the file stem used to name output files: strips Gramps extensions
+/// (`.gramps`, `.gramps.gz`) from the input path, then takes the file name.
+/// Root-like paths with no file name fall back to `"output"`.
+fn derive_stem(input_path: &std::path::Path) -> String {
+    std::path::Path::new(&strip_gramps_extensions(input_path))
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "output".to_string())
 }
 
-/// Derive the `-deleted_3.gramps` path from the input file path.
-///
-/// Strips Gramps extensions (`.gramps`, `.gramps.gz`) and appends
-/// `-deleted_3.gramps`. Always uses a plain `.gramps` extension.
-pub(crate) fn derive_deleted_3_path(input_path: &std::path::Path) -> std::path::PathBuf {
-    let stem = strip_gramps_extensions(input_path);
-    std::path::PathBuf::from(format!("{}-deleted_3.gramps", stem))
+/// Derive the `-deleted-1.gramps` path in a directory from a file stem.
+#[allow(dead_code)] // becomes the default `--output` path in the next change
+fn deleted_1_path(dir: &std::path::Path, stem: &str) -> std::path::PathBuf {
+    dir.join(format!("{}-deleted-1.gramps", stem))
 }
 
-/// Derive the `-deleted_4.gramps` path from the input file path.
-///
-/// Strips Gramps extensions (`.gramps`, `.gramps.gz`) and appends
-/// `-deleted_4.gramps`. Always uses a plain `.gramps` extension.
-pub(crate) fn derive_deleted_4_path(input_path: &std::path::Path) -> std::path::PathBuf {
-    let stem = strip_gramps_extensions(input_path);
-    std::path::PathBuf::from(format!("{}-deleted_4.gramps", stem))
+/// Derive the `-deleted-2.gramps` path in a directory from a file stem.
+fn deleted_2_path(dir: &std::path::Path, stem: &str) -> std::path::PathBuf {
+    dir.join(format!("{}-deleted-2.gramps", stem))
+}
+
+/// Derive the `-deleted-3.gramps` path in a directory from a file stem.
+fn deleted_3_path(dir: &std::path::Path, stem: &str) -> std::path::PathBuf {
+    dir.join(format!("{}-deleted-3.gramps", stem))
+}
+
+/// Derive the `-deleted-4.gramps` path in a directory from a file stem.
+fn deleted_4_path(dir: &std::path::Path, stem: &str) -> std::path::PathBuf {
+    dir.join(format!("{}-deleted-4.gramps", stem))
 }
 
 /// Compute the total size of a directory tree in bytes.
@@ -962,6 +974,10 @@ mod tests {
             strip_gramps_extensions(&PathBuf::from("test-cleaned.gramps")),
             "test-cleaned"
         );
+        assert_eq!(
+            strip_gramps_extensions(&PathBuf::from("test-deleted-1.gramps")),
+            "test-deleted-1"
+        );
         assert_eq!(strip_gramps_extensions(&PathBuf::from("noext")), "noext");
     }
 
@@ -972,67 +988,72 @@ mod tests {
     }
 
     #[test]
-    fn derive_deleted_3_path_basic() {
+    fn deleted_1_path_joins_dir_and_stem() {
         assert_eq!(
-            derive_deleted_3_path(&PathBuf::from("test.gramps")),
-            PathBuf::from("test-deleted_3.gramps")
+            deleted_1_path(&PathBuf::from("/tmp/out"), "data"),
+            PathBuf::from("/tmp/out/data-deleted-1.gramps")
         );
     }
 
     #[test]
-    fn derive_deleted_3_path_gz() {
+    fn deleted_2_path_joins_dir_and_stem() {
         assert_eq!(
-            derive_deleted_3_path(&PathBuf::from("test.gramps.gz")),
-            PathBuf::from("test-deleted_3.gramps")
+            deleted_2_path(&PathBuf::from("/tmp/out"), "data"),
+            PathBuf::from("/tmp/out/data-deleted-2.gramps")
         );
     }
 
     #[test]
-    fn derive_deleted_3_path_no_ext() {
+    fn deleted_3_path_joins_dir_and_stem() {
         assert_eq!(
-            derive_deleted_3_path(&PathBuf::from("noext")),
-            PathBuf::from("noext-deleted_3.gramps")
+            deleted_3_path(&PathBuf::from("/tmp/out"), "data"),
+            PathBuf::from("/tmp/out/data-deleted-3.gramps")
         );
     }
 
     #[test]
-    fn derive_deleted_3_path_already_cleaned() {
+    fn deleted_4_path_joins_dir_and_stem() {
         assert_eq!(
-            derive_deleted_3_path(&PathBuf::from("test-cleaned.gramps")),
-            PathBuf::from("test-cleaned-deleted_3.gramps")
+            deleted_4_path(&PathBuf::from("/tmp/out"), "data"),
+            PathBuf::from("/tmp/out/data-deleted-4.gramps")
         );
     }
 
     #[test]
-    fn derive_deleted_4_path_basic() {
+    fn deleted_paths_edge_cases() {
+        // Empty stem
         assert_eq!(
-            derive_deleted_4_path(&PathBuf::from("test.gramps")),
-            PathBuf::from("test-deleted_4.gramps")
+            deleted_1_path(&PathBuf::from("dir"), ""),
+            PathBuf::from("dir/-deleted-1.gramps")
+        );
+        // Stem with dots
+        assert_eq!(
+            deleted_2_path(&PathBuf::from("dir"), "data.v2"),
+            PathBuf::from("dir/data.v2-deleted-2.gramps")
+        );
+        // Directory as input path
+        assert_eq!(
+            deleted_3_path(std::path::Path::new("dir"), "data"),
+            PathBuf::from("dir/data-deleted-3.gramps")
         );
     }
 
     #[test]
-    fn derive_deleted_4_path_gz() {
+    fn derive_stem_from_input() {
+        assert_eq!(derive_stem(std::path::Path::new("test.gramps")), "test");
+        assert_eq!(derive_stem(std::path::Path::new("test.gramps.gz")), "test");
+        assert_eq!(derive_stem(std::path::Path::new("noext")), "noext");
         assert_eq!(
-            derive_deleted_4_path(&PathBuf::from("test.gramps.gz")),
-            PathBuf::from("test-deleted_4.gramps")
+            derive_stem(std::path::Path::new("dir/data.gramps")),
+            "data"
         );
+        assert_eq!(derive_stem(std::path::Path::new("data.v2.gramps")), "data.v2");
     }
 
     #[test]
-    fn derive_deleted_4_path_no_ext() {
-        assert_eq!(
-            derive_deleted_4_path(&PathBuf::from("noext")),
-            PathBuf::from("noext-deleted_4.gramps")
-        );
-    }
-
-    #[test]
-    fn derive_deleted_4_path_already_cleaned() {
-        assert_eq!(
-            derive_deleted_4_path(&PathBuf::from("test-cleaned.gramps")),
-            PathBuf::from("test-cleaned-deleted_4.gramps")
-        );
+    fn derive_stem_falls_back_to_output_for_root() {
+        assert_eq!(derive_stem(std::path::Path::new("/")), "output");
+        assert_eq!(derive_stem(std::path::Path::new("")), "output");
     }
 
     #[test]
